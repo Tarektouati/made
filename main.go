@@ -95,5 +95,5 @@ func printTasks(file string, tasks []parser.Task) {
 		desc := strings.ReplaceAll(t.Description, "\n", " ")
 		fmt.Fprintf(w, "  %s\t%s\n", t.Name, desc)
 	}
-	w.Flush()
+	_ = w.Flush()
 }
