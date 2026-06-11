@@ -2,6 +2,7 @@
 package runner
 
 import (
+	"context"
 	"os"
 	"os/exec"
 
@@ -12,7 +13,7 @@ import (
 // stdin/stdout/stderr, environment, and working directory. A failing script returns
 // an *exec.ExitError whose ExitCode the caller can propagate.
 func Run(t parser.Task) error {
-	cmd := exec.Command("bash", "-c", t.Script)
+	cmd := exec.CommandContext(context.Background(), "bash", "-c", t.Script)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

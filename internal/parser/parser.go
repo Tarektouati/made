@@ -40,8 +40,8 @@ func Parse(source []byte) ([]Task, error) {
 	doc := goldmark.DefaultParser().Parse(reader)
 
 	var tasks []Task
-	var cur *Task          // task currently being assembled
-	var desc []string      // description paragraphs collected so far
+	var cur *Task     // task currently being assembled
+	var desc []string // description paragraphs collected so far
 	for n := doc.FirstChild(); n != nil; n = n.NextSibling() {
 		switch node := n.(type) {
 		case *ast.Heading:
