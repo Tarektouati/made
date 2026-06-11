@@ -1,0 +1,27 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused
+    - gofmt
+    - misspell
+    - whitespace
+    - bodyclose
+    - noctx
+
+linters-settings:
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment
+  staticcheck:
+    checks: ["all"]
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
