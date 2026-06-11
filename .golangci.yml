@@ -8,19 +8,27 @@ linters:
     - staticcheck
     - ineffassign
     - unused
-    - gofmt
     - misspell
     - whitespace
     - bodyclose
     - noctx
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    staticcheck:
+      checks: ["all"]
+    errcheck:
+      exclude-functions:
+        - (io.Writer).Write
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
 
-linters-settings:
-  govet:
-    enable-all: true
-    disable:
-      - fieldalignment
-  staticcheck:
-    checks: ["all"]
+formatters:
+  enable:
+    - gofmt
 
 issues:
   max-issues-per-linter: 0
