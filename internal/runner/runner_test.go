@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"errors"
 	"os/exec"
 	"testing"
@@ -9,13 +10,13 @@ import (
 )
 
 func TestRunSuccess(t *testing.T) {
-	if err := Run(parser.Task{Name: "ok", Script: "exit 0"}); err != nil {
+	if err := Run(context.Background(), parser.Task{Name: "ok", Script: "exit 0"}); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 }
 
 func TestRunPropagatesExitCode(t *testing.T) {
-	err := Run(parser.Task{Name: "fail", Script: "exit 3"})
+	err := Run(context.Background(), parser.Task{Name: "fail", Script: "exit 3"})
 	if err == nil {
 		t.Fatal("Run: want error, got nil")
 	}
