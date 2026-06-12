@@ -15,10 +15,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Install golangci-lint
-        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
       - name: Run golangci-lint
-        run: golangci-lint run ./...
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.12.2
 
   test:
     name: Test (${{ matrix.os }})
@@ -26,14 +26,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # -race needs cgo + a C compiler; skip it on Windows where the
+        # hosted runner has no compiler reliably on PATH. The code has no
+        # concurrency, so this only trades a slower detector run for safety.
+        include:
+          - { os: ubuntu-latest, race: "-race" }
+          - { os: macos-latest, race: "-race" }
+          - { os: windows-latest, race: "" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
       - name: Run tests
-        run: go test -v -race -count=1 ./...
+        run: go test -v ${{ matrix.race }} -count=1 ./...
 
   build:
     name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
