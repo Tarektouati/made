@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -45,17 +46,17 @@ func TestMain(m *testing.M) {
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
 	}
-	build := exec.Command("go", "build", "-o", bin, "github.com/Tarektouati/made")
+	build := exec.CommandContext(context.Background(), "go", "build", "-o", bin, "github.com/Tarektouati/made")
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "e2e: build made:", err)
-		os.RemoveAll(dir)
+		_ = os.RemoveAll(dir)
 		os.Exit(1)
 	}
 	madeBin = bin
 
 	code := m.Run()
-	os.RemoveAll(dir)
+	_ = os.RemoveAll(dir)
 	os.Exit(code)
 }
 
@@ -63,7 +64,7 @@ func TestMain(m *testing.M) {
 // (0 on success, the process exit code otherwise).
 func runMade(t *testing.T, dir string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
-	cmd := exec.Command(madeBin, args...)
+	cmd := exec.CommandContext(t.Context(), madeBin, args...)
 	cmd.Dir = dir
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
