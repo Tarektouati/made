@@ -193,3 +193,17 @@ func TestNoTasks(t *testing.T) {
 		t.Errorf("stderr = %q, want it to contain %q", stderr, "no tasks found")
 	}
 }
+
+func TestExitCodePropagation(t *testing.T) {
+	requireBash(t)
+	// Use two distinct codes to prove made returns the task's real exit code,
+	// not a constant non-zero value.
+	for _, want := range []int{3, 7} {
+		content := fmt.Sprintf("### fail\n```bash\nexit %d\n```\n", want)
+		dir := writeTasks(t, "README.md", content)
+		_, stderr, code := runMade(t, dir, "fail")
+		if code != want {
+			t.Errorf("exit = %d, want %d (stderr: %s)", code, want, stderr)
+		}
+	}
+}
