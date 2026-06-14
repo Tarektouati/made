@@ -312,7 +312,8 @@ func TestRunPythonFence(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
 	}
-	if stdout != "hi-from-python\n" {
+	// Python's text-mode stdout emits CRLF on Windows; normalize before comparing.
+	if got := strings.ReplaceAll(stdout, "\r\n", "\n"); got != "hi-from-python\n" {
 		t.Errorf("stdout = %q, want %q", stdout, "hi-from-python\n")
 	}
 }
