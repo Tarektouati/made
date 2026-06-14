@@ -1,7 +1,6 @@
 package e2e
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -11,7 +10,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
@@ -221,72 +219,61 @@ func TestSIGINTCancellation(t *testing.T) {
 	content := "### long\n```bash\necho started; sleep 30; echo done\n```\n"
 	dir := writeTasks(t, "README.md", content)
 
+	// Route stdout to a file, not a pipe: when made kills bash on SIGINT, the
+	// orphaned `sleep` keeps the inherited stdout open, so a pipe would not EOF
+	// until the sleep ends (~30s). A file lets exec pass the fd directly, so
+	// cmd.Wait returns as soon as made itself exits, and we can read it anytime.
+	outPath := filepath.Join(t.TempDir(), "out.txt")
+	outFile, err := os.Create(outPath)
+	if err != nil {
+		t.Fatalf("create out file: %v", err)
+	}
+	defer outFile.Close()
+
 	cmd := exec.CommandContext(t.Context(), madeBin, "long")
 	cmd.Dir = dir
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatalf("stdout pipe: %v", err)
-	}
+	cmd.Stdout = outFile
 
-	var mu sync.Mutex
-	var lines []string
-	started := make(chan struct{})
-	readDone := make(chan struct{})
-	go func() {
-		defer close(readDone)
-		sc := bufio.NewScanner(stdout)
-		for sc.Scan() {
-			line := sc.Text()
-			mu.Lock()
-			lines = append(lines, line)
-			mu.Unlock()
-			if strings.Contains(line, "started") {
-				select {
-				case started <- struct{}{}:
-				default:
-				}
-			}
-		}
-	}()
+	output := func() string {
+		b, _ := os.ReadFile(outPath)
+		return string(b)
+	}
 
 	begin := time.Now()
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start made: %v", err)
 	}
+	waitErr := make(chan error, 1)
+	go func() { waitErr <- cmd.Wait() }()
 
-	select {
-	case <-started:
-	case <-time.After(10 * time.Second):
-		_ = cmd.Process.Kill()
-		t.Fatal("task never printed 'started'")
+	// Wait until the task has actually started running before interrupting.
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(output(), "started") {
+		if time.Now().After(deadline) {
+			_ = cmd.Process.Kill()
+			t.Fatal("task never printed 'started'")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	if err := cmd.Process.Signal(os.Interrupt); err != nil {
 		t.Fatalf("send SIGINT: %v", err)
 	}
 
-	// Draining to EOF before Wait avoids the StdoutPipe race; the timeout bounds
-	// the failure case so a broken cancellation can't hang the suite.
 	select {
-	case <-readDone:
-	case <-time.After(15 * time.Second):
+	case err := <-waitErr:
+		if elapsed := time.Since(begin); elapsed > 10*time.Second {
+			t.Errorf("made took %v to exit after SIGINT; want well under the 30s sleep", elapsed)
+		}
+		if err == nil {
+			t.Error("made exited 0 after SIGINT; want non-zero")
+		}
+	case <-time.After(10 * time.Second):
 		_ = cmd.Process.Kill()
-		<-readDone
-		t.Fatal("made did not exit within 15s of SIGINT")
-	}
-	waitErr := cmd.Wait()
-	elapsed := time.Since(begin)
-
-	if elapsed > 10*time.Second {
-		t.Errorf("made took %v to exit after SIGINT; want well under the 30s sleep", elapsed)
-	}
-	if waitErr == nil {
-		t.Error("made exited 0 after SIGINT; want non-zero")
+		t.Fatal("made did not exit within 10s of SIGINT")
 	}
 
-	mu.Lock()
-	got := strings.Join(lines, "\n")
-	mu.Unlock()
+	got := output()
 	if !strings.Contains(got, "started") {
 		t.Errorf("output = %q, want it to contain %q", got, "started")
 	}
