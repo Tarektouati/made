@@ -93,13 +93,20 @@ func writeTasks(t *testing.T, name, content string) string {
 	return dir
 }
 
-// requireBash skips the test when bash is not on PATH, so task-execution tests stay
-// green on machines without bash while still running on CI (Git Bash on windows-latest).
+// requireCmd skips the test when name is not on PATH, so interpreter-specific tests
+// stay green on machines lacking that interpreter while still running on CI.
+func requireCmd(t *testing.T, name string) {
+	t.Helper()
+	if _, err := exec.LookPath(name); err != nil {
+		t.Skipf("%s not found on PATH; skipping", name)
+	}
+}
+
+// requireBash skips the test when bash is not on PATH (Git Bash provides it on
+// windows-latest CI).
 func requireBash(t *testing.T) {
 	t.Helper()
-	if _, err := exec.LookPath("bash"); err != nil {
-		t.Skip("bash not found on PATH; skipping task-execution test")
-	}
+	requireCmd(t, "bash")
 }
 
 func TestRunTask(t *testing.T) {
@@ -279,5 +286,46 @@ func TestSIGINTCancellation(t *testing.T) {
 	}
 	if strings.Contains(got, "done") {
 		t.Errorf("output = %q, should not contain %q after cancellation", got, "done")
+	}
+}
+
+func TestRunShFence(t *testing.T) {
+	requireCmd(t, "sh")
+	content := "### greet\n```sh\necho hi-from-sh\n```\n"
+	dir := writeTasks(t, "README.md", content)
+	stdout, stderr, code := runMade(t, dir, "greet")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if stdout != "hi-from-sh\n" {
+		t.Errorf("stdout = %q, want %q", stdout, "hi-from-sh\n")
+	}
+}
+
+func TestRunPythonFence(t *testing.T) {
+	requireCmd(t, "python3")
+	// A python fence proves a non-shell interpreter is actually used: this body is
+	// valid Python and would fail under bash.
+	content := "### pytask\n```python\nprint('hi-from-python')\n```\n"
+	dir := writeTasks(t, "README.md", content)
+	stdout, stderr, code := runMade(t, dir, "pytask")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	// Python's text-mode stdout emits CRLF on Windows; normalize before comparing.
+	if got := strings.ReplaceAll(stdout, "\r\n", "\n"); got != "hi-from-python\n" {
+		t.Errorf("stdout = %q, want %q", stdout, "hi-from-python\n")
+	}
+}
+
+func TestUnsupportedLanguageFails(t *testing.T) {
+	content := "### data\n```yaml\nkey: value\n```\n"
+	dir := writeTasks(t, "README.md", content)
+	_, stderr, code := runMade(t, dir, "data")
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stderr, "unsupported language") {
+		t.Errorf("stderr = %q, want it to contain %q", stderr, "unsupported language")
 	}
 }
