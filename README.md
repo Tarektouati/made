@@ -23,7 +23,12 @@ made -f tasks.md ci  # read tasks from a different file
 ```
 
 By default `made` reads tasks from `README.md` in the current directory. Use
-`-f`/`--file` to point at another Markdown file. Scripts run with `bash -c`.
+`-f`/`--file` to point at another Markdown file.
+
+The code fence's language selects the interpreter: `bash`, `sh`, `shell`, `zsh`,
+`fish`, `python`/`python3`, `node`/`js`/`javascript`, `ruby`, and `perl`. A fence
+with no language defaults to `bash`; an unsupported language (e.g. `yaml`) is an
+error rather than being run under bash.
 
 ## Install
 
