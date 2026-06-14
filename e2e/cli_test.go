@@ -228,7 +228,7 @@ func TestSIGINTCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create out file: %v", err)
 	}
-	defer outFile.Close()
+	defer func() { _ = outFile.Close() }()
 
 	cmd := exec.CommandContext(t.Context(), madeBin, "long")
 	cmd.Dir = dir
