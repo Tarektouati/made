@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -10,7 +11,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // madeBin is the path to the compiled binary under test, set by TestMain.
@@ -205,5 +208,89 @@ func TestExitCodePropagation(t *testing.T) {
 		if code != want {
 			t.Errorf("exit = %d, want %d (stderr: %s)", code, want, stderr)
 		}
+	}
+}
+
+func TestSIGINTCancellation(t *testing.T) {
+	requireBash(t)
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Interrupt cannot be delivered to a child the same way on windows")
+	}
+
+	// "started" proves the task began; "done" must never appear once interrupted.
+	content := "### long\n```bash\necho started; sleep 30; echo done\n```\n"
+	dir := writeTasks(t, "README.md", content)
+
+	cmd := exec.CommandContext(t.Context(), madeBin, "long")
+	cmd.Dir = dir
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("stdout pipe: %v", err)
+	}
+
+	var mu sync.Mutex
+	var lines []string
+	started := make(chan struct{})
+	readDone := make(chan struct{})
+	go func() {
+		defer close(readDone)
+		sc := bufio.NewScanner(stdout)
+		for sc.Scan() {
+			line := sc.Text()
+			mu.Lock()
+			lines = append(lines, line)
+			mu.Unlock()
+			if strings.Contains(line, "started") {
+				select {
+				case started <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}()
+
+	begin := time.Now()
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start made: %v", err)
+	}
+
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatal("task never printed 'started'")
+	}
+
+	if err := cmd.Process.Signal(os.Interrupt); err != nil {
+		t.Fatalf("send SIGINT: %v", err)
+	}
+
+	// Draining to EOF before Wait avoids the StdoutPipe race; the timeout bounds
+	// the failure case so a broken cancellation can't hang the suite.
+	select {
+	case <-readDone:
+	case <-time.After(15 * time.Second):
+		_ = cmd.Process.Kill()
+		<-readDone
+		t.Fatal("made did not exit within 15s of SIGINT")
+	}
+	waitErr := cmd.Wait()
+	elapsed := time.Since(begin)
+
+	if elapsed > 10*time.Second {
+		t.Errorf("made took %v to exit after SIGINT; want well under the 30s sleep", elapsed)
+	}
+	if waitErr == nil {
+		t.Error("made exited 0 after SIGINT; want non-zero")
+	}
+
+	mu.Lock()
+	got := strings.Join(lines, "\n")
+	mu.Unlock()
+	if !strings.Contains(got, "started") {
+		t.Errorf("output = %q, want it to contain %q", got, "started")
+	}
+	if strings.Contains(got, "done") {
+		t.Errorf("output = %q, should not contain %q after cancellation", got, "done")
 	}
 }
