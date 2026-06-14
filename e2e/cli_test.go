@@ -36,6 +36,9 @@ const tasksMD = "### greet\n" +
 	"echo hi-from-tasks\n" +
 	"```\n"
 
+// proseMD has no H3 + code block, so parser.Parse yields zero tasks.
+const proseMD = "# made\n\nJust prose. No tasks defined here.\n"
+
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "made-e2e")
 	if err != nil {
@@ -152,5 +155,41 @@ func TestListFlags(t *testing.T) {
 		if stdout != base {
 			t.Errorf("made %s stdout = %q, want same as no-arg list %q", flag, stdout, base)
 		}
+	}
+}
+
+func TestUnknownTask(t *testing.T) {
+	dir := writeTasks(t, "README.md", readmeMD)
+	stdout, stderr, code := runMade(t, dir, "nope")
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1", code)
+	}
+	if !strings.Contains(stderr, "unknown task") {
+		t.Errorf("stderr = %q, want it to contain %q", stderr, "unknown task")
+	}
+	if !strings.Contains(stdout, "say-hello") {
+		t.Errorf("stdout = %q, want it to contain the task list (%q)", stdout, "say-hello")
+	}
+}
+
+func TestMissingFile(t *testing.T) {
+	dir := t.TempDir() // empty: no README.md
+	_, stderr, code := runMade(t, dir)
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1", code)
+	}
+	if !strings.Contains(stderr, "cannot read") {
+		t.Errorf("stderr = %q, want it to contain %q", stderr, "cannot read")
+	}
+}
+
+func TestNoTasks(t *testing.T) {
+	dir := writeTasks(t, "README.md", proseMD)
+	_, stderr, code := runMade(t, dir)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stderr, "no tasks found") {
+		t.Errorf("stderr = %q, want it to contain %q", stderr, "no tasks found")
 	}
 }
