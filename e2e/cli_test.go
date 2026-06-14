@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // madeBin is the path to the compiled binary under test, set by TestMain.
@@ -205,5 +206,78 @@ func TestExitCodePropagation(t *testing.T) {
 		if code != want {
 			t.Errorf("exit = %d, want %d (stderr: %s)", code, want, stderr)
 		}
+	}
+}
+
+func TestSIGINTCancellation(t *testing.T) {
+	requireBash(t)
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Interrupt cannot be delivered to a child the same way on windows")
+	}
+
+	// "started" proves the task began; "done" must never appear once interrupted.
+	content := "### long\n```bash\necho started; sleep 30; echo done\n```\n"
+	dir := writeTasks(t, "README.md", content)
+
+	// Route stdout to a file, not a pipe: when made kills bash on SIGINT, the
+	// orphaned `sleep` keeps the inherited stdout open, so a pipe would not EOF
+	// until the sleep ends (~30s). A file lets exec pass the fd directly, so
+	// cmd.Wait returns as soon as made itself exits, and we can read it anytime.
+	outPath := filepath.Join(t.TempDir(), "out.txt")
+	outFile, err := os.Create(outPath)
+	if err != nil {
+		t.Fatalf("create out file: %v", err)
+	}
+	defer func() { _ = outFile.Close() }()
+
+	cmd := exec.CommandContext(t.Context(), madeBin, "long")
+	cmd.Dir = dir
+	cmd.Stdout = outFile
+
+	output := func() string {
+		b, _ := os.ReadFile(outPath)
+		return string(b)
+	}
+
+	begin := time.Now()
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start made: %v", err)
+	}
+	waitErr := make(chan error, 1)
+	go func() { waitErr <- cmd.Wait() }()
+
+	// Wait until the task has actually started running before interrupting.
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(output(), "started") {
+		if time.Now().After(deadline) {
+			_ = cmd.Process.Kill()
+			t.Fatal("task never printed 'started'")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if err := cmd.Process.Signal(os.Interrupt); err != nil {
+		t.Fatalf("send SIGINT: %v", err)
+	}
+
+	select {
+	case err := <-waitErr:
+		if elapsed := time.Since(begin); elapsed > 10*time.Second {
+			t.Errorf("made took %v to exit after SIGINT; want well under the 30s sleep", elapsed)
+		}
+		if err == nil {
+			t.Error("made exited 0 after SIGINT; want non-zero")
+		}
+	case <-time.After(10 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatal("made did not exit within 10s of SIGINT")
+	}
+
+	got := output()
+	if !strings.Contains(got, "started") {
+		t.Errorf("output = %q, want it to contain %q", got, "started")
+	}
+	if strings.Contains(got, "done") {
+		t.Errorf("output = %q, should not contain %q after cancellation", got, "done")
 	}
 }
