@@ -33,6 +33,14 @@ error rather than being run under bash.
 
 ## Install
 
+### Homebrew
+
+```bash
+brew install Tarektouati/tap/made
+```
+
+### go install
+
 ```bash
 go install github.com/Tarektouati/made@latest
 ```
