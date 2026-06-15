@@ -330,6 +330,19 @@ func TestUnsupportedLanguageFails(t *testing.T) {
 	}
 }
 
+func TestVersionFlag(t *testing.T) {
+	dir := t.TempDir() // empty: no README — --version must not require a task file
+	for _, flag := range []string{"--version", "-V"} {
+		stdout, stderr, code := runMade(t, dir, flag)
+		if code != 0 {
+			t.Fatalf("made %s exit = %d, want 0 (stderr: %s)", flag, code, stderr)
+		}
+		if !strings.HasPrefix(stdout, "made ") || strings.TrimSpace(stdout) == "made" {
+			t.Errorf("made %s stdout = %q, want a non-empty %q line", flag, stdout, "made <version>")
+		}
+	}
+}
+
 func TestSIGINTKillsGrandchild(t *testing.T) {
 	requireBash(t)
 	if runtime.GOOS == "windows" {
