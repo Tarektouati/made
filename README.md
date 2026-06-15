@@ -20,6 +20,7 @@ Then run it:
 made say-hello       # runs the script under the "say-hello" heading
 made                 # lists all tasks with descriptions
 made -f tasks.md ci  # read tasks from a different file
+made --version       # print the version
 ```
 
 By default `made` reads tasks from `README.md` in the current directory. Use

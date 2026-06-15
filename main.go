@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -22,6 +23,23 @@ import (
 
 const defaultFile = "README.md"
 
+// version is set at release time via -ldflags "-X main.version=<tag>".
+var version = ""
+
+// resolveVersion reports the build version: the ldflags-injected value if present,
+// otherwise the module version from the build info (e.g. a `go install …@v1.2.3`),
+// falling back to "dev" for local builds.
+func resolveVersion() string {
+	if version != "" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok &&
+		info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "dev"
+}
+
 func main() {
 	os.Exit(run())
 }
@@ -31,16 +49,24 @@ func main() {
 func run() int {
 	var file string
 	var list bool
+	var showVersion bool
 	flag.StringVar(&file, "file", defaultFile, "Markdown file to read tasks from")
 	flag.StringVar(&file, "f", defaultFile, "Markdown file to read tasks from (shorthand)")
 	flag.BoolVar(&list, "list", false, "list available tasks")
 	flag.BoolVar(&list, "l", false, "list available tasks (shorthand)")
+	flag.BoolVar(&showVersion, "version", false, "print version and exit")
+	flag.BoolVar(&showVersion, "V", false, "print version and exit (shorthand)")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: made [-f file] [task]\n\n")
 		fmt.Fprintf(os.Stderr, "Run a task defined as an H3 heading + code block in a Markdown file.\n\n")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+
+	if showVersion {
+		fmt.Println("made", resolveVersion())
+		return 0
+	}
 
 	source, err := os.ReadFile(file)
 	if err != nil {
