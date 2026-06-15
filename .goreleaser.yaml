@@ -1,0 +1,60 @@
+version: 2
+
+project_name: made
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: made
+    main: .
+    binary: made
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: made
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+homebrew_casks:
+  - name: made
+    repository:
+      owner: Tarektouati
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Casks
+    homepage: "https://github.com/Tarektouati/made"
+    description: "Markdown-driven task runner — tasks are H3 headings + fenced code blocks"
+    binaries:
+      - made
+    hooks:
+      post:
+        # The binary is unsigned, so strip the Gatekeeper quarantine attribute on
+        # macOS; otherwise the first run is blocked. (Proper signing/notarization
+        # would be the alternative.)
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/made"]
+          end
