@@ -329,3 +329,65 @@ func TestUnsupportedLanguageFails(t *testing.T) {
 		t.Errorf("stderr = %q, want it to contain %q", stderr, "unsupported language")
 	}
 }
+
+func TestSIGINTKillsGrandchild(t *testing.T) {
+	requireBash(t)
+	if runtime.GOOS == "windows" {
+		t.Skip("process-group teardown is unix-only")
+	}
+
+	// The task backgrounds a grandchild that writes a marker after a delay, then waits.
+	// If made tears down the whole process group on cancel, the grandchild is killed
+	// before it can write the marker.
+	content := "### long\n```bash\n( sleep 3; echo alive > marker.txt ) &\necho started\nwait\n```\n"
+	dir := writeTasks(t, "README.md", content)
+
+	outPath := filepath.Join(t.TempDir(), "out.txt")
+	outFile, err := os.Create(outPath)
+	if err != nil {
+		t.Fatalf("create out file: %v", err)
+	}
+	defer func() { _ = outFile.Close() }()
+
+	cmd := exec.CommandContext(t.Context(), madeBin, "long")
+	cmd.Dir = dir
+	cmd.Stdout = outFile
+	output := func() string {
+		b, _ := os.ReadFile(outPath)
+		return string(b)
+	}
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start made: %v", err)
+	}
+	waitErr := make(chan error, 1)
+	go func() { waitErr <- cmd.Wait() }()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(output(), "started") {
+		if time.Now().After(deadline) {
+			_ = cmd.Process.Kill()
+			t.Fatal("task never printed 'started'")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if err := cmd.Process.Signal(os.Interrupt); err != nil {
+		t.Fatalf("send SIGINT: %v", err)
+	}
+	select {
+	case <-waitErr:
+	case <-time.After(10 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatal("made did not exit within 10s of SIGINT")
+	}
+
+	// Wait past the grandchild's delay; if its group was torn down it never wrote.
+	time.Sleep(4 * time.Second)
+	marker := filepath.Join(dir, "marker.txt")
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("grandchild survived cancellation and wrote marker.txt; process group not torn down")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat marker: %v", err)
+	}
+}
