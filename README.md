@@ -34,6 +34,20 @@ brew install Tarektouati/tap/made
 The binary is unsigned, so the cask strips the macOS Gatekeeper quarantine
 attribute on install; otherwise the first run would be blocked.
 
+**curl**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Tarektouati/made/main/install.sh | sh
+```
+
+Installs the latest release for macOS or Linux (`amd64`/`arm64`) into
+`/usr/local/bin` after verifying its checksum. Set `MADE_VERSION` to pin a release
+and `MADE_INSTALL_DIR` to change the target directory:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Tarektouati/made/main/install.sh | MADE_VERSION=v0.1.0 MADE_INSTALL_DIR="$HOME/bin" sh
+```
+
 **go install**
 
 ```sh
