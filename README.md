@@ -8,6 +8,16 @@ A Markdown-driven task runner — think `make` or `just`, but tasks live in plai
 Markdown instead of a custom file format. A task is an H3 heading followed by a
 fenced code block, so your `README.md` documents your tasks and runs them too.
 
+## What made is not
+
+`made` stays small on purpose: it finds a code block under a heading and runs it.
+
+- **Not a build system.** There are no task dependencies, file targets, or
+  up-to-date checks — every run executes the script. Use `make` if you need those.
+- **Not a cross-platform shell layer.** Scripts run as written under the fence's
+  interpreter; nothing is translated for Windows. See
+  [Platform compatibility](#platform-compatibility).
+
 ## Requirements
 
 - Go ≥ 1.26 (only when installing with `go install`)
