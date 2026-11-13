@@ -1,0 +1,6 @@
+- id: made
+  name: made
+  description: Run a task from a Markdown task file
+  entry: made
+  language: golang
+  pass_filenames: false

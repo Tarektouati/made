@@ -91,7 +91,7 @@ made [-f file] [-l] [-V] [task]
 
 Running `made` with no task lists the tasks, same as `--list`. When a task runs,
 `made` exits with the script's exit code, so it composes with `&&`, CI steps, and
-git hooks. An unknown task prints an error and the task list, and exits with `1`.
+git hooks (see [Pre-commit and prek](#pre-commit-and-prek)). An unknown task prints an error and the task list, and exits with `1`.
 
 ## Supported languages
 
@@ -203,6 +203,51 @@ import pathlib
 print(len(list(pathlib.Path(".").rglob("*.go"))))
 ```
 ````
+
+## Pre-commit and prek
+
+This repository ships a hook definition (`.pre-commit-hooks.yaml`) for
+[pre-commit](https://pre-commit.com) and [prek](https://github.com/j178/prek), so
+a project can run one of its tasks on commit without contributors installing
+`made` first. The hook uses `language: golang`: the tool builds `made` from this
+repository with `go install` (prek downloads a Go toolchain if none is found;
+pre-commit needs Go available).
+
+**pre-commit**
+
+Add the hook to `.pre-commit-config.yaml`, pinning `rev` to a release tag:
+
+```yaml
+repos:
+  - repo: https://github.com/Tarektouati/made
+    rev: v0.1.0
+    hooks:
+      - id: made
+        args: [-f, Madefile.md, check]
+```
+
+**prek**
+
+In `prek.toml`:
+
+```toml
+[[repos]]
+repo = "https://github.com/Tarektouati/made"
+rev = "v0.1.0"
+hooks = [
+  { id = "made", args = ["-f", "Madefile.md", "check"] },
+]
+```
+
+prek also reads the `.pre-commit-config.yaml` shown above.
+
+**Notes**
+
+The hook sets `pass_filenames: false`, so staged files are never appended to the
+command; the task runs as written. `args` are passed to `made`: use `-f` to pick
+the task file and end with the task name. The hook fails when the task exits with
+a non-zero code. It runs when any file is staged; set `always_run: true` or
+`files` in your config to change that.
 
 ## Tasks
 
