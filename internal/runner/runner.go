@@ -3,6 +3,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -61,8 +62,9 @@ var interpreters = map[string]interpreter{
 // language (defaulting to bash for a plain fence), inheriting the current process's
 // stdin/stdout/stderr and environment. The script runs in dir; an empty dir inherits
 // the current process's working directory. An unsupported language
-// returns an error before anything runs. A failing script returns an *exec.ExitError
-// whose ExitCode the caller can propagate.
+// returns an error before anything runs, and an interpreter missing from PATH returns
+// an error naming it, the task, and its language (wrapping exec.ErrNotFound). A
+// failing script returns an *exec.ExitError whose ExitCode the caller can propagate.
 //
 // Shell tasks run in strict mode: bash and zsh with errexit and pipefail, sh with
 // errexit only. A failing command therefore stops the task with its exit code rather
@@ -90,6 +92,10 @@ func Run(ctx context.Context, t parser.Task, dir string) error {
 	grouped := configureProcessGroup(cmd)
 
 	if err := cmd.Start(); err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return fmt.Errorf("%q was not found on PATH (required by task %q, language %s); install it or change the code fence language: %w",
+				in.cmd, t.Name, langLabel(t.Lang), exec.ErrNotFound)
+		}
 		return err
 	}
 
@@ -125,4 +131,13 @@ func supportedLanguages() string {
 	}
 	sort.Strings(keys)
 	return strings.Join(keys, ", ")
+}
+
+// langLabel describes a fence language for error messages, naming the bash default
+// when the fence has no language.
+func langLabel(lang string) string {
+	if l := strings.TrimSpace(lang); l != "" {
+		return fmt.Sprintf("%q", l)
+	}
+	return `"bash" (default for a plain fence)`
 }
