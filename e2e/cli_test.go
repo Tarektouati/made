@@ -19,7 +19,7 @@ var madeBin string
 
 // Markdown fixtures. These use double-quoted strings (not raw strings) because the
 // fenced code blocks contain backticks, which would terminate a Go raw string.
-const readmeMD = "# made test fixture\n\n" +
+const madefileMD = "# made test fixture\n\n" +
 	"## Tasks\n\n" +
 	"### say-hello\n" +
 	"Prints a friendly greeting.\n" +
@@ -122,7 +122,7 @@ func requireBash(t *testing.T) {
 
 func TestRunTask(t *testing.T) {
 	requireBash(t)
-	dir := writeTasks(t, "README.md", readmeMD)
+	dir := writeTasks(t, "Madefile.md", madefileMD)
 	stdout, stderr, code := runMade(t, dir, "say-hello")
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
@@ -145,7 +145,7 @@ func TestRunTaskCustomFile(t *testing.T) {
 }
 
 func TestListNoArgs(t *testing.T) {
-	dir := writeTasks(t, "README.md", readmeMD)
+	dir := writeTasks(t, "Madefile.md", madefileMD)
 	stdout, stderr, code := runMade(t, dir)
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
@@ -161,7 +161,7 @@ func TestListNoArgs(t *testing.T) {
 }
 
 func TestListFlags(t *testing.T) {
-	dir := writeTasks(t, "README.md", readmeMD)
+	dir := writeTasks(t, "Madefile.md", madefileMD)
 	base, _, code := runMade(t, dir)
 	if code != 0 {
 		t.Fatalf("no-arg list exit = %d", code)
@@ -178,7 +178,7 @@ func TestListFlags(t *testing.T) {
 }
 
 func TestUnknownTask(t *testing.T) {
-	dir := writeTasks(t, "README.md", readmeMD)
+	dir := writeTasks(t, "Madefile.md", madefileMD)
 	stdout, stderr, code := runMade(t, dir, "nope")
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1", code)
@@ -192,18 +192,21 @@ func TestUnknownTask(t *testing.T) {
 }
 
 func TestMissingFile(t *testing.T) {
-	dir := t.TempDir() // empty: no README.md
+	dir := t.TempDir()
+	mkdir(t, filepath.Join(dir, ".git")) // repo boundary: keep the search inside dir
 	_, stderr, code := runMade(t, dir)
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1", code)
 	}
-	if !strings.Contains(stderr, "cannot read") {
-		t.Errorf("stderr = %q, want it to contain %q", stderr, "cannot read")
+	for _, want := range []string{"made: no Madefile.md found in ", "use -f"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr = %q, want it to contain %q", stderr, want)
+		}
 	}
 }
 
 func TestNoTasks(t *testing.T) {
-	dir := writeTasks(t, "README.md", proseMD)
+	dir := writeTasks(t, "Madefile.md", proseMD)
 	_, stderr, code := runMade(t, dir)
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
@@ -219,7 +222,7 @@ func TestExitCodePropagation(t *testing.T) {
 	// not a constant non-zero value.
 	for _, want := range []int{3, 7} {
 		content := fmt.Sprintf("### fail\n```bash\nexit %d\n```\n", want)
-		dir := writeTasks(t, "README.md", content)
+		dir := writeTasks(t, "Madefile.md", content)
 		_, stderr, code := runMade(t, dir, "fail")
 		if code != want {
 			t.Errorf("exit = %d, want %d (stderr: %s)", code, want, stderr)
@@ -235,7 +238,7 @@ func TestSIGINTCancellation(t *testing.T) {
 
 	// "started" proves the task began; "done" must never appear once interrupted.
 	content := "### long\n```bash\necho started; sleep 30; echo done\n```\n"
-	dir := writeTasks(t, "README.md", content)
+	dir := writeTasks(t, "Madefile.md", content)
 
 	// Route stdout to a file, not a pipe: when made kills bash on SIGINT, the
 	// orphaned `sleep` keeps the inherited stdout open, so a pipe would not EOF
@@ -303,7 +306,7 @@ func TestSIGINTCancellation(t *testing.T) {
 func TestRunShFence(t *testing.T) {
 	requireCmd(t, "sh")
 	content := "### greet\n```sh\necho hi-from-sh\n```\n"
-	dir := writeTasks(t, "README.md", content)
+	dir := writeTasks(t, "Madefile.md", content)
 	stdout, stderr, code := runMade(t, dir, "greet")
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
@@ -318,7 +321,7 @@ func TestShellTaskFailsFast(t *testing.T) {
 	// A failing command stops the task: the next line must not run, and the task's
 	// exit code is the failing command's, not the last command's.
 	content := "### check\n```bash\nfalse\necho after-failure\n```\n"
-	dir := writeTasks(t, "README.md", content)
+	dir := writeTasks(t, "Madefile.md", content)
 	stdout, stderr, code := runMade(t, dir, "check")
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1 (stderr: %s)", code, stderr)
@@ -331,7 +334,7 @@ func TestShellTaskFailsFast(t *testing.T) {
 func TestShellTaskOptOut(t *testing.T) {
 	requireBash(t)
 	content := "### check\n```bash\nset +e\nfalse\necho after-failure\n```\n"
-	dir := writeTasks(t, "README.md", content)
+	dir := writeTasks(t, "Madefile.md", content)
 	stdout, stderr, code := runMade(t, dir, "check")
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
@@ -346,7 +349,7 @@ func TestRunPythonFence(t *testing.T) {
 	// A python fence proves a non-shell interpreter is actually used: this body is
 	// valid Python and would fail under bash.
 	content := "### pytask\n```python\nprint('hi-from-python')\n```\n"
-	dir := writeTasks(t, "README.md", content)
+	dir := writeTasks(t, "Madefile.md", content)
 	stdout, stderr, code := runMade(t, dir, "pytask")
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
@@ -359,7 +362,7 @@ func TestRunPythonFence(t *testing.T) {
 
 func TestUnsupportedLanguageFails(t *testing.T) {
 	content := "### data\n```yaml\nkey: value\n```\n"
-	dir := writeTasks(t, "README.md", content)
+	dir := writeTasks(t, "Madefile.md", content)
 	_, stderr, code := runMade(t, dir, "data")
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1 (stderr: %s)", code, stderr)
@@ -371,7 +374,7 @@ func TestUnsupportedLanguageFails(t *testing.T) {
 
 func TestMissingInterpreterFails(t *testing.T) {
 	content := "### pytask\n```python\nprint('hi')\n```\n"
-	dir := writeTasks(t, "README.md", content)
+	dir := writeTasks(t, "Madefile.md", content)
 	// An empty PATH makes python3 unresolvable; madeBin is absolute so it still runs.
 	_, stderr, code := runMadeEnv(t, dir, []string{"PATH=" + t.TempDir()}, "pytask")
 	if code != 1 {
@@ -385,7 +388,7 @@ func TestMissingInterpreterFails(t *testing.T) {
 }
 
 func TestVersionFlag(t *testing.T) {
-	dir := t.TempDir() // empty: no README — --version must not require a task file
+	dir := t.TempDir() // empty: no Madefile — --version must not require a task file
 	for _, flag := range []string{"--version", "-V"} {
 		stdout, stderr, code := runMade(t, dir, flag)
 		if code != 0 {
@@ -407,7 +410,7 @@ func TestSIGINTKillsGrandchild(t *testing.T) {
 	// If made tears down the whole process group on cancel, the grandchild is killed
 	// before it can write the marker.
 	content := "### long\n```bash\n( sleep 3; echo alive > marker.txt ) &\necho started\nwait\n```\n"
-	dir := writeTasks(t, "README.md", content)
+	dir := writeTasks(t, "Madefile.md", content)
 
 	outPath := filepath.Join(t.TempDir(), "out.txt")
 	outFile, err := os.Create(outPath)
@@ -508,10 +511,10 @@ func TestNoChdirRunsInCwd(t *testing.T) {
 	}
 }
 
-func TestFindsReadmeInParent(t *testing.T) {
+func TestFindsMadefileInParent(t *testing.T) {
 	requireBash(t)
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "README.md"), catMarkerMD)
+	writeFile(t, filepath.Join(dir, "Madefile.md"), catMarkerMD)
 	writeFile(t, filepath.Join(dir, "marker.txt"), "in-root\n")
 	nested := filepath.Join(dir, "a", "b")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
@@ -524,16 +527,16 @@ func TestFindsReadmeInParent(t *testing.T) {
 	if stdout != "in-root\n" {
 		t.Errorf("stdout = %q, want %q", stdout, "in-root\n")
 	}
-	// The README came from a parent directory, so made names it on stderr.
-	if !strings.Contains(stderr, "made: using ") || !strings.Contains(stderr, "README.md") {
-		t.Errorf("stderr = %q, want a %q line naming the README", stderr, "made: using")
+	// The Madefile came from a parent directory, so made names it on stderr.
+	if !strings.Contains(stderr, "made: using ") || !strings.Contains(stderr, "Madefile.md") {
+		t.Errorf("stderr = %q, want a %q line naming the Madefile", stderr, "made: using")
 	}
 }
 
-func TestNoUsingLineForReadmeInCwd(t *testing.T) {
+func TestNoUsingLineForMadefileInCwd(t *testing.T) {
 	requireBash(t)
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "README.md"), catMarkerMD)
+	writeFile(t, filepath.Join(dir, "Madefile.md"), catMarkerMD)
 	writeFile(t, filepath.Join(dir, "marker.txt"), "here\n")
 	_, stderr, code := runMade(t, dir, "where")
 	if code != 0 {
@@ -546,12 +549,12 @@ func TestNoUsingLineForReadmeInCwd(t *testing.T) {
 
 func TestExplicitFileNotSearchedUpward(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "README.md"), catMarkerMD)
+	writeFile(t, filepath.Join(dir, "Madefile.md"), catMarkerMD)
 	nested := filepath.Join(dir, "a")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	_, stderr, code := runMade(t, nested, "-f", "README.md", "where")
+	_, stderr, code := runMade(t, nested, "-f", "Madefile.md", "where")
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1 (stderr: %s)", code, stderr)
 	}
@@ -585,5 +588,154 @@ func TestTaskArgsPassthrough(t *testing.T) {
 				t.Errorf("stdout = %q, want %q", stdout, tc.want)
 			}
 		})
+	}
+}
+
+// mkdir creates path and its parents.
+func mkdir(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", path, err)
+	}
+}
+
+// requireCaseSensitiveFS skips the test when dir's filesystem folds case, where
+// Madefile.md and madefile.md cannot coexist.
+func requireCaseSensitiveFS(t *testing.T, dir string) {
+	t.Helper()
+	writeFile(t, filepath.Join(dir, "case-probe"), "")
+	if _, err := os.Stat(filepath.Join(dir, "CASE-PROBE")); err == nil {
+		t.Skip("case-insensitive filesystem; skipping")
+	}
+}
+
+func TestReadmeNotDiscovered(t *testing.T) {
+	dir := writeTasks(t, "README.md", madefileMD)
+	mkdir(t, filepath.Join(dir, ".git"))
+
+	_, stderr, code := runMade(t, dir, "say-hello")
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stderr, "no Madefile.md found") || !strings.Contains(stderr, "-f") {
+		t.Errorf("stderr = %q, want a not-found error with a -f hint", stderr)
+	}
+
+	stdout, stderr, code := runMade(t, dir, "-f", "README.md", "-l")
+	if code != 0 {
+		t.Fatalf("-f README.md: exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stdout, "say-hello") {
+		t.Errorf("stdout = %q, want it to list %q", stdout, "say-hello")
+	}
+}
+
+func TestNestedMadefileShadowsRoot(t *testing.T) {
+	requireBash(t)
+	dir := t.TempDir()
+	mkdir(t, filepath.Join(dir, ".git"))
+	writeFile(t, filepath.Join(dir, "Madefile.md"), catMarkerMD)
+	writeFile(t, filepath.Join(dir, "marker.txt"), "in-root\n")
+	writeFile(t, filepath.Join(dir, "pkg", "Madefile.md"), catMarkerMD)
+	writeFile(t, filepath.Join(dir, "pkg", "marker.txt"), "in-pkg\n")
+	nested := filepath.Join(dir, "pkg", "sub")
+	mkdir(t, nested)
+
+	stdout, stderr, code := runMade(t, nested, "where")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if stdout != "in-pkg\n" {
+		t.Errorf("stdout = %q, want %q", stdout, "in-pkg\n")
+	}
+	want := filepath.Join("pkg", "Madefile.md") + "\n"
+	if !strings.HasPrefix(stderr, "made: using ") || !strings.HasSuffix(stderr, want) {
+		t.Errorf("stderr = %q, want a %q line naming %q", stderr, "made: using", want)
+	}
+}
+
+func TestLowercaseMadefile(t *testing.T) {
+	requireBash(t)
+	dir := writeTasks(t, "madefile.md", madefileMD)
+	mkdir(t, filepath.Join(dir, ".git"))
+	stdout, stderr, code := runMade(t, dir, "say-hello")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if stdout != "hello\n" {
+		t.Errorf("stdout = %q, want %q", stdout, "hello\n")
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestGitBoundaryStopsSearch(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		make func(t *testing.T, path string)
+	}{
+		{"git directory", mkdir},
+		{"git file", func(t *testing.T, path string) { writeFile(t, path, "gitdir: elsewhere\n") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := writeTasks(t, "Madefile.md", madefileMD)
+			repo := filepath.Join(dir, "repo")
+			tc.make(t, filepath.Join(repo, ".git"))
+			_, stderr, code := runMade(t, repo, "-l")
+			if code != 1 {
+				t.Fatalf("exit = %d, want 1 (stderr: %s)", code, stderr)
+			}
+			if !strings.Contains(stderr, "no Madefile.md found") {
+				t.Errorf("stderr = %q, want it to contain %q", stderr, "no Madefile.md found")
+			}
+		})
+	}
+}
+
+func TestDuplicateMadefileWarns(t *testing.T) {
+	dir := t.TempDir()
+	requireCaseSensitiveFS(t, dir)
+	mkdir(t, filepath.Join(dir, ".git"))
+	writeFile(t, filepath.Join(dir, "Madefile.md"), madefileMD)
+	writeFile(t, filepath.Join(dir, "madefile.md"), tasksMD)
+	stdout, stderr, code := runMade(t, dir, "-l")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stdout, "say-hello") {
+		t.Errorf("stdout = %q, want tasks from Madefile.md", stdout)
+	}
+	want := "made: using Madefile.md (also found madefile.md)"
+	if !strings.Contains(stderr, want) {
+		t.Errorf("stderr = %q, want it to contain %q", stderr, want)
+	}
+}
+
+func TestDuplicateMadefileInParent(t *testing.T) {
+	requireBash(t)
+	dir := t.TempDir()
+	requireCaseSensitiveFS(t, dir)
+	mkdir(t, filepath.Join(dir, ".git"))
+	writeFile(t, filepath.Join(dir, "Madefile.md"), catMarkerMD)
+	writeFile(t, filepath.Join(dir, "madefile.md"), tasksMD)
+	writeFile(t, filepath.Join(dir, "marker.txt"), "in-root\n")
+	nested := filepath.Join(dir, "a")
+	mkdir(t, nested)
+
+	stdout, stderr, code := runMade(t, nested, "where")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if stdout != "in-root\n" {
+		t.Errorf("stdout = %q, want %q", stdout, "in-root\n")
+	}
+	// One line names both the parent path and the shadowed name.
+	if n := strings.Count(stderr, "made: using "); n != 1 {
+		t.Errorf("stderr = %q, want exactly one %q line, got %d", stderr, "made: using", n)
+	}
+	want := string(filepath.Separator) + "Madefile.md (also found madefile.md)\n"
+	if !strings.HasSuffix(stderr, want) {
+		t.Errorf("stderr = %q, want it to end with %q", stderr, want)
 	}
 }

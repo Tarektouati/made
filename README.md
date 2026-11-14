@@ -6,7 +6,7 @@
 
 A Markdown-driven task runner — think `make` or `just`, but tasks live in plain
 Markdown instead of a custom file format. A task is an H3 heading followed by a
-fenced code block, so your `README.md` documents your tasks and runs them too.
+fenced code block, so your `Madefile.md` documents your tasks and runs them too.
 
 ## What made is not
 
@@ -66,8 +66,8 @@ go install github.com/Tarektouati/made@latest
 
 ## Quick start
 
-Add a task to your `README.md` — an H3 heading, an optional description, and a
-fenced code block:
+Add a task to a `Madefile.md` at the root of your repository — an H3 heading, an
+optional description, and a fenced code block:
 
 ````markdown
 ### say-hello
@@ -83,6 +83,7 @@ Then run it:
 made say-hello       # runs the script under the "say-hello" heading
 made                 # lists all tasks with descriptions
 made -f tasks.md ci  # read tasks from a different file
+made -f README.md ci # …such as your README
 made deploy staging  # pass "staging" to the task as $1
 made --version       # print the version
 ```
@@ -95,7 +96,7 @@ made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]
 
 | Flag | Default | Description |
 |---|---|---|
-| `-f`, `--file` | nearest `README.md` | Markdown file to read tasks from. Without `-f`, `made` uses the `README.md` in the current directory or the closest parent directory |
+| `-f`, `--file` | nearest `Madefile.md` | Markdown file to read tasks from. Without `-f`, `made` uses the `Madefile.md` in the current directory or the closest parent directory, up to the repository root (or the filesystem root outside a repository; see [How it works](#how-it-works)) |
 | `--no-chdir` | | Run the task in the current directory instead of the task file's directory |
 | `-l`, `--list` | | List available tasks and exit |
 | `-V`, `--version` | | Print the version and exit |
@@ -181,13 +182,25 @@ therefore resolve the same way wherever you invoke `made`:
 `made -f tools/tasks.md build` runs `build` inside `tools/`. Pass `--no-chdir` to
 run the task in the current directory instead.
 
-Without `-f`, `made` looks for `README.md` in the current directory and then in
-each parent directory, and uses the first one it finds. You can therefore run a
-repository's tasks from any subdirectory; when the file comes from a parent
-directory, `made` prints `made: using <path>` on stderr before running the task. The nearest `README.md` wins even if it
-defines no tasks (for example `docs/README.md` when you run `made` from `docs/`),
-so use `-f` to pick a specific file. An explicit `-f` path is read exactly as
-given and is never looked up in parent directories.
+**Finding the task file.** Without `-f`, `made` looks for a file named
+`Madefile.md`, `madefile.md`, or `MADEFILE.md` — matched exactly, so macOS and
+Linux agree — in the current directory and then in each parent directory, and
+uses the first directory that has one. If a directory holds more than one of these
+names, `made` uses the first in that order and says so on stderr (`made: using
+Madefile.md (also found madefile.md)`).
+
+The search stops after the first directory containing a `.git` entry (a
+directory, or a file in worktrees and submodules), so it never leaves the
+repository; outside a repository it goes up to the filesystem root. You can
+therefore run a repository's tasks from any subdirectory; when the file comes from
+a parent directory, `made` prints `made: using <path>` on stderr before running the
+task. The nearest Madefile wins and is never merged with one higher up: in a
+monorepo, each package can have its own `Madefile.md`, and the root tasks stay
+reachable with `made -f ../../Madefile.md`. If no Madefile is found, `made` exits
+with an error; `README.md` is never read unless you pass `-f README.md`.
+
+An explicit `-f` path is relative to the current directory, read exactly as given,
+and never looked up in parent directories.
 
 **Signals.** On `SIGINT` or `SIGTERM`, `made` tears down the whole task, not just
 the interpreter: the task runs in its own process group, which is sent `SIGTERM`
@@ -202,7 +215,7 @@ Listing the tasks in this repository:
 
 ```
 $ made
-Tasks in README.md:
+Tasks in Madefile.md:
   say-hello  Prints a friendly greeting.
   build      Compiles all packages.
   test       Runs the test suite.
@@ -215,7 +228,7 @@ Running an unknown task:
 $ made deploy
 made: unknown task "deploy"
 
-Tasks in README.md:
+Tasks in Madefile.md:
   say-hello  Prints a friendly greeting.
   build      Compiles all packages.
   test       Runs the test suite.
@@ -262,16 +275,29 @@ exit $rc
 
 To also treat unset variables as errors, opt in with `set -u`.
 
-**Keep tasks out of the README**
+**Keep tasks in the README**
 
-Put tasks in a dedicated file and point `made` at it:
+`made` only discovers `Madefile.md`. To run tasks documented in another file, such
+as your README, point `made` at it:
 
 ```sh
-made -f tasks.md release
+made -f README.md release
 ```
 
-The task runs in the directory that holds `tasks.md` (see
+The task runs in the directory that holds that file (see
 [How it works](#how-it-works)).
+
+**One Madefile per package**
+
+In a monorepo, give each package its own `Madefile.md`. Running `made` inside a
+package uses that package's tasks; the root `Madefile.md` stays available with
+`-f`:
+
+```sh
+cd services/api
+made test                      # services/api/Madefile.md
+made -f ../../Madefile.md lint # the root tasks
+```
 
 **Show code samples without creating tasks**
 
@@ -335,33 +361,20 @@ the task file and end with the task name. The hook fails when the task exits wit
 a non-zero code. It runs when any file is staged; set `always_run: true` or
 `files` in your config to change that.
 
-## Tasks
+## Migrating from 0.2
 
-The tasks below are real — running `made` in this repo executes them.
+Before v0.3.0, `made` read tasks from the nearest `README.md`. It now reads only
+`Madefile.md` (see [How it works](#how-it-works)). To migrate, either:
 
-### say-hello
-Prints a friendly greeting.
-```bash
-echo hello
-```
+- move the task sections (the H3 headings and their code blocks) out of
+  `README.md` into a new `Madefile.md` beside it, or
+- keep them where they are and pass the file explicitly: `made -f README.md <task>`
+  (for example in scripts, CI, or a pre-commit hook's `args`).
 
-### build
-Compiles all packages.
-```bash
-go build ./...
-```
+## Development
 
-### test
-Runs the test suite.
-```bash
-go test ./...
-```
-
-### check
-Builds, vets, and tests in one go.
-```bash
-go build ./... && go vet ./... && go test ./...
-```
+This repository's own tasks live in [`Madefile.md`](./Madefile.md): run `made` in
+the repo to list them, and `made check` to build, vet, and test.
 
 ## License
 
