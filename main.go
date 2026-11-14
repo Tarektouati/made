@@ -1,8 +1,8 @@
 // Command made is a Markdown-driven task runner.
 //
-// Tasks are H3 headings in a Markdown file (README.md by default), each followed by
-// a fenced code block. `made <task> [args...]` runs that block with args as its
-// positional parameters; `made` with no task lists them.
+// Tasks are H3 headings in a Markdown file (the nearest Madefile.md by default), each
+// followed by a fenced code block. `made <task> [args...]` runs that block with args
+// as its positional parameters; `made` with no task lists them.
 package main
 
 import (
@@ -24,7 +24,10 @@ import (
 	"github.com/Tarektouati/made/internal/runner"
 )
 
-const defaultFile = "README.md"
+// madefileNames are the task file names discovered without -f, highest priority first.
+// They are matched exactly against directory entries, so case-insensitive filesystems
+// behave like case-sensitive ones.
+var madefileNames = []string{"Madefile.md", "madefile.md", "MADEFILE.md"}
 
 // version is set at release time via -ldflags "-X main.version=<tag>".
 var version = ""
@@ -58,7 +61,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var noChdir bool
 	fs := flag.NewFlagSet("made", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.StringVar(&file, "file", "", "Markdown file to read tasks from (default: nearest README.md in the current or a parent directory)")
+	fs.StringVar(&file, "file", "", "Markdown file to read tasks from (default: nearest Madefile.md, searched up to the repository root, or the filesystem root outside a repository)")
 	fs.StringVar(&file, "f", "", "shorthand for -file")
 	fs.BoolVar(&noChdir, "no-chdir", false, "run the task in the current directory instead of the task file's directory")
 	fs.BoolVar(&list, "list", false, "list available tasks")
@@ -84,12 +87,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	fromSearch := file == ""
-	file, err := resolveFile(file)
+	res, err := resolveFile(file)
 	if err != nil {
 		fmt.Fprintf(stderr, "made: %v\n", err)
 		return 1
 	}
+	if len(res.others) > 0 {
+		fmt.Fprintf(stderr, "made: using %s (also found %s)\n", res.path, strings.Join(res.others, ", "))
+	}
+	file = res.path
 
 	source, err := os.ReadFile(file)
 	if err != nil {
@@ -129,7 +135,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		dir = filepath.Dir(abs)
 	}
 
-	if file != defaultFile && fromSearch {
+	if res.fromParent && len(res.others) == 0 { // the duplicate note already named it
 		fmt.Fprintf(stderr, "made: using %s\n", file)
 	}
 
@@ -151,35 +157,70 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// resolved is the task file chosen by resolveFile.
+type resolved struct {
+	path       string   // path to read; a bare name when found in the current directory
+	fromParent bool     // discovered in a parent of the current directory
+	others     []string // other Madefile names found in the same directory, by priority
+}
+
 // resolveFile returns the task file to read. A non-empty file (given with -f) is used
-// as is. Otherwise the nearest defaultFile in the current directory or one of its
-// parents is used; if there is none, defaultFile is returned unchanged so the caller
-// reports the usual "cannot read" error.
-func resolveFile(file string) (string, error) {
+// as is. Otherwise the nearest Madefile in the current directory or one of its parents
+// is used (see findMadefile); if there is none, resolveFile returns an error.
+func resolveFile(file string) (resolved, error) {
 	if file != "" {
-		return file, nil
+		return resolved{path: file}, nil
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		return "", fmt.Errorf("cannot determine current directory: %w", err)
+		return resolved{}, fmt.Errorf("cannot determine current directory: %w", err)
 	}
-	dir, ok := findUp(cwd, isRegularFile)
-	if !ok || dir == cwd {
-		return defaultFile, nil // keep the short name when it's right here
+	dir, name, others, ok := findMadefile(cwd)
+	if !ok {
+		return resolved{}, fmt.Errorf("no %s found in %s or its parents (use -f to choose a file)", madefileNames[0], cwd)
 	}
-	return filepath.Join(dir, defaultFile), nil
+	res := resolved{path: name} // keep the short name when it's right here
+	if dir != cwd {
+		res.path = filepath.Join(dir, name)
+		res.fromParent = true
+	}
+	res.others = others
+	return res, nil
 }
 
-// findUp walks from start up to the filesystem root and returns the first directory
-// whose defaultFile satisfies isFile.
-func findUp(start string, isFile func(path string) bool) (dir string, ok bool) {
+// findMadefile walks from start upward and returns the first directory holding a
+// regular file named exactly like one of madefileNames, with the highest-priority
+// name found and any other matching names in that directory. The walk stops after
+// the first directory containing a .git entry (a directory, or a file for worktrees
+// and submodules), otherwise at the filesystem root. A directory that cannot be
+// read counts as having no Madefile.
+func findMadefile(start string) (dir, name string, others []string, ok bool) {
 	for dir = start; ; {
-		if isFile(filepath.Join(dir, defaultFile)) {
-			return dir, true
+		entries, err := os.ReadDir(dir)
+		boundary := false
+		if err == nil {
+			present := map[string]bool{}
+			for _, e := range entries {
+				present[e.Name()] = true
+			}
+			boundary = present[".git"]
+			for _, n := range madefileNames {
+				if !present[n] || !isRegularFile(filepath.Join(dir, n)) {
+					continue
+				}
+				if name == "" {
+					name = n
+				} else {
+					others = append(others, n)
+				}
+			}
+			if name != "" {
+				return dir, name, others, true
+			}
 		}
 		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", false
+		if boundary || parent == dir {
+			return "", "", nil, false
 		}
 		dir = parent
 	}
