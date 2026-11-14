@@ -83,13 +83,14 @@ Then run it:
 made say-hello       # runs the script under the "say-hello" heading
 made                 # lists all tasks with descriptions
 made -f tasks.md ci  # read tasks from a different file
+made deploy staging  # pass "staging" to the task as $1
 made --version       # print the version
 ```
 
 ## CLI reference
 
 ```
-made [-f file] [--no-chdir] [-l] [-V] [task]
+made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]
 ```
 
 | Flag | Default | Description |
@@ -99,10 +100,31 @@ made [-f file] [--no-chdir] [-l] [-V] [task]
 | `-l`, `--list` | | List available tasks and exit |
 | `-V`, `--version` | | Print the version and exit |
 | `task` | | Name of the task to run (the H3 heading text) |
+| `args` | | Passed to the task's script as positional parameters |
 
 Running `made` with no task lists the tasks, same as `--list`. When a task runs,
 `made` exits with the script's exit code, so it composes with `&&`, CI steps, and
 git hooks (see [Pre-commit and prek](#pre-commit-and-prek)). An unknown task prints an error and the task list, and exits with `1`.
+
+**Passing arguments.** Everything after the task name is passed to the script: `$1`, `"$@"` in shell tasks,
+`$argv` in fish, `sys.argv[1:]` in Python, `process.argv.slice(1)` in Node, `ARGV` in
+Ruby, and `@ARGV` in Perl. Flags for `made` itself go before the task name; anything
+after it, including `-x`-style flags, belongs to the task. A single `--` right after
+the task name is optional and dropped (`made test -- -run Foo`).
+
+````markdown
+### deploy
+Deploys to an environment (default: staging).
+```bash
+env="${1:-staging}"
+echo "deploying to $env"
+```
+````
+
+```sh
+made deploy            # deploying to staging
+made deploy production # deploying to production
+```
 
 ## Supported languages
 
