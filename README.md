@@ -109,9 +109,9 @@ The code fence's language selects the interpreter. Matching is case-insensitive.
 
 | Fence language | Interpreter |
 |---|---|
-| *(none)*, `bash`, `shell` | `bash -c` |
-| `sh` | `sh -c` |
-| `zsh` | `zsh -c` |
+| *(none)*, `bash`, `shell` | `bash -e -o pipefail -c` |
+| `sh` | `sh -e -c` |
+| `zsh` | `zsh -e -o pipefail -c` |
 | `fish` | `fish -c` |
 | `python`, `python3` | `python3 -c` |
 | `node`, `js`, `javascript` | `node -e` |
@@ -120,6 +120,21 @@ The code fence's language selects the interpreter. Matching is case-insensitive.
 
 A fence with no language defaults to `bash`. An unsupported language (e.g. `yaml`)
 is an error rather than being run under bash.
+
+**Shell tasks fail fast.** `bash`, `sh`, and `zsh` tasks run in strict mode: the task
+stops at the first failing command and `made` exits with that command's code, so a
+later successful line can't hide an earlier failure. The shell's usual `errexit`
+exceptions still apply. For example, a failure in an `if`, `while`, or `until`
+condition, in a command negated with `!`, in any command of an `&&`/`||` chain
+except the last, or (in `bash`) inside a `$(...)` command substitution doesn't
+stop the task. Put such commands on their
+own lines, or end the chain with `|| exit 1`. `bash` and `zsh` also enable
+`pipefail`, so a failure anywhere in a pipeline counts; `sh` doesn't, because
+`pipefail` isn't portable across `sh` implementations. Unset variables are not an
+error (no `-u`). `fish` (which has no such option) and the non-shell languages use
+their own defaults; they already exit non-zero on an uncaught error. To get the
+lenient behavior back, see "Let a shell task continue past failures" under
+[Common patterns](#common-patterns).
 
 ## How it works
 
@@ -131,9 +146,11 @@ description, and that code block becomes its script. Any heading of another leve
 ends the current task's scope, and an H3 with no code block after it is skipped.
 Only top-level blocks count: code inside lists or blockquotes is never a task.
 
-**Execution.** The script is passed inline to its interpreter (`bash -c <script>`,
-`node -e <script>`, …). It inherits `made`'s stdin, stdout, stderr, environment,
-and working directory — nothing is written to a temporary file.
+**Execution.** The script is passed inline to its interpreter (`bash -e -o pipefail
+-c <script>`, `node -e <script>`, …). The interpreter inherits `made`'s stdin,
+stdout, stderr, environment, and working directory — nothing is written to a
+temporary file. The strict-mode options are passed to the shell rather than
+prepended to the script, so line numbers in error messages match the code block.
 
 **Signals.** On `SIGINT` or `SIGTERM`, `made` tears down the whole task, not just
 the interpreter: the task runs in its own process group, which is sent `SIGTERM`
@@ -178,16 +195,35 @@ Each task is independent; chain them from the shell (or from another task):
 made build && made test
 ```
 
-**Fail fast in bash**
+**Let a shell task continue past failures**
 
-A `bash` task runs as one `bash -c` script, so a failing command in the middle
-doesn't stop it unless you ask:
+Shell tasks [stop at the first failing command](#supported-languages). To let one
+command fail without stopping the task, append `|| true`:
 
+````markdown
+### clean
 ```bash
-set -euo pipefail
-go vet ./...
-go test ./...
+rm -r build || true
+mkdir build
 ```
+````
+
+To turn strict mode off for a whole task, put `set +e` (and, in `bash`/`zsh`,
+`set +o pipefail`) at the top of the script. The task then exits with the last
+command's status, so an earlier failure is hidden again. To run every command but
+still fail if any of them failed, record the failures instead:
+
+````markdown
+### lint-all
+```bash
+rc=0
+golangci-lint run || rc=$?
+markdownlint README.md || rc=$?
+exit $rc
+```
+````
+
+To also treat unset variables as errors, opt in with `set -u`.
 
 **Keep tasks out of the README**
 

@@ -302,6 +302,34 @@ func TestRunShFence(t *testing.T) {
 	}
 }
 
+func TestShellTaskFailsFast(t *testing.T) {
+	requireBash(t)
+	// A failing command stops the task: the next line must not run, and the task's
+	// exit code is the failing command's, not the last command's.
+	content := "### check\n```bash\nfalse\necho after-failure\n```\n"
+	dir := writeTasks(t, "README.md", content)
+	stdout, stderr, code := runMade(t, dir, "check")
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (stderr: %s)", code, stderr)
+	}
+	if strings.Contains(stdout, "after-failure") {
+		t.Errorf("stdout = %q; the command after the failure must not run", stdout)
+	}
+}
+
+func TestShellTaskOptOut(t *testing.T) {
+	requireBash(t)
+	content := "### check\n```bash\nset +e\nfalse\necho after-failure\n```\n"
+	dir := writeTasks(t, "README.md", content)
+	stdout, stderr, code := runMade(t, dir, "check")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stdout, "after-failure") {
+		t.Errorf("stdout = %q, want it to contain %q after `set +e`", stdout, "after-failure")
+	}
+}
+
 func TestRunPythonFence(t *testing.T) {
 	requireCmd(t, "python3")
 	// A python fence proves a non-shell interpreter is actually used: this body is

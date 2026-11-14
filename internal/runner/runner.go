@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -19,27 +20,41 @@ const killGrace = 3 * time.Second
 
 // interpreter is the program that runs a script passed as a single inline argument.
 type interpreter struct {
-	cmd  string // executable to run
-	flag string // flag that precedes the inline script (e.g. -c, -e)
+	cmd  string   // executable to run
+	opts []string // options passed before flag (e.g. strict-mode shell options)
+	flag string   // flag that precedes the inline script (e.g. -c, -e)
 }
+
+// Strict-mode options for shell interpreters, so a multi-line task stops at the first
+// failing command instead of reporting only the last command's status. They are passed
+// as interpreter options rather than prepended to the script, which keeps the script's
+// line numbers intact. A script can opt out with `set +e` / `set +o pipefail`.
+var (
+	// strictPipefail is errexit plus pipefail, for shells that support pipefail.
+	strictPipefail = []string{"-e", "-o", "pipefail"}
+	// strictPOSIX is errexit only: pipefail is not portable across sh implementations
+	// (e.g. older dash).
+	strictPOSIX = []string{"-e"}
+)
 
 // interpreters maps a fenced code block's language to its interpreter. The language
 // is matched case-insensitively; the empty language defaults to bash so a plain
-// fence keeps working.
+// fence keeps working. fish has no errexit option and non-shell interpreters already
+// fail on an uncaught error, so only bash, sh, and zsh get strict-mode options.
 var interpreters = map[string]interpreter{
-	"":           {"bash", "-c"},
-	"bash":       {"bash", "-c"},
-	"sh":         {"sh", "-c"},
-	"shell":      {"bash", "-c"},
-	"zsh":        {"zsh", "-c"},
-	"fish":       {"fish", "-c"},
-	"python":     {"python3", "-c"},
-	"python3":    {"python3", "-c"},
-	"node":       {"node", "-e"},
-	"js":         {"node", "-e"},
-	"javascript": {"node", "-e"},
-	"ruby":       {"ruby", "-e"},
-	"perl":       {"perl", "-e"},
+	"":           {"bash", strictPipefail, "-c"},
+	"bash":       {"bash", strictPipefail, "-c"},
+	"sh":         {"sh", strictPOSIX, "-c"},
+	"shell":      {"bash", strictPipefail, "-c"},
+	"zsh":        {"zsh", strictPipefail, "-c"},
+	"fish":       {"fish", nil, "-c"},
+	"python":     {"python3", nil, "-c"},
+	"python3":    {"python3", nil, "-c"},
+	"node":       {"node", nil, "-e"},
+	"js":         {"node", nil, "-e"},
+	"javascript": {"node", nil, "-e"},
+	"ruby":       {"ruby", nil, "-e"},
+	"perl":       {"perl", nil, "-e"},
 }
 
 // Run executes the task's script with the interpreter chosen by the code-fence
@@ -47,6 +62,11 @@ var interpreters = map[string]interpreter{
 // stdin/stdout/stderr, environment, and working directory. An unsupported language
 // returns an error before anything runs. A failing script returns an *exec.ExitError
 // whose ExitCode the caller can propagate.
+//
+// Shell tasks run in strict mode: bash and zsh with errexit and pipefail, sh with
+// errexit only. A failing command therefore stops the task with its exit code rather
+// than being masked by a later successful one. A script that wants the shell's lenient
+// defaults opts out itself with `set +e` (and `set +o pipefail`).
 //
 // Cancelling ctx (e.g. on SIGINT) tears down the task's whole process group, not just
 // the interpreter, so spawned grandchildren are not orphaned: the group is sent SIGTERM
@@ -57,7 +77,8 @@ func Run(ctx context.Context, t parser.Task) error {
 		return fmt.Errorf("unsupported language %q; supported: %s", t.Lang, supportedLanguages())
 	}
 
-	cmd := exec.CommandContext(ctx, in.cmd, in.flag, t.Script)
+	args := append(slices.Clone(in.opts), in.flag, t.Script)
+	cmd := exec.CommandContext(ctx, in.cmd, args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
