@@ -559,3 +559,31 @@ func TestExplicitFileNotSearchedUpward(t *testing.T) {
 		t.Errorf("stderr = %q, want it to contain %q", stderr, "cannot read")
 	}
 }
+
+func TestTaskArgsPassthrough(t *testing.T) {
+	requireBash(t)
+	content := "### echo-args\n```bash\nprintf '%s\\n' \"$@\"\n```\n"
+	dir := writeTasks(t, "tasks.md", content)
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"none", nil, "\n"}, // printf with no args still prints one empty line
+		{"plain", []string{"a", "b c"}, "a\nb c\n"},
+		{"dash args without separator", []string{"-x", "--flag"}, "-x\n--flag\n"},
+		{"separator stripped", []string{"--", "-x"}, "-x\n"},
+		{"only first separator stripped", []string{"--", "--"}, "--\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append([]string{"-f", "tasks.md", "echo-args"}, tc.args...)
+			stdout, stderr, code := runMade(t, dir, args...)
+			if code != 0 {
+				t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+			}
+			if stdout != tc.want {
+				t.Errorf("stdout = %q, want %q", stdout, tc.want)
+			}
+		})
+	}
+}

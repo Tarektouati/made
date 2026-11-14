@@ -24,6 +24,12 @@ type interpreter struct {
 	cmd  string   // executable to run
 	opts []string // options passed before flag (e.g. strict-mode shell options)
 	flag string   // flag that precedes the inline script (e.g. -c, -e)
+	// argSep is always inserted between the script and the task arguments: "made" for
+	// shells (it becomes $0, so the first argument is $1, with or without arguments), and
+	// "--" for interpreters that keep parsing options after the script (fish, node, ruby,
+	// perl) and would otherwise take dash-prefixed arguments as their own options. python
+	// needs none: -c ends its option parsing.
+	argSep []string
 }
 
 // Strict-mode options for shell interpreters, so a multi-line task stops at the first
@@ -38,24 +44,30 @@ var (
 	strictPOSIX = []string{"-e"}
 )
 
+// Argument separators (see interpreter.argSep).
+var (
+	shellSep  = []string{"made"}
+	endOfOpts = []string{"--"}
+)
+
 // interpreters maps a fenced code block's language to its interpreter. The language
 // is matched case-insensitively; the empty language defaults to bash so a plain
 // fence keeps working. fish has no errexit option and non-shell interpreters already
 // fail on an uncaught error, so only bash, sh, and zsh get strict-mode options.
 var interpreters = map[string]interpreter{
-	"":           {"bash", strictPipefail, "-c"},
-	"bash":       {"bash", strictPipefail, "-c"},
-	"sh":         {"sh", strictPOSIX, "-c"},
-	"shell":      {"bash", strictPipefail, "-c"},
-	"zsh":        {"zsh", strictPipefail, "-c"},
-	"fish":       {"fish", nil, "-c"},
-	"python":     {"python3", nil, "-c"},
-	"python3":    {"python3", nil, "-c"},
-	"node":       {"node", nil, "-e"},
-	"js":         {"node", nil, "-e"},
-	"javascript": {"node", nil, "-e"},
-	"ruby":       {"ruby", nil, "-e"},
-	"perl":       {"perl", nil, "-e"},
+	"":           {"bash", strictPipefail, "-c", shellSep},
+	"bash":       {"bash", strictPipefail, "-c", shellSep},
+	"sh":         {"sh", strictPOSIX, "-c", shellSep},
+	"shell":      {"bash", strictPipefail, "-c", shellSep},
+	"zsh":        {"zsh", strictPipefail, "-c", shellSep},
+	"fish":       {"fish", nil, "-c", endOfOpts},
+	"python":     {"python3", nil, "-c", nil},
+	"python3":    {"python3", nil, "-c", nil},
+	"node":       {"node", nil, "-e", endOfOpts},
+	"js":         {"node", nil, "-e", endOfOpts},
+	"javascript": {"node", nil, "-e", endOfOpts},
+	"ruby":       {"ruby", nil, "-e", endOfOpts},
+	"perl":       {"perl", nil, "-e", endOfOpts},
 }
 
 // Run executes the task's script with the interpreter chosen by the code-fence
@@ -71,17 +83,23 @@ var interpreters = map[string]interpreter{
 // than being masked by a later successful one. A script that wants the shell's lenient
 // defaults opts out itself with `set +e` (and `set +o pipefail`).
 //
+// Any args are passed to the script as positional parameters: $1, "$@" in shells,
+// $argv in fish, sys.argv[1:] in python, process.argv.slice(1) in node, ARGV in ruby,
+// and @ARGV in perl.
+//
 // Cancelling ctx (e.g. on SIGINT) tears down the task's whole process group, not just
 // the interpreter, so spawned grandchildren are not orphaned: the group is sent SIGTERM
 // and then SIGKILL.
-func Run(ctx context.Context, t parser.Task, dir string) error {
+func Run(ctx context.Context, t parser.Task, dir string, args []string) error {
 	in, ok := interpreters[strings.ToLower(strings.TrimSpace(t.Lang))]
 	if !ok {
 		return fmt.Errorf("unsupported language %q; supported: %s", t.Lang, supportedLanguages())
 	}
 
-	args := append(slices.Clone(in.opts), in.flag, t.Script)
-	cmd := exec.CommandContext(ctx, in.cmd, args...)
+	argv := append(slices.Clone(in.opts), in.flag, t.Script)
+	argv = append(argv, in.argSep...)
+	argv = append(argv, args...)
+	cmd := exec.CommandContext(ctx, in.cmd, argv...)
 	cmd.Dir = dir
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

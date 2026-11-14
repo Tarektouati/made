@@ -1,7 +1,8 @@
 // Command made is a Markdown-driven task runner.
 //
 // Tasks are H3 headings in a Markdown file (README.md by default), each followed by
-// a fenced code block. `made <task>` runs that block; `made` with no task lists them.
+// a fenced code block. `made <task> [args...]` runs that block with args as its
+// positional parameters; `made` with no task lists them.
 package main
 
 import (
@@ -60,7 +61,7 @@ func run() int {
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 	flag.BoolVar(&showVersion, "V", false, "print version and exit (shorthand)")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: made [-f file] [--no-chdir] [task]\n\n")
+		fmt.Fprintf(os.Stderr, "Usage: made [-f file] [--no-chdir] [task [--] [args...]]\n\n")
 		fmt.Fprintf(os.Stderr, "Run a task defined as an H3 heading + code block in a Markdown file.\n\n")
 		flag.PrintDefaults()
 	}
@@ -120,7 +121,14 @@ func run() int {
 		fmt.Fprintf(os.Stderr, "made: using %s\n", file)
 	}
 
-	if err := runner.Run(ctx, task, dir); err != nil {
+	// Everything after the task name goes to the script. Flag parsing already stopped
+	// at the task name, so a leading "--" is optional; drop one if present.
+	taskArgs := flag.Args()[1:]
+	if len(taskArgs) > 0 && taskArgs[0] == "--" {
+		taskArgs = taskArgs[1:]
+	}
+
+	if err := runner.Run(ctx, task, dir, taskArgs); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			return exitErr.ExitCode()
