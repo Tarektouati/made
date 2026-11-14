@@ -68,8 +68,19 @@ func TestMain(m *testing.M) {
 // (0 on success, the process exit code otherwise).
 func runMade(t *testing.T, dir string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
+	return runMadeEnv(t, dir, nil, args...)
+}
+
+// runMadeEnv is runMade with extra KEY=VALUE environment entries, which override the
+// inherited environment.
+func runMadeEnv(t *testing.T, dir string, env []string, args ...string) (stdout, stderr string, code int) {
+	t.Helper()
 	cmd := exec.CommandContext(t.Context(), madeBin, args...)
 	cmd.Dir = dir
+	if env != nil {
+		// Later entries win: os/exec dedups the environment, keeping the last value per key.
+		cmd.Env = append(os.Environ(), env...)
+	}
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
@@ -355,6 +366,21 @@ func TestUnsupportedLanguageFails(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "unsupported language") {
 		t.Errorf("stderr = %q, want it to contain %q", stderr, "unsupported language")
+	}
+}
+
+func TestMissingInterpreterFails(t *testing.T) {
+	content := "### pytask\n```python\nprint('hi')\n```\n"
+	dir := writeTasks(t, "README.md", content)
+	// An empty PATH makes python3 unresolvable; madeBin is absolute so it still runs.
+	_, stderr, code := runMadeEnv(t, dir, []string{"PATH=" + t.TempDir()}, "pytask")
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (stderr: %s)", code, stderr)
+	}
+	for _, want := range []string{`"python3" was not found on PATH`, `task "pytask"`} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr = %q, want it to contain %q", stderr, want)
+		}
 	}
 }
 

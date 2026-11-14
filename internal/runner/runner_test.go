@@ -140,3 +140,27 @@ func TestRunEmptyDirInheritsCwd(t *testing.T) {
 		t.Fatalf("Run with empty dir: %v", err)
 	}
 }
+
+func TestRunMissingInterpreter(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	tests := []struct {
+		name, lang string
+		want       []string
+	}{
+		{"python", "python", []string{`"python3" was not found on PATH`, `task "py"`, `language "python"`}},
+		{"plain fence", "", []string{`"bash" was not found on PATH`, `task "py"`, `"bash" (default for a plain fence)`}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Run(context.Background(), parser.Task{Name: "py", Lang: tt.lang, Script: "x"}, "")
+			if !errors.Is(err, exec.ErrNotFound) {
+				t.Fatalf("Run: error = %v, want it to wrap exec.ErrNotFound", err)
+			}
+			for _, w := range tt.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("error = %q, want it to contain %q", err.Error(), w)
+				}
+			}
+		})
+	}
+}
