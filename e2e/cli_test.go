@@ -432,3 +432,104 @@ func TestSIGINTKillsGrandchild(t *testing.T) {
 		t.Fatalf("stat marker: %v", err)
 	}
 }
+
+// catMarkerMD defines a task that prints marker.txt relative to its working directory,
+// which reveals where the script ran without depending on how paths are spelled.
+const catMarkerMD = "### where\n```bash\ncat marker.txt\n```\n"
+
+// writeFile writes content to path, creating parent directories as needed.
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// subdirLayout creates dir/sub/tasks.md (catMarkerMD) with markers in dir and dir/sub.
+func subdirLayout(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "sub", "tasks.md"), catMarkerMD)
+	writeFile(t, filepath.Join(dir, "sub", "marker.txt"), "in-sub\n")
+	writeFile(t, filepath.Join(dir, "marker.txt"), "in-cwd\n")
+	return dir
+}
+
+func TestRunsInTaskFileDir(t *testing.T) {
+	requireBash(t)
+	dir := subdirLayout(t)
+	stdout, stderr, code := runMade(t, dir, "-f", filepath.Join("sub", "tasks.md"), "where")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if stdout != "in-sub\n" {
+		t.Errorf("stdout = %q, want %q", stdout, "in-sub\n")
+	}
+}
+
+func TestNoChdirRunsInCwd(t *testing.T) {
+	requireBash(t)
+	dir := subdirLayout(t)
+	stdout, stderr, code := runMade(t, dir, "--no-chdir", "-f", filepath.Join("sub", "tasks.md"), "where")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if stdout != "in-cwd\n" {
+		t.Errorf("stdout = %q, want %q", stdout, "in-cwd\n")
+	}
+}
+
+func TestFindsReadmeInParent(t *testing.T) {
+	requireBash(t)
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "README.md"), catMarkerMD)
+	writeFile(t, filepath.Join(dir, "marker.txt"), "in-root\n")
+	nested := filepath.Join(dir, "a", "b")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code := runMade(t, nested, "where")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if stdout != "in-root\n" {
+		t.Errorf("stdout = %q, want %q", stdout, "in-root\n")
+	}
+	// The README came from a parent directory, so made names it on stderr.
+	if !strings.Contains(stderr, "made: using ") || !strings.Contains(stderr, "README.md") {
+		t.Errorf("stderr = %q, want a %q line naming the README", stderr, "made: using")
+	}
+}
+
+func TestNoUsingLineForReadmeInCwd(t *testing.T) {
+	requireBash(t)
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "README.md"), catMarkerMD)
+	writeFile(t, filepath.Join(dir, "marker.txt"), "here\n")
+	_, stderr, code := runMade(t, dir, "where")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want empty", stderr)
+	}
+}
+
+func TestExplicitFileNotSearchedUpward(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "README.md"), catMarkerMD)
+	nested := filepath.Join(dir, "a")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, code := runMade(t, nested, "-f", "README.md", "where")
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stderr, "cannot read") {
+		t.Errorf("stderr = %q, want it to contain %q", stderr, "cannot read")
+	}
+}

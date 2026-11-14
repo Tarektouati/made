@@ -59,7 +59,8 @@ var interpreters = map[string]interpreter{
 
 // Run executes the task's script with the interpreter chosen by the code-fence
 // language (defaulting to bash for a plain fence), inheriting the current process's
-// stdin/stdout/stderr, environment, and working directory. An unsupported language
+// stdin/stdout/stderr and environment. The script runs in dir; an empty dir inherits
+// the current process's working directory. An unsupported language
 // returns an error before anything runs. A failing script returns an *exec.ExitError
 // whose ExitCode the caller can propagate.
 //
@@ -71,7 +72,7 @@ var interpreters = map[string]interpreter{
 // Cancelling ctx (e.g. on SIGINT) tears down the task's whole process group, not just
 // the interpreter, so spawned grandchildren are not orphaned: the group is sent SIGTERM
 // and then SIGKILL.
-func Run(ctx context.Context, t parser.Task) error {
+func Run(ctx context.Context, t parser.Task, dir string) error {
 	in, ok := interpreters[strings.ToLower(strings.TrimSpace(t.Lang))]
 	if !ok {
 		return fmt.Errorf("unsupported language %q; supported: %s", t.Lang, supportedLanguages())
@@ -79,6 +80,7 @@ func Run(ctx context.Context, t parser.Task) error {
 
 	args := append(slices.Clone(in.opts), in.flag, t.Script)
 	cmd := exec.CommandContext(ctx, in.cmd, args...)
+	cmd.Dir = dir
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

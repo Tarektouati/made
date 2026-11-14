@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"syscall"
@@ -50,14 +51,16 @@ func run() int {
 	var file string
 	var list bool
 	var showVersion bool
-	flag.StringVar(&file, "file", defaultFile, "Markdown file to read tasks from")
-	flag.StringVar(&file, "f", defaultFile, "Markdown file to read tasks from (shorthand)")
+	var noChdir bool
+	flag.StringVar(&file, "file", "", "Markdown file to read tasks from (default: nearest README.md in the current or a parent directory)")
+	flag.StringVar(&file, "f", "", "shorthand for -file")
+	flag.BoolVar(&noChdir, "no-chdir", false, "run the task in the current directory instead of the task file's directory")
 	flag.BoolVar(&list, "list", false, "list available tasks")
 	flag.BoolVar(&list, "l", false, "list available tasks (shorthand)")
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 	flag.BoolVar(&showVersion, "V", false, "print version and exit (shorthand)")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: made [-f file] [task]\n\n")
+		fmt.Fprintf(os.Stderr, "Usage: made [-f file] [--no-chdir] [task]\n\n")
 		fmt.Fprintf(os.Stderr, "Run a task defined as an H3 heading + code block in a Markdown file.\n\n")
 		flag.PrintDefaults()
 	}
@@ -66,6 +69,13 @@ func run() int {
 	if showVersion {
 		fmt.Println("made", resolveVersion())
 		return 0
+	}
+
+	fromSearch := file == ""
+	file, err := resolveFile(file)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "made: %v\n", err)
+		return 1
 	}
 
 	source, err := os.ReadFile(file)
@@ -96,7 +106,21 @@ func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := runner.Run(ctx, task); err != nil {
+	dir := ""
+	if !noChdir {
+		abs, err := filepath.Abs(file)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "made: %v\n", err)
+			return 1
+		}
+		dir = filepath.Dir(abs)
+	}
+
+	if file != defaultFile && fromSearch {
+		fmt.Fprintf(os.Stderr, "made: using %s\n", file)
+	}
+
+	if err := runner.Run(ctx, task, dir); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			return exitErr.ExitCode()
@@ -105,6 +129,46 @@ func run() int {
 		return 1
 	}
 	return 0
+}
+
+// resolveFile returns the task file to read. A non-empty file (given with -f) is used
+// as is. Otherwise the nearest defaultFile in the current directory or one of its
+// parents is used; if there is none, defaultFile is returned unchanged so the caller
+// reports the usual "cannot read" error.
+func resolveFile(file string) (string, error) {
+	if file != "" {
+		return file, nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("cannot determine current directory: %w", err)
+	}
+	dir, ok := findUp(cwd, isRegularFile)
+	if !ok || dir == cwd {
+		return defaultFile, nil // keep the short name when it's right here
+	}
+	return filepath.Join(dir, defaultFile), nil
+}
+
+// findUp walks from start up to the filesystem root and returns the first directory
+// whose defaultFile satisfies isFile.
+func findUp(start string, isFile func(path string) bool) (dir string, ok bool) {
+	for dir = start; ; {
+		if isFile(filepath.Join(dir, defaultFile)) {
+			return dir, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
+}
+
+// isRegularFile reports whether path exists and is not a directory.
+func isRegularFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 func find(tasks []parser.Task, name string) (parser.Task, bool) {
