@@ -89,12 +89,13 @@ made --version       # print the version
 ## CLI reference
 
 ```
-made [-f file] [-l] [-V] [task]
+made [-f file] [--no-chdir] [-l] [-V] [task]
 ```
 
 | Flag | Default | Description |
 |---|---|---|
-| `-f`, `--file` | `README.md` | Markdown file to read tasks from |
+| `-f`, `--file` | nearest `README.md` | Markdown file to read tasks from. Without `-f`, `made` uses the `README.md` in the current directory or the closest parent directory |
+| `--no-chdir` | | Run the task in the current directory instead of the task file's directory |
 | `-l`, `--list` | | List available tasks and exit |
 | `-V`, `--version` | | Print the version and exit |
 | `task` | | Name of the task to run (the H3 heading text) |
@@ -148,9 +149,23 @@ Only top-level blocks count: code inside lists or blockquotes is never a task.
 
 **Execution.** The script is passed inline to its interpreter (`bash -e -o pipefail
 -c <script>`, `node -e <script>`, …). The interpreter inherits `made`'s stdin,
-stdout, stderr, environment, and working directory — nothing is written to a
-temporary file. The strict-mode options are passed to the shell rather than
-prepended to the script, so line numbers in error messages match the code block.
+stdout, stderr, and environment — nothing is written to a temporary file. The
+strict-mode options are passed to the shell rather than prepended to the script,
+so line numbers in error messages match the code block.
+
+**Working directory.** A task runs in the directory that contains its task file,
+not in the directory `made` was started from. Relative paths in a script
+therefore resolve the same way wherever you invoke `made`:
+`made -f tools/tasks.md build` runs `build` inside `tools/`. Pass `--no-chdir` to
+run the task in the current directory instead.
+
+Without `-f`, `made` looks for `README.md` in the current directory and then in
+each parent directory, and uses the first one it finds. You can therefore run a
+repository's tasks from any subdirectory; when the file comes from a parent
+directory, `made` prints `made: using <path>` on stderr before running the task. The nearest `README.md` wins even if it
+defines no tasks (for example `docs/README.md` when you run `made` from `docs/`),
+so use `-f` to pick a specific file. An explicit `-f` path is read exactly as
+given and is never looked up in parent directories.
 
 **Signals.** On `SIGINT` or `SIGTERM`, `made` tears down the whole task, not just
 the interpreter: the task runs in its own process group, which is sent `SIGTERM`
@@ -232,6 +247,9 @@ Put tasks in a dedicated file and point `made` at it:
 ```sh
 made -f tasks.md release
 ```
+
+The task runs in the directory that holds `tasks.md` (see
+[How it works](#how-it-works)).
 
 **Show code samples without creating tasks**
 
