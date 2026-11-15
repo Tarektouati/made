@@ -3,7 +3,8 @@
 // Tasks are H3 headings in a Markdown file (the nearest Madefile.md by default), each
 // followed by a fenced code block. `made <task> [args...]` runs that block with args
 // as its positional parameters; `made` with no task lists them. `made init` writes a
-// starter Madefile.md in the current directory.
+// starter Madefile.md in the current directory, and `made completion <shell>` prints a
+// bash, zsh or fish completion script.
 package main
 
 import (
@@ -22,6 +23,7 @@ import (
 	"syscall"
 	"text/tabwriter"
 
+	"github.com/Tarektouati/made/internal/completion"
 	"github.com/Tarektouati/made/internal/parser"
 	"github.com/Tarektouati/made/internal/runner"
 )
@@ -72,6 +74,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var list bool
 	var showVersion bool
 	var noChdir bool
+	var listNames bool
 	fs := flag.NewFlagSet("made", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&file, "file", "", "Markdown file to read tasks from (default: nearest Madefile.md, searched up to the repository root, or the filesystem root outside a repository)")
@@ -81,13 +84,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.BoolVar(&list, "l", false, "list available tasks (shorthand)")
 	fs.BoolVar(&showVersion, "version", false, "print version and exit")
 	fs.BoolVar(&showVersion, "V", false, "print version and exit (shorthand)")
+	// list-names is for the completion scripts and stays out of the usage text.
+	fs.BoolVar(&listNames, "list-names", false, "print task names and descriptions, tab-separated, one per line")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "Usage: made [-f file] [--no-chdir] [task [--] [args...]]\n")
-		fmt.Fprintf(stderr, "       made init [--force]\n\n")
+		fmt.Fprintf(stderr, "       made init [--force]\n")
+		fmt.Fprintf(stderr, "       made completion <%s>\n\n", strings.Join(completion.Shells, "|"))
 		fmt.Fprintf(stderr, "Run a task defined as an H3 heading + code block in a Markdown file.\n")
 		fmt.Fprintf(stderr, "`made init` creates a starter Madefile.md in the current directory;\n")
-		fmt.Fprintf(stderr, "--force overwrites an existing one.\n\n")
-		fs.PrintDefaults()
+		fmt.Fprintf(stderr, "--force overwrites an existing one.\n")
+		fmt.Fprintf(stderr, "`made completion <shell>` prints a shell completion script.\n\n")
+		printVisibleDefaults(fs, stderr, "list-names")
 	}
 	if err := fs.Parse(args); err != nil {
 		// fs has already reported the error and the usage on stderr. Keep the exit
@@ -132,12 +139,31 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return initMadefile(stdout, stderr, force)
 	}
 
+	// completion is reserved like init: it prints a script and needs no task file.
+	if fs.NArg() > 0 && fs.Arg(0) == "completion" {
+		if file != "" {
+			fmt.Fprintln(stderr, "made: completion does not take -f")
+			return 2
+		}
+		var script []byte
+		ok := fs.NArg() == 2
+		if ok {
+			script, ok = completion.Script(fs.Arg(1))
+		}
+		if !ok {
+			fmt.Fprintf(stderr, "made: completion takes one of: %s\n", strings.Join(completion.Shells, ", "))
+			return 2
+		}
+		_, _ = stdout.Write(script)
+		return 0
+	}
+
 	res, err := resolveFile(file)
 	if err != nil {
 		fmt.Fprintf(stderr, "made: %v\n", err)
 		return 1
 	}
-	if len(res.others) > 0 {
+	if len(res.others) > 0 && !listNames {
 		fmt.Fprintf(stderr, "made: using %s (also found %s)\n", res.path, strings.Join(res.others, ", "))
 	}
 	file = res.path
@@ -152,6 +178,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "made: cannot parse %s: %v\n", file, err)
 		return 1
+	}
+
+	if listNames {
+		printNames(stdout, tasks)
+		return 0
 	}
 
 	if list || fs.NArg() == 0 {
@@ -366,4 +397,26 @@ func printTasks(stdout, stderr io.Writer, file string, tasks []parser.Task) {
 		fmt.Fprintf(w, "  %s\t%s\n", t.Name, desc)
 	}
 	_ = w.Flush()
+}
+
+// printNames writes one task per line as "name<TAB>description" for the completion
+// scripts, with no header. The description is flattened to one line.
+func printNames(stdout io.Writer, tasks []parser.Task) {
+	for _, t := range tasks {
+		fmt.Fprintf(stdout, "%s\t%s\n", t.Name, strings.ReplaceAll(t.Description, "\n", " "))
+	}
+}
+
+// printVisibleDefaults is fs.PrintDefaults without the flags named in hidden.
+func printVisibleDefaults(fs *flag.FlagSet, w io.Writer, hidden ...string) {
+	visible := flag.NewFlagSet(fs.Name(), flag.ContinueOnError)
+	visible.SetOutput(w)
+	fs.VisitAll(func(f *flag.Flag) {
+		if slices.Contains(hidden, f.Name) {
+			return
+		}
+		visible.Var(f.Value, f.Name, f.Usage)
+		visible.Lookup(f.Name).DefValue = f.DefValue // f.Value may hold a parsed value
+	})
+	visible.PrintDefaults()
 }

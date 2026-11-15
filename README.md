@@ -64,6 +64,22 @@ curl -fsSL https://raw.githubusercontent.com/Tarektouati/made/main/install.sh | 
 go install github.com/Tarektouati/made@latest
 ```
 
+### Shell completion
+
+`made <TAB>` completes task names (with their descriptions in zsh and fish) from the
+task file `made` would use, including one given with `-f`. `made -f <TAB>` completes
+file names, and `made completion <TAB>` completes shell names. Homebrew installs the
+completions for bash, zsh, and fish automatically. Otherwise, load the script that
+`made completion <shell>` prints:
+
+| Shell | Setup |
+|---|---|
+| bash | add `eval "$(made completion bash)"` to `~/.bashrc` |
+| zsh | add `eval "$(made completion zsh)"` to `~/.zshrc`, after `compinit`; or save it as `_made` in a directory on `$fpath` |
+| fish | run `made completion fish > ~/.config/fish/completions/made.fish` once |
+
+Release archives also include the scripts, in `completions/`.
+
 ## Quick start
 
 Create a starter `Madefile.md` at the root of your repository:
@@ -99,6 +115,7 @@ made --version       # print the version
 ```
 made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]
 made init [--force]
+made completion <bash|zsh|fish>
 ```
 
 | Flag | Default | Description |
@@ -125,6 +142,11 @@ reads (`Madefile.md`, then `madefile.md`, then `MADEFILE.md`) is overwritten; th
 others are named on stderr and left unchanged. Directories with these names are
 not Madefiles and are never overwritten. The flag goes after `init`. With no
 existing Madefile, it behaves like plain `made init`.
+
+**`made completion <shell>`** prints the completion script for `bash`, `zsh`, or
+`fish` (see [Shell completion](#shell-completion)). Like `init`, it needs no task
+file, takes no `-f`, and is reserved: a task named `completion` cannot be run with
+`made completion`.
 
 Running `made` with no task lists the tasks, same as `--list`. When a task runs,
 `made` exits with the script's exit code, so it composes with `&&`, CI steps, and
