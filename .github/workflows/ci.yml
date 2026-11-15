@@ -76,3 +76,59 @@ jobs:
           name: made-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/
           if-no-files-found: error
+
+  # Compares the PR against its base on this one runner. Warn only: nothing here
+  # fails the job. Run it locally with scripts/bench.sh (see the README).
+  bench:
+    name: Bench (base vs head)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    concurrency: # one run per PR, so two pushes can't each create the sticky comment
+      group: bench-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      pull-requests: write # sticky comment; absent on fork PRs, where it is skipped
+    env:
+      HYPERFINE_VERSION: "2.0.0"
+      HYPERFINE_SHA256: ae2beda2ac99c098427e4f755244552daf20e514422889cca6d44421e2d93c87
+      BENCHSTAT_VERSION: v0.0.0-20261009192801-be2c69fb417e
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the base commit must be available
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install hyperfine and benchstat (pinned)
+        continue-on-error: true # warn only
+        run: |
+          tarball="hyperfine-v${HYPERFINE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$tarball" \
+            "https://github.com/sharkdp/hyperfine/releases/download/v${HYPERFINE_VERSION}/$tarball"
+          echo "$HYPERFINE_SHA256  $RUNNER_TEMP/$tarball" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP"
+          sudo install "$RUNNER_TEMP/${tarball%.tar.gz}/hyperfine" /usr/local/bin/hyperfine
+          go install "golang.org/x/perf/cmd/benchstat@${BENCHSTAT_VERSION}"
+      - name: Run benchmarks
+        continue-on-error: true # warn only
+        run: scripts/bench.sh "${{ github.event.pull_request.base.sha }}" "$RUNNER_TEMP/bench"
+      - name: Publish report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          report="$RUNNER_TEMP/bench/report.md"
+          # -s, not -f: bench.sh tees into report.md, so a failed run can leave it empty.
+          if [ ! -s "$report" ]; then
+            mkdir -p "$(dirname "$report")"
+            printf '## made benchmarks: base vs head\n\n⚠️ The benchmark run failed; see the job log.\n' > "$report"
+          fi
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$HEAD_REPO" = "$GITHUB_REPOSITORY" ]; then
+            scripts/bench-comment.sh "$report"
+          else
+            echo "Fork PR: skipping the PR comment, see the step summary."
+          fi

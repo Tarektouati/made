@@ -34,3 +34,6 @@ completions/
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Benchmark output
+bench-out/
