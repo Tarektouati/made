@@ -29,6 +29,7 @@ go.work.sum
 
 # GoReleaser build output
 dist/
+completions/
 
 # Editor/IDE
 # .idea/

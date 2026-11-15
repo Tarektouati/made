@@ -5,6 +5,9 @@ project_name: made
 before:
   hooks:
     - go mod tidy
+    # Shell completion scripts, shipped in the archives and installed by the cask.
+    # zsh looks completions up by function name, hence _made.
+    - sh -c 'mkdir -p completions && go run . completion bash > completions/made.bash && go run . completion zsh > completions/_made && go run . completion fish > completions/made.fish'
 
 builds:
   - id: made
@@ -26,6 +29,10 @@ builds:
 archives:
   - id: made
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+      - completions/*
 
 checksum:
   name_template: checksums.txt
@@ -49,6 +56,10 @@ homebrew_casks:
     description: "Markdown-driven task runner — tasks are H3 headings + fenced code blocks"
     binaries:
       - made
+    completions:
+      bash: completions/made.bash
+      zsh: completions/_made
+      fish: completions/made.fish
     hooks:
       post:
         # The binary is unsigned, so strip the Gatekeeper quarantine attribute on
