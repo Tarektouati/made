@@ -54,7 +54,7 @@ homebrew_casks:
         # The binary is unsigned, so strip the Gatekeeper quarantine attribute on
         # macOS; otherwise the first run is blocked. (Proper signing/notarization
         # would be the alternative.)
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/made"]
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/made"]
           end
