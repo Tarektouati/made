@@ -198,7 +198,7 @@ func TestMissingFile(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1", code)
 	}
-	for _, want := range []string{"made: no Madefile.md found in ", "use -f"} {
+	for _, want := range []string{"made: no Madefile.md found in ", "use -f", "made init"} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr = %q, want it to contain %q", stderr, want)
 		}
@@ -737,5 +737,32 @@ func TestDuplicateMadefileInParent(t *testing.T) {
 	want := string(filepath.Separator) + "Madefile.md (also found madefile.md)\n"
 	if !strings.HasSuffix(stderr, want) {
 		t.Errorf("stderr = %q, want it to end with %q", stderr, want)
+	}
+}
+
+// TestInit scaffolds a Madefile, then lists and runs its example task.
+func TestInit(t *testing.T) {
+	requireBash(t)
+	dir := t.TempDir()
+	mkdir(t, filepath.Join(dir, ".git")) // repo boundary: keep discovery inside dir
+
+	stdout, stderr, code := runMade(t, dir, "init")
+	if code != 0 || stdout != "made: created Madefile.md\n" {
+		t.Fatalf("made init = (%d, %q), want (0, %q) (stderr: %s)", code, stdout, "made: created Madefile.md\n", stderr)
+	}
+
+	stdout, stderr, code = runMade(t, dir)
+	if code != 0 || !strings.Contains(stdout, "hello") {
+		t.Errorf("made = (%d, %q), want the hello task listed (stderr: %s)", code, stdout, stderr)
+	}
+
+	stdout, stderr, code = runMade(t, dir, "hello")
+	if code != 0 || stdout != "hello\n" {
+		t.Errorf("made hello = (%d, %q), want (0, %q) (stderr: %s)", code, stdout, "hello\n", stderr)
+	}
+
+	_, stderr, code = runMade(t, dir, "init")
+	if code != 1 || !strings.Contains(stderr, "Madefile.md already exists") {
+		t.Errorf("second made init = (%d, %q), want exit 1 and an already-exists error", code, stderr)
 	}
 }

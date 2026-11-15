@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Tarektouati/made/internal/parser"
 )
 
 // runTasksMD defines tasks for the run tests. The check tasks exit non-zero unless they
@@ -317,9 +319,113 @@ func TestResolveFileNotFound(t *testing.T) {
 		t.Fatal("resolveFile: want error, got nil")
 	}
 	cwd, _ := os.Getwd()
-	for _, want := range []string{"no Madefile.md found in " + cwd + " or its parents", "use -f"} {
+	for _, want := range []string{"no Madefile.md found in " + cwd + " or its parents", "use -f", "made init"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("err = %q, want it to contain %q", err, want)
 		}
+	}
+}
+
+func TestInitCreatesMadefile(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"init"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("run(init) = %d, want 0 (stderr: %s)", code, &stderr)
+	}
+	if got := stdout.String(); got != "made: created Madefile.md\n" {
+		t.Errorf("stdout = %q, want %q", got, "made: created Madefile.md\n")
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "Madefile.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != madefileTemplate {
+		t.Errorf("Madefile.md = %q, want the template", got)
+	}
+}
+
+// TestInitTemplateIsValid checks the template parses to exactly the example task.
+func TestInitTemplateIsValid(t *testing.T) {
+	tasks, err := parser.Parse([]byte(madefileTemplate))
+	if err != nil {
+		t.Fatalf("parser.Parse(template): %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].Name != "hello" || tasks[0].Script == "" {
+		t.Errorf("template tasks = %+v, want one task %q with a script", tasks, "hello")
+	}
+}
+
+func TestInitRefusesExisting(t *testing.T) {
+	for _, name := range madefileNames {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if name != madefileNames[0] {
+				requireCaseSensitiveFS(t, dir)
+			}
+			path := filepath.Join(dir, name)
+			if err := os.WriteFile(path, []byte("keep me"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			t.Chdir(dir)
+			var stdout, stderr bytes.Buffer
+			if code := run([]string{"init"}, &stdout, &stderr); code != 1 {
+				t.Errorf("run(init) = %d, want 1", code)
+			}
+			checkContains(t, "stderr", stderr.String(), []string{name + " already exists"}, true)
+			if got, _ := os.ReadFile(path); string(got) != "keep me" {
+				t.Errorf("%s = %q, want it untouched", name, got)
+			}
+			if name != madefileNames[0] {
+				if _, err := os.Stat(filepath.Join(dir, madefileNames[0])); err == nil {
+					t.Errorf("%s was created next to %s", madefileNames[0], name)
+				}
+			}
+		})
+	}
+}
+
+// TestInitIgnoresParentMadefile checks init creates a nested Madefile rather than
+// refusing because of one higher up.
+func TestInitIgnoresParentMadefile(t *testing.T) {
+	dir := t.TempDir()
+	mkTree(t, dir, ".git/", "Madefile.md", "sub/")
+	t.Chdir(filepath.Join(dir, "sub"))
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"init"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("run(init) = %d, want 0 (stderr: %s)", code, &stderr)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "sub", "Madefile.md")); err != nil {
+		t.Errorf("sub/Madefile.md not created: %v", err)
+	}
+}
+
+func TestInitUsageErrors(t *testing.T) {
+	t.Chdir(t.TempDir())
+	checkRunCases(t, []runCase{
+		{name: "with -f", args: []string{"-f", "tasks.md", "init"}, wantCode: 2, wantStderr: []string{"init does not take -f"}},
+		{name: "extra args", args: []string{"init", "extra"}, wantCode: 2, wantStderr: []string{"init takes no arguments"}},
+	})
+	if entries, _ := os.ReadDir("."); len(entries) != 0 {
+		t.Errorf("cwd has %d entries after usage errors, want none", len(entries))
+	}
+}
+
+// TestInitIsReserved checks a user task named init never runs: made init scaffolds
+// (or refuses) instead.
+func TestInitIsReserved(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "ran")
+	content := "### init\n```bash\ntouch " + marker + "\n```\n"
+	if err := os.WriteFile(filepath.Join(dir, "Madefile.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"init"}, &stdout, &stderr); code != 1 {
+		t.Errorf("run(init) = %d, want 1", code)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the user's init task ran")
 	}
 }
