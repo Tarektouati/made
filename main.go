@@ -2,7 +2,8 @@
 //
 // Tasks are H3 headings in a Markdown file (the nearest Madefile.md by default), each
 // followed by a fenced code block. `made <task> [args...]` runs that block with args
-// as its positional parameters; `made` with no task lists them.
+// as its positional parameters; `made` with no task lists them. `made init` writes a
+// starter Madefile.md in the current directory.
 package main
 
 import (
@@ -16,6 +17,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -28,6 +30,17 @@ import (
 // They are matched exactly against directory entries, so case-insensitive filesystems
 // behave like case-sensitive ones.
 var madefileNames = []string{"Madefile.md", "madefile.md", "MADEFILE.md"}
+
+// madefileTemplate is what `made init` writes: a short header and one example task,
+// valid as is.
+const madefileTemplate = "# Tasks\n\n" +
+	"Tasks for this project. Run `made` to list them,\n" +
+	"or `made <task>` to run one.\n\n" +
+	"### hello\n" +
+	"Prints a friendly greeting.\n" +
+	"```bash\n" +
+	"echo hello\n" +
+	"```\n"
 
 // version is set at release time via -ldflags "-X main.version=<tag>".
 var version = ""
@@ -69,8 +82,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.BoolVar(&showVersion, "version", false, "print version and exit")
 	fs.BoolVar(&showVersion, "V", false, "print version and exit (shorthand)")
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "Usage: made [-f file] [--no-chdir] [task [--] [args...]]\n\n")
-		fmt.Fprintf(stderr, "Run a task defined as an H3 heading + code block in a Markdown file.\n\n")
+		fmt.Fprintf(stderr, "Usage: made [-f file] [--no-chdir] [task [--] [args...]]\n")
+		fmt.Fprintf(stderr, "       made init\n\n")
+		fmt.Fprintf(stderr, "Run a task defined as an H3 heading + code block in a Markdown file.\n")
+		fmt.Fprintf(stderr, "`made init` creates a starter Madefile.md in the current directory.\n\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -85,6 +100,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if showVersion {
 		fmt.Fprintln(stdout, "made", resolveVersion())
 		return 0
+	}
+
+	// init is reserved: it scaffolds even when a task named "init" exists, and needs no
+	// task file, like --version.
+	if fs.NArg() > 0 && fs.Arg(0) == "init" {
+		if file != "" {
+			fmt.Fprintf(stderr, "made: init does not take -f; it creates %s in the current directory\n", madefileNames[0])
+			return 2
+		}
+		if fs.NArg() > 1 {
+			fmt.Fprintln(stderr, "made: init takes no arguments")
+			return 2
+		}
+		return initMadefile(stdout, stderr)
 	}
 
 	res, err := resolveFile(file)
@@ -157,6 +186,47 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+// initMadefile writes madefileTemplate to Madefile.md in the current directory and
+// returns the exit code. It refuses (exit 1) when any of madefileNames already exists
+// there, matched exactly like findMadefile; parent directories are not searched, so a
+// nested Madefile can be created on purpose.
+func initMadefile(stdout, stderr io.Writer) int {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(stderr, "made: cannot determine current directory: %v\n", err)
+		return 1
+	}
+	entries, err := os.ReadDir(cwd)
+	if err != nil {
+		fmt.Fprintf(stderr, "made: cannot read %s: %v\n", cwd, err)
+		return 1
+	}
+	for _, e := range entries {
+		if slices.Contains(madefileNames, e.Name()) {
+			fmt.Fprintf(stderr, "made: %s already exists in %s\n", e.Name(), cwd)
+			return 1
+		}
+	}
+	// O_EXCL never overwrites, even if a file appeared since the check or the
+	// filesystem folds case.
+	name := madefileNames[0]
+	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		fmt.Fprintf(stderr, "made: cannot create %s: %v\n", name, err)
+		return 1
+	}
+	_, err = io.WriteString(f, madefileTemplate)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "made: cannot write %s: %v\n", name, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "made: created %s\n", name)
+	return 0
+}
+
 // resolved is the task file chosen by resolveFile.
 type resolved struct {
 	path       string   // path to read; a bare name when found in the current directory
@@ -177,7 +247,7 @@ func resolveFile(file string) (resolved, error) {
 	}
 	dir, name, others, ok := findMadefile(cwd)
 	if !ok {
-		return resolved{}, fmt.Errorf("no %s found in %s or its parents (use -f to choose a file)", madefileNames[0], cwd)
+		return resolved{}, fmt.Errorf("no %s found in %s or its parents (use -f to choose a file, or made init to create one)", madefileNames[0], cwd)
 	}
 	res := resolved{path: name} // keep the short name when it's right here
 	if dir != cwd {

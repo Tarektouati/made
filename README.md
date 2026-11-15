@@ -66,8 +66,13 @@ go install github.com/Tarektouati/made@latest
 
 ## Quick start
 
-Add a task to a `Madefile.md` at the root of your repository — an H3 heading, an
-optional description, and a fenced code block:
+Create a starter `Madefile.md` at the root of your repository:
+
+```sh
+made init   # writes Madefile.md with one example task, "hello"
+```
+
+A task is an H3 heading, an optional description, and a fenced code block:
 
 ````markdown
 ### say-hello
@@ -82,6 +87,7 @@ Then run it:
 ```sh
 made say-hello       # runs the script under the "say-hello" heading
 made                 # lists all tasks with descriptions
+made hello          # runs the example task from made init
 made -f tasks.md ci  # read tasks from a different file
 made -f README.md ci # …such as your README
 made deploy staging  # pass "staging" to the task as $1
@@ -92,6 +98,7 @@ made --version       # print the version
 
 ```
 made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]
+made init
 ```
 
 | Flag | Default | Description |
@@ -102,6 +109,14 @@ made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]
 | `-V`, `--version` | | Print the version and exit |
 | `task` | | Name of the task to run (the H3 heading text) |
 | `args` | | Passed to the task's script as positional parameters |
+
+**`made init`** writes a starter `Madefile.md` (a short header and one `hello`
+task) in the current directory and prints `made: created Madefile.md`. It needs no
+existing task file. If `Madefile.md`, `madefile.md`, or `MADEFILE.md` already exists
+in the current directory, it exits with `1` and leaves the file alone; parent
+directories are not checked, so you can create a nested Madefile on purpose. It
+takes no `-f` and no arguments. `init` is reserved: a task named `init` cannot be
+run with `made init`, so give it another name.
 
 Running `made` with no task lists the tasks, same as `--list`. When a task runs,
 `made` exits with the script's exit code, so it composes with `&&`, CI steps, and
@@ -197,7 +212,8 @@ a parent directory, `made` prints `made: using <path>` on stderr before running 
 task. The nearest Madefile wins and is never merged with one higher up: in a
 monorepo, each package can have its own `Madefile.md`, and the root tasks stay
 reachable with `made -f ../../Madefile.md`. If no Madefile is found, `made` exits
-with an error; `README.md` is never read unless you pass `-f README.md`.
+with an error that suggests `-f` or `made init`; `README.md` is never read unless
+you pass `-f README.md`.
 
 An explicit `-f` path is relative to the current directory, read exactly as given,
 and never looked up in parent directories.
@@ -366,8 +382,9 @@ a non-zero code. It runs when any file is staged; set `always_run: true` or
 Before v0.3.0, `made` read tasks from the nearest `README.md`. It now reads only
 `Madefile.md` (see [How it works](#how-it-works)). To migrate, either:
 
-- move the task sections (the H3 headings and their code blocks) out of
-  `README.md` into a new `Madefile.md` beside it, or
+- run `made init` next to your `README.md` to create a `Madefile.md`, then move
+  the task sections (the H3 headings and their code blocks) out of `README.md`
+  into it, replacing the example `hello` task, or
 - keep them where they are and pass the file explicitly: `made -f README.md <task>`
   (for example in scripts, CI, or a pre-commit hook's `args`).
 
