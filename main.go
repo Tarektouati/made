@@ -83,9 +83,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.BoolVar(&showVersion, "V", false, "print version and exit (shorthand)")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "Usage: made [-f file] [--no-chdir] [task [--] [args...]]\n")
-		fmt.Fprintf(stderr, "       made init\n\n")
+		fmt.Fprintf(stderr, "       made init [--force]\n\n")
 		fmt.Fprintf(stderr, "Run a task defined as an H3 heading + code block in a Markdown file.\n")
-		fmt.Fprintf(stderr, "`made init` creates a starter Madefile.md in the current directory.\n\n")
+		fmt.Fprintf(stderr, "`made init` creates a starter Madefile.md in the current directory;\n")
+		fmt.Fprintf(stderr, "--force overwrites an existing one.\n\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -109,11 +110,26 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "made: init does not take -f; it creates %s in the current directory\n", madefileNames[0])
 			return 2
 		}
-		if fs.NArg() > 1 {
+		var force bool
+		ifs := flag.NewFlagSet("made init", flag.ContinueOnError)
+		ifs.SetOutput(stderr)
+		ifs.BoolVar(&force, "force", false, "overwrite an existing Madefile in the current directory")
+		ifs.Usage = func() {
+			fmt.Fprintf(stderr, "Usage: made init [--force]\n\n")
+			fmt.Fprintf(stderr, "Create a starter %s in the current directory.\n\n", madefileNames[0])
+			ifs.PrintDefaults()
+		}
+		if err := ifs.Parse(fs.Args()[1:]); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return 0
+			}
+			return 2
+		}
+		if ifs.NArg() > 0 {
 			fmt.Fprintln(stderr, "made: init takes no arguments")
 			return 2
 		}
-		return initMadefile(stdout, stderr)
+		return initMadefile(stdout, stderr, force)
 	}
 
 	res, err := resolveFile(file)
@@ -187,10 +203,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 }
 
 // initMadefile writes madefileTemplate to Madefile.md in the current directory and
-// returns the exit code. It refuses (exit 1) when any of madefileNames already exists
-// there, matched exactly like findMadefile; parent directories are not searched, so a
-// nested Madefile can be created on purpose.
-func initMadefile(stdout, stderr io.Writer) int {
+// returns the exit code. Existing files are matched against madefileNames exactly, and
+// only regular files count, like findMadefile; parent directories are not searched, so a nested Madefile can be
+// created on purpose. When one already exists, it refuses (exit 1) unless force is
+// set; with force it overwrites the highest-priority existing file in place, keeping
+// its name, and leaves any other Madefiles there untouched.
+func initMadefile(stdout, stderr io.Writer, force bool) int {
 	cwd, err := os.Getwd()
 	if err != nil {
 		fmt.Fprintf(stderr, "made: cannot determine current directory: %v\n", err)
@@ -201,30 +219,55 @@ func initMadefile(stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "made: cannot read %s: %v\n", cwd, err)
 		return 1
 	}
-	for _, e := range entries {
-		if slices.Contains(madefileNames, e.Name()) {
-			fmt.Fprintf(stderr, "made: %s already exists in %s\n", e.Name(), cwd)
-			return 1
+	var present []string // in madefileNames priority order
+	for _, n := range madefileNames {
+		if slices.ContainsFunc(entries, func(e os.DirEntry) bool { return e.Name() == n }) && isRegularFile(n) {
+			present = append(present, n)
 		}
 	}
-	// O_EXCL never overwrites, even if a file appeared since the check or the
-	// filesystem folds case.
-	name := madefileNames[0]
-	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if err != nil {
-		fmt.Fprintf(stderr, "made: cannot create %s: %v\n", name, err)
+
+	if len(present) == 0 {
+		// O_EXCL never overwrites, even if a file appeared since the check or the
+		// filesystem folds case.
+		name := madefileNames[0]
+		if err := writeTemplate(name, os.O_CREATE|os.O_EXCL); err != nil {
+			fmt.Fprintf(stderr, "made: cannot create %s: %v\n", name, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "made: created %s\n", name)
+		return 0
+	}
+
+	target := present[0]
+	if !force {
+		fmt.Fprintf(stderr, "made: %s already exists in %s (use made init --force to overwrite it)\n", target, cwd)
 		return 1
+	}
+	if len(present) > 1 {
+		fmt.Fprintf(stderr, "made: also found %s; left unchanged\n", strings.Join(present[1:], ", "))
+	}
+	// No O_CREATE: overwrite the file that is there, never create one under a
+	// different case.
+	if err := writeTemplate(target, os.O_TRUNC); err != nil {
+		fmt.Fprintf(stderr, "made: cannot write %s: %v\n", target, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "made: overwrote %s\n", target)
+	return 0
+}
+
+// writeTemplate opens name for writing with the extra open flags and writes
+// madefileTemplate to it. New files get mode 0644.
+func writeTemplate(name string, flags int) error {
+	f, err := os.OpenFile(name, os.O_WRONLY|flags, 0o644)
+	if err != nil {
+		return err
 	}
 	_, err = io.WriteString(f, madefileTemplate)
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
-	if err != nil {
-		fmt.Fprintf(stderr, "made: cannot write %s: %v\n", name, err)
-		return 1
-	}
-	fmt.Fprintf(stdout, "made: created %s\n", name)
-	return 0
+	return err
 }
 
 // resolved is the task file chosen by resolveFile.

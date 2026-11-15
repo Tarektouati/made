@@ -765,4 +765,19 @@ func TestInit(t *testing.T) {
 	if code != 1 || !strings.Contains(stderr, "Madefile.md already exists") {
 		t.Errorf("second made init = (%d, %q), want exit 1 and an already-exists error", code, stderr)
 	}
+
+	writeFile(t, filepath.Join(dir, "Madefile.md"), "### custom\n\n```bash\necho custom\n```\n")
+	stdout, stderr, code = runMade(t, dir, "init", "--force")
+	if code != 0 || stdout != "made: overwrote Madefile.md\n" {
+		t.Errorf("made init --force = (%d, %q), want (0, %q) (stderr: %s)", code, stdout, "made: overwrote Madefile.md\n", stderr)
+	}
+
+	stdout, stderr, code = runMade(t, dir, "hello")
+	if code != 0 || stdout != "hello\n" {
+		t.Errorf("made hello after --force = (%d, %q), want (0, %q) (stderr: %s)", code, stdout, "hello\n", stderr)
+	}
+
+	if _, _, code = runMade(t, dir, "custom"); code == 0 {
+		t.Error("made custom after --force exited 0, want the custom task gone")
+	}
 }

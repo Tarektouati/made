@@ -98,7 +98,7 @@ made --version       # print the version
 
 ```
 made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]
-made init
+made init [--force]
 ```
 
 | Flag | Default | Description |
@@ -117,6 +117,14 @@ in the current directory, it exits with `1` and leaves the file alone; parent
 directories are not checked, so you can create a nested Madefile on purpose. It
 takes no `-f` and no arguments. `init` is reserved: a task named `init` cannot be
 run with `made init`, so give it another name.
+
+**`made init --force`** overwrites the existing file with the starter template
+instead, keeping its name (so a `madefile.md` stays `madefile.md`), and prints
+`made: overwrote <name>`. If several Madefile names exist, only the one `made`
+reads (`Madefile.md`, then `madefile.md`, then `MADEFILE.md`) is overwritten; the
+others are named on stderr and left unchanged. Directories with these names are
+not Madefiles and are never overwritten. The flag goes after `init`. With no
+existing Madefile, it behaves like plain `made init`.
 
 Running `made` with no task lists the tasks, same as `--list`. When a task runs,
 `made` exits with the script's exit code, so it composes with `&&`, CI steps, and
