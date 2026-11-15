@@ -26,3 +26,9 @@ Builds, vets, and tests in one go.
 ```bash
 go build ./... && go vet ./... && go test ./...
 ```
+
+### bench
+Benchmarks the working tree against a base ref (default `origin/main`): Go benchmarks (benchstat), CLI timings (hyperfine) and binary size. Needs `hyperfine` and `benchstat` on PATH. Usage: `made bench [base-ref]`.
+```bash
+scripts/bench.sh "${1:-origin/main}"
+```

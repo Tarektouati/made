@@ -423,6 +423,18 @@ Before v0.3.0, `made` read tasks from the nearest `README.md`. It now reads only
 This repository's own tasks live in [`Madefile.md`](./Madefile.md): run `made` in
 the repo to list them, and `made check` to build, vet, and test.
 
+### Benchmarks
+
+Every pull request gets a base-vs-head performance table from the `bench` CI job
+(step summary and one sticky PR comment; warn only, it never fails the build). To
+produce the same report locally, install [`hyperfine`](https://github.com/sharkdp/hyperfine)
+and `benchstat` (`go install golang.org/x/perf/cmd/benchstat@latest`), then run:
+
+```bash
+made bench              # or: scripts/bench.sh [base-ref] [out-dir], base defaults to origin/main
+go test -run '^$' -bench . -count 10 ./...   # just the Go benchmarks
+```
+
 ## License
 
 MIT
