@@ -361,7 +361,8 @@ func TestInitRefusesExisting(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 			if name != madefileNames[0] {
-				requireCaseSensitiveFS(t, dir)
+				// Probe a sibling dir: the probe file would break the entry count below.
+				requireCaseSensitiveFS(t, t.TempDir())
 			}
 			path := filepath.Join(dir, name)
 			if err := os.WriteFile(path, []byte("keep me"), 0o644); err != nil {
@@ -372,7 +373,7 @@ func TestInitRefusesExisting(t *testing.T) {
 			if code := run([]string{"init"}, &stdout, &stderr); code != 1 {
 				t.Errorf("run(init) = %d, want 1", code)
 			}
-			checkContains(t, "stderr", stderr.String(), []string{name + " already exists"}, true)
+			checkContains(t, "stderr", stderr.String(), []string{name + " already exists", "made init --force"}, true)
 			if got, _ := os.ReadFile(path); string(got) != "keep me" {
 				t.Errorf("%s = %q, want it untouched", name, got)
 			}
@@ -405,6 +406,10 @@ func TestInitUsageErrors(t *testing.T) {
 	checkRunCases(t, []runCase{
 		{name: "with -f", args: []string{"-f", "tasks.md", "init"}, wantCode: 2, wantStderr: []string{"init does not take -f"}},
 		{name: "extra args", args: []string{"init", "extra"}, wantCode: 2, wantStderr: []string{"init takes no arguments"}},
+		{name: "force with extra args", args: []string{"init", "--force", "extra"}, wantCode: 2, wantStderr: []string{"init takes no arguments"}},
+		{name: "unknown init flag", args: []string{"init", "--bogus"}, wantCode: 2, wantStderr: []string{"flag provided but not defined: -bogus", "Usage: made init [--force]"}},
+		{name: "-f after init", args: []string{"init", "-f", "x"}, wantCode: 2, wantStderr: []string{"flag provided but not defined: -f"}},
+		{name: "init help", args: []string{"init", "-h"}, wantCode: 0, wantStderr: []string{"Usage: made init [--force]", "-force"}},
 	})
 	if entries, _ := os.ReadDir("."); len(entries) != 0 {
 		t.Errorf("cwd has %d entries after usage errors, want none", len(entries))
@@ -427,5 +432,118 @@ func TestInitIsReserved(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); err == nil {
 		t.Error("the user's init task ran")
+	}
+}
+
+func TestInitForceOverwrites(t *testing.T) {
+	for _, name := range madefileNames {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if name != madefileNames[0] {
+				// Probe a sibling dir: the probe file would break the entry count below.
+				requireCaseSensitiveFS(t, t.TempDir())
+			}
+			path := filepath.Join(dir, name)
+			if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			t.Chdir(dir)
+			var stdout, stderr bytes.Buffer
+			if code := run([]string{"init", "--force"}, &stdout, &stderr); code != 0 {
+				t.Fatalf("run(init --force) = %d, want 0 (stderr: %s)", code, &stderr)
+			}
+			if want := "made: overwrote " + name + "\n"; stdout.String() != want {
+				t.Errorf("stdout = %q, want %q", stdout.String(), want)
+			}
+			if got, _ := os.ReadFile(path); string(got) != madefileTemplate {
+				t.Errorf("%s = %q, want the template", name, got)
+			}
+			if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+				t.Errorf("dir has %d entries, want only %s", len(entries), name)
+			}
+		})
+	}
+}
+
+func TestInitForceWithoutExisting(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"init", "--force"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("run(init --force) = %d, want 0 (stderr: %s)", code, &stderr)
+	}
+	if got := stdout.String(); got != "made: created Madefile.md\n" {
+		t.Errorf("stdout = %q, want %q", got, "made: created Madefile.md\n")
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "Madefile.md")); string(got) != madefileTemplate {
+		t.Errorf("Madefile.md = %q, want the template", got)
+	}
+}
+
+// TestInitForceMultiple checks only the highest-priority Madefile is overwritten and
+// the others are named and left alone.
+func TestInitForceMultiple(t *testing.T) {
+	dir := t.TempDir()
+	requireCaseSensitiveFS(t, t.TempDir())
+	for _, n := range []string{"madefile.md", "Madefile.md"} {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("old "+n), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(dir)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"init", "--force"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("run(init --force) = %d, want 0 (stderr: %s)", code, &stderr)
+	}
+	if got := stdout.String(); got != "made: overwrote Madefile.md\n" {
+		t.Errorf("stdout = %q, want %q", got, "made: overwrote Madefile.md\n")
+	}
+	checkContains(t, "stderr", stderr.String(), []string{"also found madefile.md; left unchanged"}, true)
+	if got, _ := os.ReadFile("Madefile.md"); string(got) != madefileTemplate {
+		t.Errorf("Madefile.md = %q, want the template", got)
+	}
+	if got, _ := os.ReadFile("madefile.md"); string(got) != "old madefile.md" {
+		t.Errorf("madefile.md = %q, want it untouched", got)
+	}
+}
+
+// TestInitForceSkipsDirectory checks that a directory with a Madefile name is not a
+// Madefile, like findMadefile: --force overwrites the regular file made reads.
+func TestInitForceSkipsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	requireCaseSensitiveFS(t, t.TempDir())
+	mkTree(t, dir, "Madefile.md/")
+	if err := os.WriteFile(filepath.Join(dir, "madefile.md"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"init", "--force"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("run(init --force) = %d, want 0 (stderr: %s)", code, &stderr)
+	}
+	if got := stdout.String(); got != "made: overwrote madefile.md\n" {
+		t.Errorf("stdout = %q, want %q", got, "made: overwrote madefile.md\n")
+	}
+	if got, _ := os.ReadFile("madefile.md"); string(got) != madefileTemplate {
+		t.Errorf("madefile.md = %q, want the template", got)
+	}
+	if info, err := os.Stat("Madefile.md"); err != nil || !info.IsDir() {
+		t.Errorf("Madefile.md is no longer a directory (err: %v)", err)
+	}
+}
+
+// TestInitDirectoryOnly checks that a directory named Madefile.md is neither
+// overwritten nor reported as an existing Madefile.
+func TestInitDirectoryOnly(t *testing.T) {
+	dir := t.TempDir()
+	mkTree(t, dir, "Madefile.md/")
+	t.Chdir(dir)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"init", "--force"}, &stdout, &stderr); code != 1 {
+		t.Errorf("run(init --force) = %d, want 1", code)
+	}
+	checkContains(t, "stderr", stderr.String(), []string{"cannot create Madefile.md"}, true)
+	if info, err := os.Stat("Madefile.md"); err != nil || !info.IsDir() {
+		t.Errorf("Madefile.md is no longer a directory (err: %v)", err)
 	}
 }
