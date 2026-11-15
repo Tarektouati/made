@@ -547,3 +547,67 @@ func TestInitDirectoryOnly(t *testing.T) {
 		t.Errorf("Madefile.md is no longer a directory (err: %v)", err)
 	}
 }
+
+func TestCompletion(t *testing.T) {
+	checkRunCases(t, []runCase{
+		{name: "bash", args: []string{"completion", "bash"}, wantStdout: []string{"complete -o default -F _made made"}},
+		{name: "zsh", args: []string{"completion", "zsh"}, wantStdout: []string{"#compdef made"}},
+		{name: "fish", args: []string{"completion", "fish"}, wantStdout: []string{"complete -c made"}},
+		{name: "no shell", args: []string{"completion"}, wantCode: 2, wantStderr: []string{"completion takes one of: bash, zsh, fish"}},
+		{name: "unknown shell", args: []string{"completion", "pwsh"}, wantCode: 2, wantStderr: []string{"completion takes one of"}},
+		{name: "extra args", args: []string{"completion", "zsh", "extra"}, wantCode: 2, wantStderr: []string{"completion takes one of"}},
+		{name: "with -f", args: []string{"-f", "tasks.md", "completion", "zsh"}, wantCode: 2, wantStderr: []string{"completion does not take -f"}},
+		{name: "help shows usage", args: []string{"-h"}, wantStderr: []string{"made completion <bash|zsh|fish>"}, notStderr: []string{"list-names"}},
+	})
+}
+
+// TestCompletionIsReserved checks a user task named completion never runs, and that
+// made completion needs no task file.
+func TestCompletionIsReserved(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "ran")
+	content := "### completion\n```bash\ntouch " + marker + "\n```\n"
+	if err := os.WriteFile(filepath.Join(dir, "Madefile.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"completion", "bash"}, &stdout, &stderr); code != 0 {
+		t.Errorf("run(completion bash) = %d, want 0 (stderr: %s)", code, &stderr)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the user's completion task ran")
+	}
+}
+
+func TestListNames(t *testing.T) {
+	f := writeRunTasks(t)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-f", f, "--list-names"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("run(--list-names) = %d, want 0 (stderr: %s)", code, &stderr)
+	}
+	want := "hello\tSay hello.\ncheck\t\ncheckdash\t\n"
+	if got := stdout.String(); got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want empty", &stderr)
+	}
+}
+
+// TestListNamesSkipsDuplicateNote keeps stdout and stderr clean for completion
+// scripts when several Madefile names exist.
+func TestListNamesSkipsDuplicateNote(t *testing.T) {
+	requireCaseSensitiveFS(t, t.TempDir())
+	dir := t.TempDir()
+	for _, name := range []string{"Madefile.md", "madefile.md"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(runTasksMD), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(dir)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--list-names"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
+		t.Errorf("run(--list-names) = %d, stderr %q; want 0 and empty", code, &stderr)
+	}
+}
