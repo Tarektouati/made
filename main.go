@@ -47,7 +47,8 @@ const madefileTemplate = "# Tasks\n\n" +
 	"echo hello\n" +
 	"```\n"
 
-// version is set at release time via -ldflags "-X main.version=<tag>".
+// version is set at release time via -ldflags "-X main.version=<version>", with or
+// without the leading "v".
 var version = ""
 
 // resolveVersion reports the build version: the ldflags-injected value if present,
@@ -55,13 +56,22 @@ var version = ""
 // falling back to "dev" for local builds.
 func resolveVersion() string {
 	if version != "" {
-		return version
+		return normalizeVersion(version)
 	}
 	if info, ok := debug.ReadBuildInfo(); ok &&
 		info.Main.Version != "" && info.Main.Version != "(devel)" {
-		return info.Main.Version
+		return normalizeVersion(info.Main.Version)
 	}
 	return "dev"
+}
+
+// normalizeVersion gives ldflags and build-info versions one format: a leading "v"
+// before a numeric version (goreleaser strips it from .Version; Go module versions keep it).
+func normalizeVersion(v string) string {
+	if v != "" && v[0] >= '0' && v[0] <= '9' {
+		return "v" + v
+	}
+	return v
 }
 
 func main() {
