@@ -231,7 +231,10 @@ Only top-level blocks count: code inside lists or blockquotes is never a task.
 -c <script>`, `node -e <script>`, …). The interpreter inherits `made`'s stdin,
 stdout, stderr, and environment — nothing is written to a temporary file. The
 strict-mode options are passed to the shell rather than prepended to the script,
-so line numbers in error messages match the code block.
+so line numbers in error messages match the code block. A script whose first
+character is `-` or `+` gets a single leading space prepended (except for `python`, where
+that would be an indentation error), so the interpreter doesn't read it as an
+option; line numbers are unaffected.
 
 **Working directory.** A task runs in the directory that contains its task file,
 not in the directory `made` was started from. Relative paths in a script

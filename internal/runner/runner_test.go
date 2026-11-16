@@ -235,6 +235,60 @@ func TestRunShellDollarZero(t *testing.T) {
 	}
 }
 
+func TestInlineScript(t *testing.T) {
+	tests := []struct{ lang, script, want string }{
+		{"bash", "-x", " -x"},
+		{"bash", "+x", " +x"},
+		{"node", "-1", " -1"},
+		{"python", "-1", "-1"},
+		{"python3", "+1", "+1"},
+		{"bash", "echo -x", "echo -x"},
+		{"bash", " -x", " -x"},
+		{"bash", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s/%q", tt.lang, tt.script), func(t *testing.T) {
+			if got := inlineScript(interpreters[tt.lang], tt.script); got != tt.want {
+				t.Errorf("inlineScript(%q) = %q, want %q", tt.script, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunScriptLeadingDash(t *testing.T) {
+	// Each script exits 42 only if it ran as a script rather than being parsed as an
+	// interpreter option.
+	shellScript := "-x 2>/dev/null || exit 42"
+	for _, tc := range []struct {
+		name, lang, bin, script string
+		want                    int
+	}{
+		{"plain", "", "bash", shellScript, 42},
+		{"bash", "bash", "bash", shellScript, 42},
+		{"sh", "sh", "sh", shellScript, 42},
+		{"zsh", "zsh", "zsh", shellScript, 42},
+		{"bash plus", "bash", "bash", "+x 2>/dev/null || exit 42", 42},
+		{"sh plus", "sh", "sh", "+x 2>/dev/null || exit 42", 42},
+		{"zsh plus", "zsh", "zsh", "+x 2>/dev/null || exit 42", 42},
+		{"node plus", "node", "node", "+process.exit(42)", 42},
+		{"fish", "fish", "fish", "-x 2>/dev/null; or exit 42", 42},
+		{"node", "node", "node", "-process.exit(42)", 42},
+		{"ruby", "ruby", "ruby", "-1; exit 42", 42},
+		{"perl", "perl", "perl", "-1; exit 42", 42},
+		{"python", "python", "python3", "-1\nimport sys; sys.exit(42)", 42},
+		// The padding must not shift line numbers. (bash 3.2 always reports $LINENO as 1
+		// under -c, so zsh and node check this.)
+		{"zsh line numbers", "zsh", "zsh", "-x 2>/dev/null || true\nexit $LINENO", 2},
+		{"node line numbers", "node", "node", "-1\nprocess.exit(40 + +new Error().stack.match(/\\[eval\\]:(\\d+)/)[1])", 42},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requireCmd(t, tc.bin)
+			err := Run(context.Background(), parser.Task{Name: "x", Lang: tc.lang, Script: tc.script}, "", nil)
+			wantExitCode(t, err, tc.want)
+		})
+	}
+}
+
 func TestRunNoArgsSeparatorNotPassed(t *testing.T) {
 	// The "--" separator is always appended; with no task arguments it must not show
 	// up as an argument itself.

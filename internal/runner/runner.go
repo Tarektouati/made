@@ -54,6 +54,9 @@ type interpreter struct {
 	// perl) and would otherwise take dash-prefixed arguments as their own options. python
 	// needs none: -c ends its option parsing.
 	argSep []string
+	// noPad disables the leading space inlineScript adds to a script starting with "-"
+	// or "+", for interpreters where leading whitespace is significant (python).
+	noPad bool
 }
 
 // Strict-mode options for shell interpreters, so a multi-line task stops at the first
@@ -79,19 +82,19 @@ var (
 // fence keeps working. fish has no errexit option and non-shell interpreters already
 // fail on an uncaught error, so only bash, sh, and zsh get strict-mode options.
 var interpreters = map[string]interpreter{
-	"":           {"bash", strictPipefail, "-c", shellSep},
-	"bash":       {"bash", strictPipefail, "-c", shellSep},
-	"sh":         {"sh", strictPOSIX, "-c", shellSep},
-	"shell":      {"bash", strictPipefail, "-c", shellSep},
-	"zsh":        {"zsh", strictPipefail, "-c", shellSep},
-	"fish":       {"fish", nil, "-c", endOfOpts},
-	"python":     {"python3", nil, "-c", nil},
-	"python3":    {"python3", nil, "-c", nil},
-	"node":       {"node", nil, "-e", endOfOpts},
-	"js":         {"node", nil, "-e", endOfOpts},
-	"javascript": {"node", nil, "-e", endOfOpts},
-	"ruby":       {"ruby", nil, "-e", endOfOpts},
-	"perl":       {"perl", nil, "-e", endOfOpts},
+	"":           {"bash", strictPipefail, "-c", shellSep, false},
+	"bash":       {"bash", strictPipefail, "-c", shellSep, false},
+	"sh":         {"sh", strictPOSIX, "-c", shellSep, false},
+	"shell":      {"bash", strictPipefail, "-c", shellSep, false},
+	"zsh":        {"zsh", strictPipefail, "-c", shellSep, false},
+	"fish":       {"fish", nil, "-c", endOfOpts, false},
+	"python":     {"python3", nil, "-c", nil, true},
+	"python3":    {"python3", nil, "-c", nil, true},
+	"node":       {"node", nil, "-e", endOfOpts, false},
+	"js":         {"node", nil, "-e", endOfOpts, false},
+	"javascript": {"node", nil, "-e", endOfOpts, false},
+	"ruby":       {"ruby", nil, "-e", endOfOpts, false},
+	"perl":       {"perl", nil, "-e", endOfOpts, false},
 }
 
 // Run executes the task's script with the interpreter chosen by the code-fence
@@ -124,7 +127,7 @@ func Run(ctx context.Context, t parser.Task, dir string, args []string) error {
 		return fmt.Errorf("unsupported language %q; supported: %s", t.Lang, supportedLanguages())
 	}
 
-	argv := append(slices.Clone(in.opts), in.flag, t.Script)
+	argv := append(slices.Clone(in.opts), in.flag, inlineScript(in, t.Script))
 	argv = append(argv, in.argSep...)
 	argv = append(argv, args...)
 	cmd := exec.CommandContext(ctx, in.cmd, argv...)
@@ -179,6 +182,16 @@ func awaitSurvivors(cmd *exec.Cmd, td *teardown, deadline <-chan time.Time) {
 		case <-time.After(survivorPoll):
 		}
 	}
+}
+
+// inlineScript returns the script as passed after the interpreter's inline flag. A
+// script starting with "-" or "+" gets a leading space so the interpreter doesn't parse
+// it as an option (shells read both as option prefixes), unless in.noPad is set.
+func inlineScript(in interpreter, script string) string {
+	if !in.noPad && (strings.HasPrefix(script, "-") || strings.HasPrefix(script, "+")) {
+		return " " + script
+	}
+	return script
 }
 
 // supportedLanguages returns the named languages, sorted, for error messages; the
