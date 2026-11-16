@@ -126,6 +126,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	// -f with an empty value would otherwise look like no -f at all and fall back to
+	// discovery, so an unset shell variable could silently select another file.
+	fileSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "f" || f.Name == "file" {
+			fileSet = true
+		}
+	})
+	if fileSet && file == "" {
+		fmt.Fprintln(stderr, "made: -f requires a non-empty file name")
+		return 2
+	}
+
 	if showVersion {
 		fmt.Fprintln(stdout, "made", resolveVersion())
 		return 0

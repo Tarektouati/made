@@ -180,6 +180,21 @@ func TestRunRejectsDeepNesting(t *testing.T) {
 	})
 }
 
+// TestRunEmptyFileFlag checks that -f with an empty value is a usage error instead
+// of silently falling back to file discovery.
+func TestRunEmptyFileFlag(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "Madefile.md"), []byte(runTasksMD), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	checkRunCases(t, []runCase{
+		{name: "-f", args: []string{"-f", "", "-l"}, wantCode: 2, wantStderr: []string{"-f requires a non-empty file name"}, notStdout: []string{"Tasks in"}},
+		{name: "-file", args: []string{"-file", "", "-l"}, wantCode: 2, wantStderr: []string{"-f requires a non-empty file name"}, notStdout: []string{"Tasks in"}},
+	})
+}
+
 // TestRunTaskArgs runs real bash tasks to check what reaches the script. notStderr
 // rules out a runner error (for example a missing interpreter), which also exits 1.
 func TestRunTaskArgs(t *testing.T) {
