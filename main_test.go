@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -326,31 +327,32 @@ func requireCaseSensitiveFS(t *testing.T, dir string) {
 func TestFindMadefile(t *testing.T) {
 	// Every tree has .git at its root so the walk never leaves the temp dir.
 	tests := []struct {
-		name     string
-		paths    []string
-		start    string // relative to the temp root
-		wantDir  string // relative to the temp root
-		wantName string
-		wantOK   bool
+		name        string
+		paths       []string
+		start       string // relative to the temp root
+		wantDir     string // relative to the temp root
+		wantName    string
+		wantOK      bool
+		wantSkipped []string // relative to the temp root
 	}{
-		{"in start", []string{".git/", "Madefile.md"}, ".", ".", "Madefile.md", true},
-		{"in ancestor", []string{".git/", "Madefile.md", "a/b/"}, "a/b", ".", "Madefile.md", true},
-		{"nearest wins", []string{".git/", "Madefile.md", "a/Madefile.md", "a/b/"}, "a/b", "a", "Madefile.md", true},
-		{"lowercase name", []string{".git/", "a/madefile.md"}, "a", "a", "madefile.md", true},
-		{"uppercase name", []string{".git/", "a/MADEFILE.md"}, "a", "a", "MADEFILE.md", true},
-		{"other case is not a match", []string{".git/", "MadeFile.md"}, ".", "", "", false},
-		{"README is ignored", []string{".git/", "README.md"}, ".", "", "", false},
-		{"directory named Madefile.md is skipped", []string{".git/", "Madefile.md", "a/Madefile.md/"}, "a", ".", "Madefile.md", true},
-		{"stops at .git directory", []string{"Madefile.md", "repo/.git/", "repo/sub/"}, "repo/sub", "", "", false},
-		{"stops at .git file", []string{"Madefile.md", "repo/.git", "repo/sub/"}, "repo/sub", "", "", false},
-		{"boundary dir is checked", []string{"Madefile.md", "repo/.git/", "repo/Madefile.md", "repo/sub/"}, "repo/sub", "repo", "Madefile.md", true},
-		{"not found", []string{".git/", "a/b/"}, "a/b", "", "", false},
+		{"in start", []string{".git/", "Madefile.md"}, ".", ".", "Madefile.md", true, nil},
+		{"in ancestor", []string{".git/", "Madefile.md", "a/b/"}, "a/b", ".", "Madefile.md", true, nil},
+		{"nearest wins", []string{".git/", "Madefile.md", "a/Madefile.md", "a/b/"}, "a/b", "a", "Madefile.md", true, nil},
+		{"lowercase name", []string{".git/", "a/madefile.md"}, "a", "a", "madefile.md", true, nil},
+		{"uppercase name", []string{".git/", "a/MADEFILE.md"}, "a", "a", "MADEFILE.md", true, nil},
+		{"other case is not a match", []string{".git/", "MadeFile.md"}, ".", "", "", false, nil},
+		{"README is ignored", []string{".git/", "README.md"}, ".", "", "", false, nil},
+		{"directory named Madefile.md is skipped", []string{".git/", "Madefile.md", "a/Madefile.md/"}, "a", ".", "Madefile.md", true, []string{"a/Madefile.md"}},
+		{"stops at .git directory", []string{"Madefile.md", "repo/.git/", "repo/sub/"}, "repo/sub", "", "", false, nil},
+		{"stops at .git file", []string{"Madefile.md", "repo/.git", "repo/sub/"}, "repo/sub", "", "", false, nil},
+		{"boundary dir is checked", []string{"Madefile.md", "repo/.git/", "repo/Madefile.md", "repo/sub/"}, "repo/sub", "repo", "Madefile.md", true, nil},
+		{"not found", []string{".git/", "a/b/"}, "a/b", "", "", false, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
 			mkTree(t, root, tt.paths...)
-			dir, name, others, ok := findMadefile(filepath.Join(root, filepath.FromSlash(tt.start)))
+			dir, name, others, skipped, ok := findMadefile(filepath.Join(root, filepath.FromSlash(tt.start)))
 			wantDir := ""
 			if tt.wantOK {
 				wantDir = filepath.Join(root, filepath.FromSlash(tt.wantDir))
@@ -359,7 +361,94 @@ func TestFindMadefile(t *testing.T) {
 				t.Errorf("findMadefile = (%q, %q, %q, %v), want (%q, %q, [], %v)",
 					dir, name, others, ok, wantDir, tt.wantName, tt.wantOK)
 			}
+			var gotSkipped, wantSkipped []string
+			for _, s := range skipped {
+				gotSkipped = append(gotSkipped, s.path)
+			}
+			for _, p := range tt.wantSkipped {
+				wantSkipped = append(wantSkipped, filepath.Join(root, filepath.FromSlash(p)))
+			}
+			if !slices.Equal(gotSkipped, wantSkipped) {
+				t.Errorf("findMadefile skipped = %q, want %q", gotSkipped, wantSkipped)
+			}
 		})
+	}
+}
+
+func TestFindMadefileSkipsUnusable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks and FIFOs need Unix")
+	}
+	tests := []struct {
+		name       string
+		rootFile   bool                         // root holds a valid Madefile.md
+		bad        func(t *testing.T, a string) // makes a/Madefile.md unusable
+		wantPath   string                       // the skipped path, relative to a
+		wantReason string
+	}{
+		{"symlink loop", true, func(t *testing.T, a string) {
+			mkSymlink(t, "Madefile.md", filepath.Join(a, "Madefile.md"))
+		}, "Madefile.md", "too many levels"},
+		{"broken symlink", true, func(t *testing.T, a string) {
+			mkSymlink(t, "missing.md", filepath.Join(a, "Madefile.md"))
+		}, "Madefile.md", "broken symlink to missing.md"},
+		{"unsearchable directory", true, func(t *testing.T, a string) {
+			mkTree(t, a, "Madefile.md")
+			chmodDir(t, a, 0o644)
+		}, "Madefile.md", "permission denied"},
+		{"unlistable directory", true, func(t *testing.T, a string) {
+			mkTree(t, a, "Madefile.md")
+			chmodDir(t, a, 0o311)
+		}, ".", "permission denied"},
+		{"fifo", true, func(t *testing.T, a string) {
+			mkFIFO(t, filepath.Join(a, "Madefile.md"))
+		}, "Madefile.md", "not a regular file"},
+		{"no fallback", false, func(t *testing.T, a string) {
+			mkSymlink(t, "missing.md", filepath.Join(a, "Madefile.md"))
+		}, "Madefile.md", "broken symlink to missing.md"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			mkTree(t, root, ".git/", "a/")
+			if tt.rootFile {
+				mkTree(t, root, "Madefile.md")
+			}
+			a := filepath.Join(root, "a")
+			tt.bad(t, a)
+			dir, name, _, skipped, ok := findMadefile(a)
+			if tt.rootFile && (!ok || dir != root || name != "Madefile.md") {
+				t.Errorf("findMadefile = (%q, %q, %v), want (%q, %q, true)", dir, name, ok, root, "Madefile.md")
+			}
+			if !tt.rootFile && ok {
+				t.Errorf("findMadefile = (%q, %q, true), want not found", dir, name)
+			}
+			wantPath := filepath.Join(a, tt.wantPath)
+			if len(skipped) != 1 || skipped[0].path != wantPath || !strings.Contains(skipped[0].err.Error(), tt.wantReason) {
+				t.Errorf("findMadefile skipped = %+v, want one entry for %q containing %q", skipped, wantPath, tt.wantReason)
+			}
+		})
+	}
+}
+
+// chmodDir sets dir's mode for the test and restores 0755 afterwards so t.TempDir
+// can be removed. It skips the test as root, which ignores directory permissions.
+func chmodDir(t *testing.T, dir string, mode os.FileMode) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	if err := os.Chmod(dir, mode); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+}
+
+// mkSymlink creates a symlink at link pointing to target.
+func mkSymlink(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -368,7 +457,7 @@ func TestFindMadefile(t *testing.T) {
 func TestFindMadefileWalksToRoot(t *testing.T) {
 	root := t.TempDir()
 	mkTree(t, root, "Madefile.md", "a/b/c/")
-	dir, name, _, ok := findMadefile(filepath.Join(root, "a", "b", "c"))
+	dir, name, _, _, ok := findMadefile(filepath.Join(root, "a", "b", "c"))
 	if !ok || dir != root || name != "Madefile.md" {
 		t.Errorf("findMadefile = (%q, %q, %v), want (%q, %q, true)", dir, name, ok, root, "Madefile.md")
 	}
@@ -389,7 +478,7 @@ func TestFindMadefilePriority(t *testing.T) {
 			root := t.TempDir()
 			requireCaseSensitiveFS(t, root)
 			mkTree(t, root, append([]string{".git/"}, tt.paths...)...)
-			_, name, others, ok := findMadefile(root)
+			_, name, others, _, ok := findMadefile(root)
 			if !ok || name != tt.wantName || strings.Join(others, ",") != strings.Join(tt.wantOthers, ",") {
 				t.Errorf("findMadefile = (%q, %q, %v), want (%q, %q, true)", name, others, ok, tt.wantName, tt.wantOthers)
 			}
@@ -424,21 +513,6 @@ func TestIsRegularFile(t *testing.T) {
 	}
 }
 
-func TestFindMadefileSkipsFIFO(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("FIFOs are not supported on Windows")
-	}
-	root := t.TempDir()
-	mkTree(t, root, ".git/", "Madefile.md", "a/b/")
-	mkFIFO(t, filepath.Join(root, "a", "Madefile.md"))
-	dir, name, others, ok := findMadefile(filepath.Join(root, "a", "b"))
-	wantDir := filepath.Join(root)
-	if !ok || dir != wantDir || name != "Madefile.md" || len(others) != 0 {
-		t.Errorf("findMadefile = (%q, %q, %q, %v), want (%q, %q, [], true)",
-			dir, name, others, ok, wantDir, "Madefile.md")
-	}
-}
-
 func TestRunSkipsFIFOForDiscovery(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("FIFOs are not supported on Windows")
@@ -453,7 +527,7 @@ func TestRunSkipsFIFOForDiscovery(t *testing.T) {
 		if code != 1 {
 			t.Errorf("run(-l) = %d, want 1", code)
 		}
-		checkContains(t, "stderr", stderr.String(), []string{"no Madefile.md found"}, true)
+		checkContains(t, "stderr", stderr.String(), []string{"made: skipping ", "no Madefile.md found"}, true)
 	})
 	t.Run("fifo in subdir parent wins", func(t *testing.T) {
 		dir := t.TempDir()
@@ -470,7 +544,43 @@ func TestRunSkipsFIFOForDiscovery(t *testing.T) {
 			t.Fatalf("run(-l) = %d, want 0 (stderr: %s)", code, stderr.String())
 		}
 		checkContains(t, "stdout", stdout.String(), []string{"hello"}, true)
+		checkContains(t, "stderr", stderr.String(), []string{"made: skipping "}, true)
 	})
+}
+
+func TestRunWarnsOnUnusableMadefile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need Unix")
+	}
+	tests := []struct {
+		name     string
+		parent   bool // a valid Madefile.md one level up
+		wantCode int
+		wantErr  []string
+	}{
+		{"only candidate", false, 1, []string{"made: skipping ", "no Madefile.md found"}},
+		{"parent used", true, 0, []string{"made: skipping ", "made: using "}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			mkTree(t, dir, ".git/", "sub/")
+			if tt.parent {
+				content := "# Tasks\n\n### hello\n```bash\necho hi\n```\n"
+				if err := os.WriteFile(filepath.Join(dir, "Madefile.md"), []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			mkSymlink(t, "missing.md", filepath.Join(dir, "sub", "Madefile.md"))
+			t.Chdir(filepath.Join(dir, "sub"))
+			var stdout, stderr bytes.Buffer
+			code := run([]string{"hello"}, &stdout, &stderr)
+			if code != tt.wantCode {
+				t.Errorf("run(hello) = %d, want %d (stderr: %s)", code, tt.wantCode, stderr.String())
+			}
+			checkContains(t, "stderr", stderr.String(), tt.wantErr, true)
+		})
+	}
 }
 
 func TestRunRejectsNonRegularExplicitFile(t *testing.T) {
@@ -543,12 +653,53 @@ func TestResolveFileFromParent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveFile: %v", err)
 	}
-	// Compare against the parent of the real cwd: t.TempDir may sit behind a symlink
-	// (/var -> /private/var on macOS) that os.Getwd resolves.
-	cwd, _ := os.Getwd()
-	want := filepath.Join(filepath.Dir(cwd), "Madefile.md")
+	// t.TempDir may sit behind a symlink (/var -> /private/var on macOS) that
+	// resolveFile resolves.
+	physical, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(physical, "Madefile.md")
 	if got.path != want || !got.fromParent {
 		t.Errorf("resolveFile = %+v, want path %q, fromParent true", got, want)
+	}
+}
+
+func TestResolveFileThroughSymlinkedCwd(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need Unix")
+	}
+	tests := []struct {
+		name           string
+		target         string // of sd/link, relative to sd
+		wantFromParent bool
+	}{
+		{"link below the Madefile", "real/deep", true},
+		{"link to the Madefile's directory", "real", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			mkTree(t, root, ".git/", "sd/real/Madefile.md", "sd/real/deep/")
+			link := filepath.Join(root, "sd", "link")
+			mkSymlink(t, filepath.FromSlash(tt.target), link)
+			t.Chdir(link) // sets $PWD to the logical path, like a shell's cd
+			got, err := resolveFile("")
+			if err != nil {
+				t.Fatalf("resolveFile: %v", err)
+			}
+			want := "Madefile.md"
+			if tt.wantFromParent {
+				physical, err := filepath.EvalSymlinks(filepath.Join(root, "sd", "real"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				want = filepath.Join(physical, "Madefile.md")
+			}
+			if got.path != want || got.fromParent != tt.wantFromParent {
+				t.Errorf("resolveFile = %+v, want path %q, fromParent %v", got, want, tt.wantFromParent)
+			}
+		})
 	}
 }
 
@@ -574,11 +725,40 @@ func TestResolveFileNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("resolveFile: want error, got nil")
 	}
-	cwd, _ := os.Getwd()
-	for _, want := range []string{"no Madefile.md found in " + cwd + " or its parents", "use -f", "made init"} {
+	physical, err2 := filepath.EvalSymlinks(dir)
+	if err2 != nil {
+		t.Fatal(err2)
+	}
+	for _, want := range []string{"no Madefile.md found in " + physical + " or its parents", "use -f", "made init"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("err = %q, want it to contain %q", err, want)
 		}
+	}
+}
+
+// TestResolveFileNotFoundThroughSymlinkedCwd checks the error names the directory the
+// search started from, not the symlink the shell cd'd through: the Madefile next to
+// the link must not be found, and the message must not point there.
+func TestResolveFileNotFoundThroughSymlinkedCwd(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need Unix")
+	}
+	root := t.TempDir()
+	mkTree(t, root, "sd/Madefile.md", "other/.git/", "other/real/deep/")
+	link := filepath.Join(root, "sd", "link")
+	mkSymlink(t, filepath.Join("..", "other", "real", "deep"), link)
+	t.Chdir(link)
+	_, err := resolveFile("")
+	if err == nil {
+		t.Fatal("resolveFile: want error, got nil")
+	}
+	physical, err2 := filepath.EvalSymlinks(filepath.Join(root, "other", "real", "deep"))
+	if err2 != nil {
+		t.Fatal(err2)
+	}
+	want := "no Madefile.md found in " + physical + " or its parents"
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("err = %q, want it to contain %q", err, want)
 	}
 }
 

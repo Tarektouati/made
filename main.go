@@ -13,6 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -199,6 +200,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	res, err := resolveFile(file)
+	for _, s := range res.skipped {
+		fmt.Fprintf(stderr, "made: skipping %s: %v\n", s.path, s.err)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "made: %v\n", err)
 		return 1
@@ -409,11 +413,20 @@ type resolved struct {
 	path       string   // path to read; a bare name when found in the current directory
 	fromParent bool     // discovered in a parent of the current directory
 	others     []string // other Madefile names found in the same directory, by priority
+	skipped    []skippedMadefile
+}
+
+// skippedMadefile is a Madefile name present in a directory that could not be used.
+type skippedMadefile struct {
+	path string
+	err  error
 }
 
 // resolveFile returns the task file to read. A non-empty file (given with -f) is used
 // as is. Otherwise the nearest Madefile in the current directory or one of its parents
-// is used (see findMadefile); if there is none, resolveFile returns an error.
+// is used (see findMadefile); if there is none, resolveFile returns an error. The walk
+// starts from the physical current directory, with symlinks resolved. Unusable
+// candidates are reported in skipped, also alongside the not-found error.
 func resolveFile(file string) (resolved, error) {
 	if file != "" {
 		return resolved{path: file}, nil
@@ -422,16 +435,19 @@ func resolveFile(file string) (resolved, error) {
 	if err != nil {
 		return resolved{}, fmt.Errorf("cannot determine current directory: %w", err)
 	}
-	dir, name, others, ok := findMadefile(cwd)
-	if !ok {
-		return resolved{}, fmt.Errorf("no %s found in %s or its parents (use -f to choose a file, or made init to create one)", madefileNames[0], cwd)
+	start := cwd
+	if physical, err := filepath.EvalSymlinks(cwd); err == nil {
+		start = physical
 	}
-	res := resolved{path: name} // keep the short name when it's right here
-	if dir != cwd {
+	dir, name, others, skipped, ok := findMadefile(start)
+	if !ok {
+		return resolved{skipped: skipped}, fmt.Errorf("no %s found in %s or its parents (use -f to choose a file, or made init to create one)", madefileNames[0], start)
+	}
+	res := resolved{path: name, others: others, skipped: skipped} // keep the short name when it's right here
+	if dir != start {
 		res.path = filepath.Join(dir, name)
 		res.fromParent = true
 	}
-	res.others = others
 	return res, nil
 }
 
@@ -439,12 +455,17 @@ func resolveFile(file string) (resolved, error) {
 // regular file named exactly like one of madefileNames, with the highest-priority
 // name found and any other matching names in that directory. The walk stops after
 // the first directory containing a .git entry (a directory, or a file for worktrees
-// and submodules), otherwise at the filesystem root. A directory that cannot be
-// read counts as having no Madefile.
-func findMadefile(start string) (dir, name string, others []string, ok bool) {
+// and submodules), otherwise at the filesystem root. Names that are present but
+// unusable (broken or looping symlinks, non-regular files, permission errors), and
+// directories that exist but cannot be listed, are returned in skipped, nearest
+// first, and the walk goes on.
+func findMadefile(start string) (dir, name string, others []string, skipped []skippedMadefile, ok bool) {
 	for dir = start; ; {
 		entries, err := os.ReadDir(dir)
 		boundary := false
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			skipped = append(skipped, skippedMadefile{dir, pathErrReason(err)})
+		}
 		if err == nil {
 			present := map[string]bool{}
 			for _, e := range entries {
@@ -452,7 +473,11 @@ func findMadefile(start string) (dir, name string, others []string, ok bool) {
 			}
 			boundary = present[".git"]
 			for _, n := range madefileNames {
-				if !present[n] || !isRegularFile(filepath.Join(dir, n)) {
+				if !present[n] {
+					continue
+				}
+				if err := checkMadefile(filepath.Join(dir, n)); err != nil {
+					skipped = append(skipped, skippedMadefile{filepath.Join(dir, n), err})
 					continue
 				}
 				if name == "" {
@@ -462,12 +487,12 @@ func findMadefile(start string) (dir, name string, others []string, ok bool) {
 				}
 			}
 			if name != "" {
-				return dir, name, others, true
+				return dir, name, others, skipped, true
 			}
 		}
 		parent := filepath.Dir(dir)
 		if boundary || parent == dir {
-			return "", "", nil, false
+			return "", "", nil, skipped, false
 		}
 		dir = parent
 	}
@@ -493,6 +518,37 @@ func readMadefile(path string) ([]byte, error) {
 func isRegularFile(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Mode().IsRegular()
+}
+
+// errNotRegular is checkMadefile's reason for an existing path that is not a regular file.
+var errNotRegular = errors.New("not a regular file")
+
+// checkMadefile returns nil if path is a regular file (following symlinks), otherwise
+// the reason it cannot be used, without the path.
+func checkMadefile(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			if target, lerr := os.Readlink(path); lerr == nil {
+				return fmt.Errorf("broken symlink to %s", target)
+			}
+		}
+		return pathErrReason(err)
+	}
+	if !info.Mode().IsRegular() {
+		return errNotRegular
+	}
+	return nil
+}
+
+// pathErrReason returns the error inside a *fs.PathError, dropping the operation
+// and path, or err itself otherwise.
+func pathErrReason(err error) error {
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) {
+		return pathErr.Err
+	}
+	return err
 }
 
 // isSymlink reports whether path exists and is a symlink (does not follow the link).

@@ -21,7 +21,7 @@ func BenchmarkFindUp(b *testing.B) {
 		b.Fatal(err)
 	}
 	for b.Loop() {
-		if _, _, _, ok := findMadefile(deep); !ok {
+		if _, _, _, _, ok := findMadefile(deep); !ok {
 			b.Fatal("Madefile not found")
 		}
 	}
