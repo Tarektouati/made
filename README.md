@@ -268,15 +268,26 @@ run time.
 **Working directory.** A task runs in the directory that contains its task file,
 not in the directory `made` was started from. Relative paths in a script
 therefore resolve the same way wherever you invoke `made`:
-`made -f tools/tasks.md build` runs `build` inside `tools/`. Pass `--no-chdir` to
-run the task in the current directory instead.
+`made -f tools/tasks.md build` runs `build` inside `tools/`. That is the directory
+where the file was found (or the directory of the `-f` path as written): if the
+Madefile is a symlink, the task runs next to the link, not in the directory of
+its target. Pass `--no-chdir` to run the task in the current directory instead.
 
 **Finding the task file.** Without `-f`, `made` looks for a file named
 `Madefile.md`, `madefile.md`, or `MADEFILE.md` — matched exactly, so macOS and
 Linux agree — in the current directory and then in each parent directory, and
 uses the first directory that has one. If a directory holds more than one of these
 names, `made` uses the first in that order and says so on stderr (`made: using
-Madefile.md (also found madefile.md)`).
+Madefile.md (also found madefile.md)`). A name that is present but cannot be used
+(a broken symlink, a symlink loop, something other than a regular file, or a
+permission error) is skipped with a warning such as `made: skipping
+/path/Madefile.md: broken symlink to missing.md`, and the search goes on. A
+directory that exists but cannot be listed is reported the same way.
+
+The search starts from the physical current directory, with symlinks resolved
+like `pwd -P` and `git` do. After `cd`-ing into a symlinked directory, `made`
+therefore walks the parents of the link's target, not of the link, and both
+`made: using <path>` and the not-found error show the resolved path.
 
 The search stops after the first directory containing a `.git` entry (a
 directory, or a file in worktrees and submodules), so it never leaves the
