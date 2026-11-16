@@ -50,6 +50,36 @@ func TestRunNormalizesLanguage(t *testing.T) {
 	}
 }
 
+// sigCause is a cancellation cause that reports a signal through a Signal method.
+type sigCause struct{ sig os.Signal }
+
+func (c sigCause) Error() string     { return c.sig.String() }
+func (c sigCause) Signal() os.Signal { return c.sig }
+
+func TestCancelSignal(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		cause error // nil: plain cancel
+		want  os.Signal
+	}{
+		{"plain cancel", nil, nil},
+		{"signal cause", sigCause{os.Interrupt}, os.Interrupt},
+		{"wrapped signal cause", fmt.Errorf("stopping: %w", sigCause{os.Kill}), os.Kill},
+		{"cause without a signal", errors.New("deadline"), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancelCause(context.Background())
+			cancel(tc.cause)
+			if got := cancelSignal(ctx); got != tc.want {
+				t.Errorf("cancelSignal = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	if got := cancelSignal(context.Background()); got != nil {
+		t.Errorf("cancelSignal(uncancelled) = %v, want nil", got)
+	}
+}
+
 // requireCmd skips the test when name is not on PATH.
 func requireCmd(t *testing.T, name string) {
 	t.Helper()
