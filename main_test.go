@@ -842,3 +842,68 @@ func TestListNamesSkipsDuplicateNote(t *testing.T) {
 		t.Errorf("run(--list-names) = %d, stderr %q; want 0 and empty", code, &stderr)
 	}
 }
+
+func TestSanitizeDisplay(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "plain", in: "hello", want: "hello"},
+		{name: "csi clear", in: "a\x1b[2Jb", want: "a[2Jb"},
+		{name: "osc title", in: "\x1b]0;evil\x07title", want: "]0;eviltitle"},
+		{name: "tab", in: "a\tb", want: "ab"},
+		{name: "newline", in: "a\nb", want: "ab"},
+		{name: "del", in: "a\x7fb", want: "ab"},
+		{name: "c1 csi", in: "a\u009b2Jb", want: "a2Jb"},
+		{name: "unicode", in: "保留", want: "保留"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := sanitizeDisplay(tt.in); got != tt.want {
+				t.Errorf("sanitizeDisplay(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// controlCharsTasksMD has escape sequences in the task heading and description.
+const controlCharsTasksMD = "### evil\x1b[2J\n\x1b]0;pwned\x07note\n```bash\ntrue\n```\n"
+
+func TestPrintTasksStripsControlChars(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.md")
+	if err := os.WriteFile(path, []byte(controlCharsTasksMD), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{name: "default list", args: []string{"-f", path}},
+		{name: "list flag", args: []string{"-f", path, "-l"}},
+		{name: "list-names", args: []string{"-f", path, "--list-names"}},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := run(tt.args, &stdout, &stderr); code != 0 {
+				t.Fatalf("run(%v) = %d, want 0 (stderr: %s)", tt.args, code, &stderr)
+			}
+			out := stdout.String()
+			if strings.Contains(out, "\x1b") {
+				t.Errorf("stdout contains ESC: %q", out)
+			}
+			if strings.Contains(out, "\x07") {
+				t.Errorf("stdout contains BEL: %q", out)
+			}
+			if !strings.Contains(out, "evil") {
+				t.Errorf("stdout = %q, want visible task name", out)
+			}
+			if stderr.Len() != 0 {
+				t.Errorf("stderr = %q, want empty", &stderr)
+			}
+		})
+	}
+}
