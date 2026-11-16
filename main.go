@@ -132,6 +132,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "made: init does not take -f; it creates %s in the current directory\n", madefileNames[0])
 			return 2
 		}
+		if f := firstSetFlag(fs, "f", "file"); f != "" {
+			fmt.Fprintf(stderr, "made: init does not take %s\n", f)
+			return 2
+		}
 		var force bool
 		ifs := flag.NewFlagSet("made init", flag.ContinueOnError)
 		ifs.SetOutput(stderr)
@@ -158,6 +162,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if fs.NArg() > 0 && fs.Arg(0) == "completion" {
 		if file != "" {
 			fmt.Fprintln(stderr, "made: completion does not take -f")
+			return 2
+		}
+		if f := firstSetFlag(fs, "f", "file"); f != "" {
+			fmt.Fprintf(stderr, "made: completion does not take %s\n", f)
 			return 2
 		}
 		var script []byte
@@ -533,4 +541,21 @@ func printVisibleDefaults(fs *flag.FlagSet, w io.Writer, hidden ...string) {
 		visible.Lookup(f.Name).DefValue = f.DefValue // f.Value may hold a parsed value
 	})
 	visible.PrintDefaults()
+}
+
+// firstSetFlag returns the first flag set on fs's command line, written as "-x" or
+// "--name", skipping the names in except; it returns "" if there is none.
+func firstSetFlag(fs *flag.FlagSet, except ...string) string {
+	var name string
+	fs.Visit(func(f *flag.Flag) {
+		if name != "" || slices.Contains(except, f.Name) {
+			return
+		}
+		if len(f.Name) == 1 {
+			name = "-" + f.Name
+		} else {
+			name = "--" + f.Name
+		}
+	})
+	return name
 }
