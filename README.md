@@ -282,7 +282,9 @@ with an error that suggests `-f` or `made init`; `README.md` is never read unles
 you pass `-f README.md`.
 
 An explicit `-f` path is relative to the current directory, read exactly as given,
-and never looked up in parent directories.
+and never looked up in parent directories. An empty value (for example
+`-f "$UNSET_VAR"`) is an error (exit `2`); `made` never falls back to discovery
+when `-f` is given.
 
 **Signals.** On `SIGINT`, `SIGTERM`, `SIGHUP` (for example, a closed SSH session or
 terminal) or `SIGQUIT`, `made` tears down the whole task, not just the interpreter: the task runs in its own process group, which is sent `SIGTERM`,

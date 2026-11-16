@@ -94,6 +94,12 @@ func TestRun(t *testing.T) {
 		{name: "bad flag", args: []string{"-bogus"}, wantCode: 2, wantStderr: []string{"flag provided but not defined: -bogus", "Usage: made", "-no-chdir"}},
 		{name: "help", args: []string{"-h"}, wantStderr: []string{"Usage: made", "-no-chdir", "-file"}},
 		{name: "missing file", args: []string{"-f", missing}, wantCode: 1, wantStderr: []string{"cannot read " + missing}},
+		// The package dir has a Madefile.md, so falling back to discovery would list it.
+		{name: "empty -f", args: []string{"-f", ""}, wantCode: 2, wantStderr: []string{"-f requires a file path"}, notStdout: []string{"Tasks in"}},
+		{name: "empty --file", args: []string{"--file", ""}, wantCode: 2, wantStderr: []string{"-f requires a file path"}, notStdout: []string{"Tasks in"}},
+		{name: "empty -f=", args: []string{"-f="}, wantCode: 2, wantStderr: []string{"-f requires a file path"}, notStdout: []string{"Tasks in"}},
+		{name: "empty -f with task", args: []string{"-f", "", "hello"}, wantCode: 2, wantStderr: []string{"-f requires a file path"}, notStdout: []string{"Tasks in"}},
+		{name: "empty -f with -l", args: []string{"-f", "", "-l"}, wantCode: 2, wantStderr: []string{"-f requires a file path"}, notStdout: []string{"Tasks in"}},
 	})
 }
 
@@ -571,6 +577,7 @@ func TestInitUsageErrors(t *testing.T) {
 	t.Chdir(t.TempDir())
 	checkRunCases(t, []runCase{
 		{name: "with -f", args: []string{"-f", "tasks.md", "init"}, wantCode: 2, wantStderr: []string{"init does not take -f"}},
+		{name: "with empty -f", args: []string{"-f", "", "init"}, wantCode: 2, wantStderr: []string{"-f requires a file path"}},
 		{name: "extra args", args: []string{"init", "extra"}, wantCode: 2, wantStderr: []string{"init takes no arguments"}},
 		{name: "force with extra args", args: []string{"init", "--force", "extra"}, wantCode: 2, wantStderr: []string{"init takes no arguments"}},
 		{name: "unknown init flag", args: []string{"init", "--bogus"}, wantCode: 2, wantStderr: []string{"flag provided but not defined: -bogus", "Usage: made init [--force]"}},
@@ -821,6 +828,7 @@ func TestCompletion(t *testing.T) {
 		{name: "unknown shell", args: []string{"completion", "pwsh"}, wantCode: 2, wantStderr: []string{"completion takes one of"}},
 		{name: "extra args", args: []string{"completion", "zsh", "extra"}, wantCode: 2, wantStderr: []string{"completion takes one of"}},
 		{name: "with -f", args: []string{"-f", "tasks.md", "completion", "zsh"}, wantCode: 2, wantStderr: []string{"completion does not take -f"}},
+		{name: "with empty -f", args: []string{"-f", "", "completion", "zsh"}, wantCode: 2, wantStderr: []string{"-f requires a file path"}},
 		{name: "help shows usage", args: []string{"-h"}, wantStderr: []string{"made completion <bash|zsh|fish>"}, notStderr: []string{"list-names"}},
 	})
 }
