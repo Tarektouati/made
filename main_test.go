@@ -242,15 +242,53 @@ func TestResolveVersionUsesLdflagsVar(t *testing.T) {
 	saved := version
 	t.Cleanup(func() { version = saved })
 
-	version = "v9.9.9"
-	if got := resolveVersion(); got != "v9.9.9" {
-		t.Errorf("resolveVersion() = %q, want %q", got, "v9.9.9")
+	tests := []struct {
+		name    string
+		ldflags string
+		want    string
+	}{
+		{name: "tagged", ldflags: "v9.9.9", want: "v9.9.9"},
+		{name: "goreleaser strips v", ldflags: "0.4.0", want: "v0.4.0"},
+		{name: "goreleaser snapshot", ldflags: "0.4.0-SNAPSHOT-fd1991f", want: "v0.4.0-SNAPSHOT-fd1991f"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			version = tt.ldflags
+			if got := resolveVersion(); got != tt.want {
+				t.Errorf("resolveVersion() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 
 	// With no injected version, the resolver still returns a non-empty fallback.
 	version = ""
 	if got := resolveVersion(); got == "" {
 		t.Error("resolveVersion() = empty, want a non-empty fallback")
+	}
+}
+
+func TestNormalizeVersion(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "release without v", in: "0.4.0", want: "v0.4.0"},
+		{name: "snapshot without v", in: "0.4.0-SNAPSHOT-fd1991f", want: "v0.4.0-SNAPSHOT-fd1991f"},
+		{name: "release with v", in: "v0.4.0", want: "v0.4.0"},
+		{name: "pseudo-version", in: "v0.0.0-20261116000000-abcdef123456", want: "v0.0.0-20261116000000-abcdef123456"},
+		{name: "dev", in: "dev", want: "dev"},
+		{name: "empty", in: "", want: ""},
+		{name: "custom", in: "custom-build", want: "custom-build"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := normalizeVersion(tt.in); got != tt.want {
+				t.Errorf("normalizeVersion(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
 	}
 }
 
