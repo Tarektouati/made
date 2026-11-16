@@ -217,7 +217,9 @@ lenient behavior back, see "Let a shell task continue past failures" under
 
 **Parsing.** `made` parses the Markdown file with
 [goldmark](https://github.com/yuin/goldmark) and walks the top-level blocks in
-document order. Each H3 heading starts a task named after its text. Paragraphs
+document order. Each H3 heading starts a task named after its text, with Markdown
+escapes and HTML entities decoded (`&amp;` becomes `&`, `\*` becomes `*`) and
+whitespace collapsed to single spaces; that is the name you pass to `made`. Paragraphs
 between the heading and the first fenced code block become the task's
 description, and that code block becomes its script. Any heading of another level
 ends the current task's scope, and an H3 with no code block after it is skipped.
@@ -358,6 +360,22 @@ made -f ../../Madefile.md lint # the root tasks
 Any H3 followed by a code block is a task. To document code under a heading
 without making it runnable, use an H2 or H4 heading, or wrap the example in a
 four-backtick fence as the Quick start section above does.
+
+**Leave a blank line after raw HTML**
+
+Under CommonMark, an HTML block such as `<div>…</div>` runs until the next blank
+line. A code block directly after it, with no blank line in between, becomes part
+of the HTML, so the H3 above it has no code block and is skipped without a warning.
+Keep the blank line:
+
+````markdown
+### banner
+<div align="center">Build</div>
+
+```bash
+echo build
+```
+````
 
 **Tasks in other languages**
 

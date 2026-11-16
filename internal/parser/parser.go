@@ -12,12 +12,14 @@ package parser
 
 import (
 	"bytes"
+	"strconv"
 	"strings"
 	"unicode"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
 )
 
 // taskHeadingLevel is the heading level that introduces a task.
@@ -57,7 +59,7 @@ func Parse(source []byte) ([]Task, error) {
 		switch node := n.(type) {
 		case *ast.Heading:
 			if node.Level == taskHeadingLevel {
-				cur = &Task{Name: strings.TrimSpace(headingText(node, source))}
+				cur = &Task{Name: normalizeSpace(headingText(node, source))}
 				desc = nil
 			} else {
 				cur = nil
@@ -65,7 +67,7 @@ func Parse(source []byte) ([]Task, error) {
 			}
 		case *ast.Paragraph:
 			if cur != nil && cur.Script == "" {
-				if t := strings.TrimSpace(headingText(node, source)); t != "" {
+				if t := normalizeSpace(headingText(node, source)); t != "" {
 					desc = append(desc, t)
 				}
 			}
@@ -83,13 +85,18 @@ func Parse(source []byte) ([]Task, error) {
 	return tasks, nil
 }
 
-// headingText concatenates the raw text of a node's inline children. It works for
-// any node whose meaningful content is plain text segments (headings, paragraphs).
+// headingText concatenates the text of a node's inline children, decoding backslash
+// escapes and entity references. It works for any node whose meaningful content is
+// plain text segments (headings, paragraphs).
 func headingText(n ast.Node, source []byte) string {
 	var b strings.Builder
 	for c := n.FirstChild(); c != nil; c = c.NextSibling() {
 		if t, ok := c.(*ast.Text); ok {
-			b.Write(t.Segment.Value(source))
+			if t.IsRaw() {
+				b.Write(t.Segment.Value(source))
+			} else {
+				b.WriteString(decodeText(t.Segment.Value(source)))
+			}
 			if t.SoftLineBreak() || t.HardLineBreak() {
 				b.WriteByte(' ')
 			}
@@ -117,6 +124,81 @@ func fenceLanguage(n *ast.FencedCodeBlock, source []byte) string {
 		return string(info)
 	}
 	return string(info[:cut])
+}
+
+// maxEntityLen bounds how far decodeText scans for the ';' closing an entity reference.
+const maxEntityLen = 32
+
+// decodeText resolves backslash escapes and entity references in one pass, as
+// CommonMark renders inline text: "\&amp;" stays "&amp;" and "&#92;*" stays "\*".
+func decodeText(b []byte) string {
+	var out strings.Builder
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		if c == '\\' && i+1 < len(b) && util.IsPunct(b[i+1]) {
+			out.WriteByte(b[i+1])
+			i++
+			continue
+		}
+		if c == '&' {
+			j := i + 1
+			for j < len(b) && j-i < maxEntityLen && (util.IsAlphaNumeric(b[j]) || b[j] == '#') {
+				j++
+			}
+			if j < len(b) && b[j] == ';' {
+				if r, ok := resolveEntity(b[i+1 : j]); ok {
+					out.WriteString(r)
+					i = j
+					continue
+				}
+			}
+		}
+		out.WriteByte(c)
+	}
+	return out.String()
+}
+
+// resolveEntity decodes the body of an entity reference (between '&' and ';'). Numeric
+// references are always decimal or hex, as CommonMark specifies; goldmark's
+// util.ResolveNumericReferences reads a leading zero as octal.
+func resolveEntity(body []byte) (string, bool) {
+	if len(body) < 2 || body[0] != '#' {
+		e, ok := util.LookUpHTML5EntityByName(string(body))
+		if !ok {
+			return "", false
+		}
+		return string(e.Characters), true
+	}
+	digits, base, maxLen, isDigit := body[1:], 10, 7, util.IsNumeric
+	if body[1] == 'x' || body[1] == 'X' {
+		digits, base, maxLen, isDigit = body[2:], 16, 6, util.IsHexDecimal
+	}
+	if len(digits) == 0 || len(digits) > maxLen {
+		return "", false
+	}
+	for _, d := range digits {
+		if !isDigit(d) {
+			return "", false
+		}
+	}
+	v, err := strconv.ParseUint(string(digits), base, 32)
+	if err != nil {
+		return "", false
+	}
+	return string(util.ToValidRune(rune(v))), true
+}
+
+// normalizeSpace drops control characters, then trims s and collapses each run of
+// whitespace (tabs, newlines, repeated spaces) to a single space. Control characters
+// are stripped from listed names, so keeping them would make a listed name unrunnable.
+func normalizeSpace(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) && !unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, s)
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // codeText joins the raw lines of a fenced code block, normalising CRLF to LF.

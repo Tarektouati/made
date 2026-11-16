@@ -222,6 +222,80 @@ func TestParseCRLF(t *testing.T) {
 	}
 }
 
+func TestParseHeadingTextDecoding(t *testing.T) {
+	tests := []struct {
+		name     string
+		heading  string
+		desc     string
+		wantName string
+		wantDesc string
+	}{
+		{"issue example", `entity &amp; stuff \* esc`, "d", "entity & stuff * esc", "d"},
+		{"numeric entities", "a &#38; b &#x26; c", "d", "a & b & c", "d"},
+		{"escaped ampersand keeps entity", `\&amp;`, "d", "&amp;", "d"},
+		{"encoded backslash is literal", `&#92;*`, "d", `\*`, "d"},
+		{"invalid entities kept", "&bogus; & &amp", "d", "&bogus; & &amp", "d"},
+		{"backslash before letter kept", `a\b`, "d", `a\b`, "d"},
+		{"tab collapsed", "a\tb", "d", "a b", "d"},
+		{"space run collapsed", "a   b", "d", "a b", "d"},
+		{"description decoded", "t", "x &lt;y&gt;\tz", "t", "x <y> z"},
+		{"control char entity", "a&#27;b", "d", "ab", "d"},
+		{"c0 control entity", "a&#1;b", "d", "ab", "d"},
+		{"c1 control entity", "a&#150;b", "d", "ab", "d"},
+		{"control entity in description", "t", "x&#27;y", "t", "xy"},
+		{"tab entity collapsed", "a&#9;b", "d", "a b", "d"},
+		{"leading zero is decimal", "&#0123;", "d", "{", "d"},
+		{"leading zero tab", "a&#09;b", "d", "a b", "d"},
+		{"zero is replacement char", "a&#0;b", "d", "a\uFFFDb", "d"},
+		{"hex entity", "&#X7B;", "d", "{", "d"},
+		{"too many digits kept", "&#12345678;", "d", "&#12345678;", "d"},
+		{"non-digit numeric kept", "&#1a;", "d", "&#1a;", "d"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := []byte("### " + tt.heading + "\n" + tt.desc + "\n```bash\necho\n```\n")
+			tasks, err := Parse(src)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if len(tasks) != 1 {
+				t.Fatalf("got %d tasks, want 1", len(tasks))
+			}
+			if tasks[0].Name != tt.wantName {
+				t.Errorf("Name = %q, want %q", tasks[0].Name, tt.wantName)
+			}
+			if tasks[0].Description != tt.wantDesc {
+				t.Errorf("Description = %q, want %q", tasks[0].Description, tt.wantDesc)
+			}
+		})
+	}
+}
+
+func TestParseHTMLBlockSwallowsFence(t *testing.T) {
+	tests := []struct {
+		name  string
+		src   string
+		tasks int
+	}{
+		{"no blank line", "### html\n<div>x</div>\n```bash\necho\n```\n", 0},
+		{"blank line", "### html\n<div>x</div>\n\n```bash\necho\n```\n", 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tasks, err := Parse([]byte(tt.src))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if len(tasks) != tt.tasks {
+				t.Fatalf("got %d tasks, want %d", len(tasks), tt.tasks)
+			}
+			if tt.tasks == 1 && tasks[0].Name != "html" {
+				t.Errorf("Name = %q, want %q", tasks[0].Name, "html")
+			}
+		})
+	}
+}
+
 func TestParseEmpty(t *testing.T) {
 	tasks, err := Parse([]byte("# just a doc\n\nno tasks here.\n"))
 	if err != nil {
