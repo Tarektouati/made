@@ -21,6 +21,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"text/tabwriter"
 	"unicode"
@@ -250,7 +251,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if !signal.Ignored(syscall.SIGHUP) {
 		sigs = append(sigs, syscall.SIGHUP)
 	}
-	ctx, stop, received := notifySignal(sigs...)
+	ctx, force, stop, received := notifySignal(sigs...)
 	defer stop()
 
 	dir := ""
@@ -274,7 +275,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		taskArgs = taskArgs[1:]
 	}
 
-	runErr := runner.Run(ctx, task, dir, taskArgs)
+	runErr := runner.Run(ctx, force, task, dir, taskArgs)
 	// Interrupted like a shell would be: 128+n for the signal made received, whatever
 	// status the torn-down task ended with.
 	if sig, ok := received().(syscall.Signal); ok {
@@ -305,23 +306,43 @@ func (s signalReceived) Error() string { return s.sig.String() + " signal receiv
 // terminal itself sent it.
 func (s signalReceived) Signal() os.Signal { return s.sig }
 
-// notifySignal is signal.NotifyContext that also remembers which signal arrived:
-// ctx is cancelled on the first of sigs, and received reports that signal (nil if
-// none came). stop releases the signal handler and ctx.
-func notifySignal(sigs ...os.Signal) (ctx context.Context, stop func(), received func() os.Signal) {
-	ch := make(chan os.Signal, 1)
+// notifySignal is signal.NotifyContext that also remembers which signal arrived and
+// lets a second one force teardown; see watchSignals. stop also releases the signal
+// handler.
+func notifySignal(sigs ...os.Signal) (ctx context.Context, force <-chan struct{}, stop func(), received func() os.Signal) {
+	ch := make(chan os.Signal, 2)
 	signal.Notify(ch, sigs...)
+	ctx, force, unwatch, received := watchSignals(ch)
+	return ctx, force, func() { signal.Stop(ch); unwatch() }, received
+}
+
+// watchSignals cancels ctx on the first value from ch, and received reports that
+// signal (nil if none came). force is closed by a second value, so a second Ctrl-C can
+// skip the task's grace period. stop releases the watching goroutine and ctx; it is
+// safe to call more than once.
+func watchSignals(ch <-chan os.Signal) (ctx context.Context, force <-chan struct{}, stop func(), received func() os.Signal) {
 	ctx, cancel := context.WithCancelCause(context.Background())
+	forceCh := make(chan struct{})
+	quit := make(chan struct{})
 	go func() {
 		select {
 		case s := <-ch:
 			cancel(signalReceived{s})
-		case <-ctx.Done():
+		case <-quit:
+			return
+		}
+		select {
+		case <-ch:
+			close(forceCh)
+		case <-quit:
 		}
 	}()
+	var once sync.Once
 	stop = func() {
-		signal.Stop(ch)
-		cancel(nil)
+		once.Do(func() {
+			close(quit)
+			cancel(nil)
+		})
 	}
 	received = func() os.Signal {
 		var s signalReceived
@@ -330,7 +351,7 @@ func notifySignal(sigs ...os.Signal) (ctx context.Context, stop func(), received
 		}
 		return nil
 	}
-	return ctx, stop, received
+	return ctx, forceCh, stop, received
 }
 
 // initMadefile writes madefileTemplate to Madefile.md in the current directory and

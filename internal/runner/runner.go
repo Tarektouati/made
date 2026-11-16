@@ -132,11 +132,19 @@ var fallbacks = map[string][]string{"python": {"python"}}
 // terminal and the cancelling signal (see cancelSignal) is one the terminal itself sends
 // to the whole foreground group (SIGINT, SIGQUIT), only the interpreter is signaled, so
 // the task's processes handle Ctrl-C as if they had been run directly.
-func Run(ctx context.Context, t parser.Task, dir string, args []string) error {
+// Closing force during the grace period sends SIGKILL right away instead of waiting
+// killGrace; a nil force never fires.
+//
+// A script containing a NUL byte cannot be passed as an argument and returns an error
+// before anything runs. On Linux the interpreter is also killed if made itself dies.
+func Run(ctx context.Context, force <-chan struct{}, t parser.Task, dir string, args []string) error {
 	lang := strings.ToLower(strings.TrimSpace(t.Lang))
 	in, ok := interpreters[lang]
 	if !ok {
 		return fmt.Errorf("unsupported language %q; supported: %s", t.Lang, supportedLanguages())
+	}
+	if i := strings.IndexByte(t.Script, 0); i >= 0 {
+		return fmt.Errorf("task %q: script contains a NUL byte (line %d of the script)", t.Name, strings.Count(t.Script[:i], "\n")+1)
 	}
 
 	argv := append(slices.Clone(in.opts), in.flag, inlineScript(in, t.Script))
@@ -152,6 +160,7 @@ func Run(ctx context.Context, t parser.Task, dir string, args []string) error {
 	// built-in kill, which would target only the interpreter and orphan its children.
 	cmd.Cancel = func() error { return nil }
 	td := &teardown{grouped: configureProcessGroup(cmd)}
+	setParentDeathSignal(cmd)
 
 	if err := cmd.Start(); err != nil {
 		if argListTooLong(err) {
@@ -175,9 +184,12 @@ func Run(ctx context.Context, t parser.Task, dir string, args []string) error {
 		case err := <-done:
 			// Leader exited on SIGTERM; the rest of the task keeps the remainder of the
 			// grace period before any survivor is force-killed.
-			awaitSurvivors(cmd, td, deadline)
+			awaitSurvivors(cmd, td, deadline, force)
 			signalKill(cmd, td)
 			return err
+		case <-force:
+			signalKill(cmd, td)
+			return <-done
 		case <-deadline:
 			signalKill(cmd, td)
 			return <-done
@@ -186,11 +198,13 @@ func Run(ctx context.Context, t parser.Task, dir string, args []string) error {
 }
 
 // awaitSurvivors returns once no member of the cancelled task outlives its interpreter,
-// or when deadline fires.
-func awaitSurvivors(cmd *exec.Cmd, td *teardown, deadline <-chan time.Time) {
+// or when deadline fires or force is closed.
+func awaitSurvivors(cmd *exec.Cmd, td *teardown, deadline <-chan time.Time, force <-chan struct{}) {
 	for survivors(cmd, td) {
 		select {
 		case <-deadline:
+			return
+		case <-force:
 			return
 		case <-time.After(survivorPoll):
 		}
