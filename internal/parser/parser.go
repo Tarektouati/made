@@ -11,6 +11,7 @@
 package parser
 
 import (
+	"bytes"
 	"strings"
 
 	"github.com/yuin/goldmark"
@@ -90,13 +91,19 @@ func headingText(n ast.Node, source []byte) string {
 	return b.String()
 }
 
-// codeText joins the raw lines of a fenced code block.
+// codeText joins the raw lines of a fenced code block, normalising CRLF to LF.
 func codeText(n *ast.FencedCodeBlock, source []byte) string {
 	var b strings.Builder
 	lines := n.Lines()
 	for i := 0; i < lines.Len(); i++ {
 		seg := lines.At(i)
-		b.Write(seg.Value(source))
+		line := seg.Value(source)
+		if bytes.HasSuffix(line, []byte("\r\n")) {
+			b.Write(line[:len(line)-2])
+			b.WriteByte('\n')
+			continue
+		}
+		b.Write(line)
 	}
 	return b.String()
 }
