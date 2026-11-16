@@ -22,7 +22,7 @@ fenced code block, so your `Madefile.md` documents your tasks and runs them too.
 
 - Go ≥ 1.26 (only when installing with `go install`)
 - The interpreter for each fence language you use available on `PATH` (`bash`,
-  `python3`, `node`, …)
+  `python3` (or `python` for `python` fences), `node`, …)
 
 ## Platform compatibility
 
@@ -154,7 +154,7 @@ Running `made` with no task lists the tasks, same as `--list`. When a task runs,
 `made` exits with the script's exit code, so it composes with `&&`, CI steps, and
 git hooks (see [Pre-commit and prek](#pre-commit-and-prek)). A task killed by signal
 n makes `made` exit with `128+n`, as shells report it: `137` for `kill -9`, `141` for
-`SIGPIPE` (e.g. `made task | head -1`). An unknown task prints an error and the task list, and exits with `1`.
+`SIGPIPE` (e.g. `made task | head -1`). An unknown task prints an error and the task list, and exits with `1`. If the task's interpreter can't be started, `made` exits with `127` (not on `PATH`) or `126` (found but not executable); see [Supported languages](#supported-languages).
 
 **Passing arguments.** Everything after the task name is passed to the script: `$1`, `"$@"` in shell tasks,
 `$argv` in fish, `sys.argv[1:]` in Python, `process.argv.slice(1)` in Node, `ARGV` in
@@ -186,7 +186,8 @@ The code fence's language selects the interpreter. Matching is case-insensitive.
 | `sh` | `sh -e -c` |
 | `zsh` | `zsh -e -o pipefail -c` |
 | `fish` | `fish -c` |
-| `python`, `python3` | `python3 -c` |
+| `python` | `python3 -c`, or `python -c` if `python3` is not on `PATH` |
+| `python3` | `python3 -c` |
 | `node`, `js`, `javascript` | `node -e` |
 | `ruby` | `ruby -e` |
 | `perl` | `perl -e` |
@@ -194,11 +195,22 @@ The code fence's language selects the interpreter. Matching is case-insensitive.
 A fence with no language defaults to `bash`. An unsupported language (e.g. `yaml`)
 is an error rather than being run under bash.
 
+A `python` fence runs under `python` only when `python3` is not on `PATH`, and
+`made` doesn't say so. On older systems (e.g. CentOS 7, or macOS before 12.3)
+`python` can be Python 2, so a Python 3 script fails there with a Python 2 syntax
+error. Use a `python3` fence to require Python 3: it never falls back, and a missing
+`python3` is reported as not found.
+
 Only the first word of the fence's info string selects the language. It ends at the
 first space, `{`, or `,`, so `bash title="x"`, `bash {1,3}`, `bash{.x}`, and
 `bash,title` all run as `bash`. A fence whose info string starts with `{` (e.g.
 Pandoc's `{.python}`) is reported as an unsupported language rather than run under
 bash.
+
+If a fence's interpreter can't be started, `made` names the interpreter, the task,
+and its language, and exits like a shell would: with `127` when the interpreter is
+not on `PATH`, or `126` when it is found but can't be executed (it isn't
+executable, or its `#!` line points to a missing program).
 
 **Shell tasks fail fast.** `bash`, `sh`, and `zsh` tasks run in strict mode: the task
 stops at the first failing command and `made` exits with that command's code, so a

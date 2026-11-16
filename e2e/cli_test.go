@@ -464,10 +464,10 @@ func TestMissingInterpreterFails(t *testing.T) {
 	dir := writeTasks(t, "Madefile.md", content)
 	// An empty PATH makes python3 unresolvable; madeBin is absolute so it still runs.
 	_, stderr, code := runMadeEnv(t, dir, []string{"PATH=" + t.TempDir()}, "pytask")
-	if code != 1 {
-		t.Fatalf("exit = %d, want 1 (stderr: %s)", code, stderr)
+	if code != 127 {
+		t.Fatalf("exit = %d, want 127 (stderr: %s)", code, stderr)
 	}
-	for _, want := range []string{`"python3" was not found on PATH`, `task "pytask"`} {
+	for _, want := range []string{`neither "python3" nor "python" was found on PATH`, `task "pytask"`} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr = %q, want it to contain %q", stderr, want)
 		}

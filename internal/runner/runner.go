@@ -5,8 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -97,15 +99,22 @@ var interpreters = map[string]interpreter{
 	"perl":       {"perl", nil, "-e", endOfOpts, false},
 }
 
+// fallbacks lists interpreters tried in order when a language's interpreter is not on
+// PATH. Only the "python" fence falls back; "python3" stays explicit. The fallback
+// python may be Python 2 on older systems; a python3 fence never runs it.
+var fallbacks = map[string][]string{"python": {"python"}}
+
 // Run executes the task's script with the interpreter chosen by the code-fence
 // language (defaulting to bash for a plain fence), inheriting the current process's
 // stdin/stdout/stderr and environment. The script runs in dir; an empty dir inherits
 // the current process's working directory. An unsupported language
-// returns an error before anything runs, and an interpreter missing from PATH returns
-// an error naming it, the task, and its language (wrapping exec.ErrNotFound). A script
-// too large for the OS argument limit returns an error giving its size, before anything
-// runs. A failing script returns an *exec.ExitError whose ExitCode the caller can
-// propagate.
+// returns an error before anything runs. An interpreter that cannot be started returns
+// an *InterpreterError naming it, the task, and its language; it wraps exec.ErrNotFound
+// when the interpreter is not on PATH and fs.ErrPermission when a file of that name is
+// on PATH but not executable. The python fence falls back to python when python3 is
+// not on PATH. A script too large for the OS argument limit returns an error giving
+// its size, before anything runs. A failing script returns an *exec.ExitError whose
+// ExitCode the caller can propagate.
 //
 // Shell tasks run in strict mode: bash and zsh with errexit and pipefail, sh with
 // errexit only. A failing command therefore stops the task with its exit code rather
@@ -124,7 +133,8 @@ var interpreters = map[string]interpreter{
 // to the whole foreground group (SIGINT, SIGQUIT), only the interpreter is signaled, so
 // the task's processes handle Ctrl-C as if they had been run directly.
 func Run(ctx context.Context, t parser.Task, dir string, args []string) error {
-	in, ok := interpreters[strings.ToLower(strings.TrimSpace(t.Lang))]
+	lang := strings.ToLower(strings.TrimSpace(t.Lang))
+	in, ok := interpreters[lang]
 	if !ok {
 		return fmt.Errorf("unsupported language %q; supported: %s", t.Lang, supportedLanguages())
 	}
@@ -132,7 +142,8 @@ func Run(ctx context.Context, t parser.Task, dir string, args []string) error {
 	argv := append(slices.Clone(in.opts), in.flag, inlineScript(in, t.Script))
 	argv = append(argv, in.argSep...)
 	argv = append(argv, args...)
-	cmd := exec.CommandContext(ctx, in.cmd, argv...)
+	cands := append([]string{in.cmd}, fallbacks[lang]...)
+	cmd := exec.CommandContext(ctx, pickInterpreter(cands), argv...)
 	cmd.Dir = dir
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -143,15 +154,11 @@ func Run(ctx context.Context, t parser.Task, dir string, args []string) error {
 	td := &teardown{grouped: configureProcessGroup(cmd)}
 
 	if err := cmd.Start(); err != nil {
-		if errors.Is(err, exec.ErrNotFound) {
-			return fmt.Errorf("%q was not found on PATH (required by task %q, language %s); install it or change the code fence language: %w",
-				in.cmd, t.Name, langLabel(t.Lang), exec.ErrNotFound)
-		}
 		if argListTooLong(err) {
 			return fmt.Errorf("task %q: script is %d bytes, too large to pass to %q as a command-line argument (the OS limit is about %d bytes); move the bulk of it into a file the task runs: %w",
-				t.Name, len(t.Script), in.cmd, argLimit, err)
+				t.Name, len(t.Script), filepath.Base(cmd.Path), argLimit, err)
 		}
-		return err
+		return startError(err, cmd, cands, t)
 	}
 
 	done := make(chan error, 1)
@@ -220,4 +227,100 @@ func langLabel(lang string) string {
 		return fmt.Sprintf("%q", l)
 	}
 	return `"bash" (default for a plain fence)`
+}
+
+// InterpreterError reports that a task's interpreter could not be started.
+type InterpreterError struct {
+	Cmd       string   // interpreter name, e.g. "python3"
+	Fallbacks []string // interpreters also tried when Cmd was not on PATH
+	Path      string   // resolved or found path; empty when nothing was found
+	Task      string
+	Lang      string // raw fence language
+	Err       error  // exec.ErrNotFound, fs.ErrPermission, or the start errno
+	// NotExecutable is set when a file named Cmd is on PATH without execute
+	// permission. A start errno such as EACCES (e.g. a noexec mount) also matches
+	// fs.ErrPermission but leaves this false.
+	NotExecutable bool
+}
+
+func (e *InterpreterError) Error() string {
+	req := fmt.Sprintf("required by task %q, language %s", e.Task, langLabel(e.Lang))
+	switch {
+	case errors.Is(e.Err, exec.ErrNotFound):
+		if len(e.Fallbacks) > 0 {
+			names := make([]string, 0, 1+len(e.Fallbacks))
+			for _, n := range append([]string{e.Cmd}, e.Fallbacks...) {
+				names = append(names, fmt.Sprintf("%q", n))
+			}
+			return fmt.Sprintf("neither %s was found on PATH (%s); install one or change the code fence language",
+				strings.Join(names, " nor "), req)
+		}
+		return fmt.Sprintf("%q was not found on PATH (%s); install it or change the code fence language", e.Cmd, req)
+	case e.NotExecutable:
+		return fmt.Sprintf("%q at %s is not executable (%s); make it executable or fix PATH", e.Cmd, e.Path, req)
+	case errors.Is(e.Err, fs.ErrNotExist):
+		return fmt.Sprintf("cannot run %q at %s (%s): %v; check its #! line", e.Cmd, e.Path, req, e.Err)
+	default:
+		return fmt.Sprintf("cannot run %q at %s (%s): %v", e.Cmd, e.Path, req, e.Err)
+	}
+}
+
+func (e *InterpreterError) Unwrap() error { return e.Err }
+
+// ExitCode follows the shell convention: 127 when the interpreter is not found, 126
+// when it is found but cannot be executed.
+func (e *InterpreterError) ExitCode() int {
+	if errors.Is(e.Err, exec.ErrNotFound) {
+		return 127
+	}
+	return 126
+}
+
+// pickInterpreter returns the first of cands that is on PATH, or cands[0] if none is.
+func pickInterpreter(cands []string) string {
+	if len(cands) > 1 {
+		for _, c := range cands {
+			if _, err := exec.LookPath(c); err == nil {
+				return c
+			}
+		}
+	}
+	return cands[0]
+}
+
+// startError turns a cmd.Start failure into an *InterpreterError when the interpreter
+// was missing, not executable, or could not be executed; other errors pass through.
+func startError(err error, cmd *exec.Cmd, cands []string, t parser.Task) error {
+	ie := &InterpreterError{Cmd: cands[0], Fallbacks: cands[1:], Task: t.Name, Lang: t.Lang, Err: err}
+	if errors.Is(err, exec.ErrNotFound) {
+		ie.Err = exec.ErrNotFound
+		for _, c := range cands {
+			if p := findNonExecutable(c); p != "" {
+				ie.Cmd, ie.Fallbacks, ie.Path, ie.Err, ie.NotExecutable = c, nil, p, fs.ErrPermission, true
+				break
+			}
+		}
+		return ie
+	}
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) && pathErr.Op == "fork/exec" {
+		ie.Cmd, ie.Fallbacks, ie.Path, ie.Err = filepath.Base(cmd.Args[0]), nil, cmd.Path, pathErr.Err
+		return ie
+	}
+	return err
+}
+
+// findNonExecutable returns the first regular file named name in a PATH directory, or
+// "" if there is none. exec.LookPath skips such files when they are not executable.
+func findNonExecutable(name string) string {
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		if dir == "" {
+			dir = "."
+		}
+		p := filepath.Join(dir, name)
+		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
+			return p
+		}
+	}
+	return ""
 }
