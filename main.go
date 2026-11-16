@@ -419,6 +419,17 @@ func find(tasks []parser.Task, name string) (parser.Task, bool) {
 	return parser.Task{}, false
 }
 
+// sanitizeDisplay removes C0/C1 control characters and DEL from strings printed to the
+// terminal (task names and descriptions). Task lookup still uses the parsed values.
+func sanitizeDisplay(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 func printTasks(stdout, stderr io.Writer, file string, tasks []parser.Task) {
 	if len(tasks) == 0 {
 		fmt.Fprintf(stderr, "made: no tasks found in %s\n", file)
@@ -427,8 +438,9 @@ func printTasks(stdout, stderr io.Writer, file string, tasks []parser.Task) {
 	fmt.Fprintf(stdout, "Tasks in %s:\n", file)
 	w := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 	for _, t := range tasks {
-		desc := strings.ReplaceAll(t.Description, "\n", " ")
-		fmt.Fprintf(w, "  %s\t%s\n", t.Name, desc)
+		name := sanitizeDisplay(t.Name)
+		desc := sanitizeDisplay(strings.ReplaceAll(t.Description, "\n", " "))
+		fmt.Fprintf(w, "  %s\t%s\n", name, desc)
 	}
 	_ = w.Flush()
 }
@@ -437,7 +449,9 @@ func printTasks(stdout, stderr io.Writer, file string, tasks []parser.Task) {
 // scripts, with no header. The description is flattened to one line.
 func printNames(stdout io.Writer, tasks []parser.Task) {
 	for _, t := range tasks {
-		fmt.Fprintf(stdout, "%s\t%s\n", t.Name, strings.ReplaceAll(t.Description, "\n", " "))
+		name := sanitizeDisplay(t.Name)
+		desc := sanitizeDisplay(strings.ReplaceAll(t.Description, "\n", " "))
+		fmt.Fprintf(stdout, "%s\t%s\n", name, desc)
 	}
 }
 
