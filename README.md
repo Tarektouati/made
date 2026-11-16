@@ -51,12 +51,19 @@ curl -fsSL https://raw.githubusercontent.com/Tarektouati/made/main/install.sh | 
 ```
 
 Installs the latest release for macOS or Linux (`amd64`/`arm64`) into
-`/usr/local/bin` after verifying its checksum. Set `MADE_VERSION` to pin a release
-and `MADE_INSTALL_DIR` to change the target directory:
+`/usr/local/bin` after verifying its checksum, using `sudo` when that directory is not
+writable. If `sudo` is missing or fails (for example with no terminal to prompt on),
+it installs into `~/.local/bin` instead. Set `MADE_VERSION` to pin a release
+(`v0.1.0`, `0.1.0`, or `latest`) and `MADE_INSTALL_DIR` to change the target
+directory; give it as an absolute path (`$HOME/bin`, not a quoted `~/bin`):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Tarektouati/made/main/install.sh | MADE_VERSION=v0.1.0 MADE_INSTALL_DIR="$HOME/bin" sh
 ```
+
+The checksum is downloaded from the same GitHub release as the archive, so it catches
+a corrupted download but not a tampered release. If you need more than that, build
+from source with `go install` or verify the release yourself.
 
 **go install**
 

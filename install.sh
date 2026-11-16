@@ -4,8 +4,12 @@
 #   curl -fsSL https://raw.githubusercontent.com/Tarektouati/made/main/install.sh | sh
 #
 # Environment:
-#   MADE_VERSION      release tag to install, e.g. v1.2.3 (default: latest)
-#   MADE_INSTALL_DIR  target directory (default: /usr/local/bin)
+#   MADE_VERSION      release tag to install, e.g. v1.2.3 or latest (default: latest)
+#   MADE_INSTALL_DIR  target directory (default: /usr/local/bin, using sudo when it is
+#                     not writable, falling back to ~/.local/bin)
+#
+# Everything runs from main, called on the last line, so a truncated download
+# executes nothing.
 
 set -eu
 
@@ -20,79 +24,116 @@ need() {
 	command -v "$1" >/dev/null 2>&1 || err "required command not found: $1"
 }
 
-need curl
-need tar
-need uname
+# install_to copies the extracted binary into dir, creating dir if needed. An optional
+# second argument (sudo) runs both steps under that command.
+install_to() {
+	${2:-} mkdir -p "$1" && ${2:-} install -m 0755 "$tmp/made" "$1/made"
+}
 
-case "$(uname -s)" in
-	Darwin) os=darwin ;;
-	Linux) os=linux ;;
-	*) err "unsupported OS: $(uname -s) (use 'go install github.com/$REPO@latest')" ;;
-esac
+install_home() {
+	[ -n "${HOME:-}" ] || err "HOME is not set; set MADE_INSTALL_DIR to choose an install directory"
+	install_dir="$HOME/.local/bin"
+	echo "made-install: cannot write to /usr/local/bin; installing to $install_dir instead" >&2
+	install_to "$install_dir" || err "cannot install to $install_dir; set MADE_INSTALL_DIR"
+}
 
-case "$(uname -m)" in
-	x86_64 | amd64) arch=amd64 ;;
-	arm64 | aarch64) arch=arm64 ;;
-	*) err "unsupported architecture: $(uname -m)" ;;
-esac
+main() {
+	case "${MADE_INSTALL_DIR:-}" in
+		"~"*) err "MADE_INSTALL_DIR starts with '~', which was not expanded; use \$HOME instead" ;;
+		[!/]*) err "MADE_INSTALL_DIR must be an absolute path (got '$MADE_INSTALL_DIR')" ;;
+	esac
 
-if command -v sha256sum >/dev/null 2>&1; then
-	sha256() { sha256sum "$1" | cut -d ' ' -f 1; }
-elif command -v shasum >/dev/null 2>&1; then
-	sha256() { shasum -a 256 "$1" | cut -d ' ' -f 1; }
-else
-	err "required command not found: sha256sum or shasum"
-fi
+	need curl
+	need tar
+	need gzip
+	need uname
 
-tag="${MADE_VERSION:-}"
-if [ -z "$tag" ]; then
-	latest_url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest") ||
-		err "could not resolve the latest release"
-	tag="${latest_url##*/}"
-fi
-case "$tag" in
-	v*) ;;
-	*) tag="v$tag" ;;
-esac
-case "$tag" in
-	v[0-9]*) ;;
-	*) err "could not determine a release tag (got '$tag')" ;;
-esac
-version="${tag#v}"
+	case "$(uname -s)" in
+		Darwin) os=darwin ;;
+		Linux) os=linux ;;
+		*) err "unsupported OS: $(uname -s) (use 'go install github.com/$REPO@latest')" ;;
+	esac
 
-archive="made_${version}_${os}_${arch}.tar.gz"
-base_url="https://github.com/$REPO/releases/download/$tag"
+	case "$(uname -m)" in
+		x86_64 | amd64) arch=amd64 ;;
+		arm64 | aarch64) arch=arm64 ;;
+		*) err "unsupported architecture: $(uname -m)" ;;
+	esac
 
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
-
-echo "Downloading made $tag ($os/$arch)..."
-curl -fsSL -o "$tmp/$archive" "$base_url/$archive" || err "download failed: $base_url/$archive"
-curl -fsSL -o "$tmp/checksums.txt" "$base_url/checksums.txt" || err "download failed: $base_url/checksums.txt"
-
-expected=$(awk -v f="$archive" '$2 == f { print $1 }' "$tmp/checksums.txt")
-[ -n "$expected" ] || err "no checksum found for $archive"
-actual=$(sha256 "$tmp/$archive")
-[ "$expected" = "$actual" ] || err "checksum mismatch for $archive"
-
-tar -xzf "$tmp/$archive" -C "$tmp" made
-
-install_dir="${MADE_INSTALL_DIR:-/usr/local/bin}"
-sudo=""
-if [ -z "${MADE_INSTALL_DIR:-}" ] && ! { [ -d "$install_dir" ] && [ -w "$install_dir" ]; }; then
-	if command -v sudo >/dev/null 2>&1; then
-		sudo="sudo"
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256() { sha256sum "$1" | cut -d ' ' -f 1; }
+	elif command -v shasum >/dev/null 2>&1; then
+		sha256() { shasum -a 256 "$1" | cut -d ' ' -f 1; }
 	else
-		install_dir="$HOME/.local/bin"
+		err "required command not found: sha256sum or shasum"
 	fi
-fi
 
-$sudo mkdir -p "$install_dir"
-$sudo install -m 0755 "$tmp/made" "$install_dir/made"
+	tag="${MADE_VERSION:-}"
+	if [ "$tag" = latest ]; then
+		tag=""
+	fi
+	if [ -z "$tag" ]; then
+		latest_url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest") ||
+			err "could not resolve the latest release"
+		tag="${latest_url##*/}"
+	fi
+	case "$tag" in
+		v*) ;;
+		*) tag="v$tag" ;;
+	esac
+	case "$tag" in
+		v[0-9]*) ;;
+		*) err "could not determine a release tag (got '$tag')" ;;
+	esac
+	case "${tag#v}" in
+		*[!0-9A-Za-z.+-]*) err "invalid release tag '$tag'" ;;
+	esac
+	version="${tag#v}"
 
-echo "Installed $("$install_dir/made" --version) to $install_dir/made"
+	archive="made_${version}_${os}_${arch}.tar.gz"
+	base_url="https://github.com/$REPO/releases/download/$tag"
 
-case ":$PATH:" in
-	*":$install_dir:"*) ;;
-	*) echo "Note: $install_dir is not on your PATH; add it to use 'made' directly." ;;
-esac
+	tmp=$(mktemp -d)
+	trap 'rm -rf "$tmp"' EXIT
+
+	echo "Downloading made $tag ($os/$arch)..."
+	curl -fsSL -o "$tmp/$archive" "$base_url/$archive" || err "download failed: $base_url/$archive"
+	curl -fsSL -o "$tmp/checksums.txt" "$base_url/checksums.txt" || err "download failed: $base_url/checksums.txt"
+
+	expected=$(awk -v f="$archive" '$2 == f { print $1 }' "$tmp/checksums.txt")
+	[ -n "$expected" ] || err "no checksum found for $archive"
+	actual=$(sha256 "$tmp/$archive")
+	[ "$expected" = "$actual" ] || err "checksum mismatch for $archive"
+
+	tar -xzf "$tmp/$archive" -C "$tmp" made
+
+	if [ -n "${MADE_INSTALL_DIR:-}" ]; then
+		install_dir="$MADE_INSTALL_DIR"
+		install_to "$install_dir" || err "cannot install to $install_dir; choose another MADE_INSTALL_DIR"
+	else
+		install_dir=/usr/local/bin
+		if [ -d "$install_dir" ] && [ -w "$install_dir" ]; then
+			install_to "$install_dir" || err "cannot install to $install_dir"
+		elif command -v sudo >/dev/null 2>&1; then
+			if ! install_to "$install_dir" sudo; then
+				echo "made-install: sudo failed; falling back to a directory in HOME" >&2
+				install_home
+			fi
+		else
+			install_home
+		fi
+	fi
+
+	echo "Installed $("$install_dir/made" --version) to $install_dir/made"
+
+	case ":$PATH:" in
+		*":$install_dir:"*) ;;
+		*) echo "Note: $install_dir is not on your PATH; add it to use 'made' directly." ;;
+	esac
+	found=$(command -v made 2>/dev/null) || found=""
+	if [ -n "$found" ] && [ "$found" != "${install_dir%/}/made" ]; then
+		echo "Note: 'made' on your PATH is $found, which takes precedence over $install_dir/made."
+	fi
+}
+
+main "$@"
