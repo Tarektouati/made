@@ -33,6 +33,9 @@ import (
 // behave like case-sensitive ones.
 var madefileNames = []string{"Madefile.md", "madefile.md", "MADEFILE.md"}
 
+// maxMadefileBytes is the largest task file made will read (discovery or -f).
+const maxMadefileBytes = 10 << 20 // 10 MiB
+
 // madefileTemplate is what `made init` writes: a short header and one example task,
 // valid as is.
 const madefileTemplate = "# Tasks\n\n" +
@@ -168,7 +171,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	file = res.path
 
-	source, err := os.ReadFile(file)
+	source, err := readMadefile(file)
 	if err != nil {
 		fmt.Fprintf(stderr, "made: cannot read %s: %v\n", file, err)
 		return 1
@@ -370,10 +373,26 @@ func findMadefile(start string) (dir, name string, others []string, ok bool) {
 	}
 }
 
-// isRegularFile reports whether path exists and is not a directory.
+// readMadefile reads a task file after checking it is a regular file within
+// maxMadefileBytes.
+func readMadefile(path string) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	if info.Size() > maxMadefileBytes {
+		return nil, fmt.Errorf("%s exceeds maximum size (%d bytes)", path, maxMadefileBytes)
+	}
+	return os.ReadFile(path)
+}
+
+// isRegularFile reports whether path exists and is a regular file.
 func isRegularFile(path string) bool {
 	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
+	return err == nil && info.Mode().IsRegular()
 }
 
 func find(tasks []parser.Task, name string) (parser.Task, bool) {
