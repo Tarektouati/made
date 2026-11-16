@@ -22,6 +22,10 @@ import (
 // taskHeadingLevel is the heading level that introduces a task.
 const taskHeadingLevel = 3
 
+// utf8BOM is the byte order mark some editors (e.g. Windows Notepad) write at the
+// start of UTF-8 files.
+var utf8BOM = []byte("\xef\xbb\xbf")
+
 // Task is a single runnable unit parsed from the Markdown source.
 type Task struct {
 	Name        string
@@ -35,8 +39,10 @@ type Task struct {
 // Each H3 heading starts a task; the first fenced code block after it provides the
 // script and completes the task. Paragraph text between the heading and that code
 // block becomes the description. Headings of any other level end the current task's
-// scope. A heading with no following code block is skipped.
+// scope. A heading with no following code block is skipped. A leading UTF-8 byte
+// order mark is ignored.
 func Parse(source []byte) ([]Task, error) {
+	source = bytes.TrimPrefix(source, utf8BOM)
 	if err := validateNesting(source); err != nil {
 		return nil, err
 	}
