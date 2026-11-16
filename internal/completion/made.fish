@@ -45,8 +45,21 @@ function __made_no_positional
     test (count (__made_positional)) -eq 0
 end
 
+# __made_list_names runs made --list-names with a 2s limit (timeout(1) or perl);
+# without either it runs unbounded.
+function __made_list_names
+    set -l fileargs (__made_file_args)
+    if type -q timeout
+        timeout 2 made $fileargs --list-names 2>/dev/null
+    else if type -q perl
+        perl -e 'alarm shift; exec @ARGV' 2 made $fileargs --list-names 2>/dev/null
+    else
+        command made $fileargs --list-names 2>/dev/null
+    end
+end
+
 function __made_tasks
-    command made (__made_file_args) --list-names 2>/dev/null
+    __made_list_names
 end
 
 # __made_in_task succeeds once a task name is on the line; its arguments are files.

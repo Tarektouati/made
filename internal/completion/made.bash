@@ -59,6 +59,18 @@ __made_dequote() {
     printf '%s' "$out"
 }
 
+# __made_list_names runs made --list-names with a short wall-time limit so untrusted
+# repos cannot stall tab completion. Without timeout(1) or perl it runs unbounded.
+__made_list_names() {
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 2 made "$@" --list-names 2>/dev/null
+    elif command -v perl >/dev/null 2>&1; then
+        perl -e 'alarm shift; exec @ARGV' 2 made "$@" --list-names 2>/dev/null
+    else
+        made "$@" --list-names 2>/dev/null
+    fi
+}
+
 _made() {
     local -a words=() fileargs=()
     local cword cur prev
@@ -141,7 +153,7 @@ _made() {
     fi
     while IFS=$'\t' read -r name _; do
         [[ $name == "$cur"* ]] && COMPREPLY+=("${name#"$prefix"}")
-    done < <(made "${fileargs[@]}" --list-names 2>/dev/null; printf '%s\n' init completion)
+    done < <(__made_list_names "${fileargs[@]}"; printf '%s\n' init completion)
     return 0
 }
 

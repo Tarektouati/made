@@ -1,6 +1,13 @@
 package parser
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func repeatToken(token string, n int) []byte {
+	return []byte(strings.Repeat(token, n) + "\n")
+}
 
 func TestParseBasic(t *testing.T) {
 	src := []byte("### say-hello\nPrints a friendly greeting.\n```bash\necho hello\n```\n")
@@ -94,5 +101,98 @@ func TestParseEmpty(t *testing.T) {
 	}
 	if len(tasks) != 0 {
 		t.Errorf("got %d tasks, want 0", len(tasks))
+	}
+}
+
+func TestParseRejectsDeepBlockquoteNesting(t *testing.T) {
+	_, err := Parse(repeatToken("> ", maxNestingDepth+1))
+	if err == nil {
+		t.Fatal("Parse: nil error, want nesting too deep")
+	}
+	if got := err.Error(); !strings.Contains(got, "nesting too deep") {
+		t.Fatalf("Parse error = %q, want nesting too deep", got)
+	}
+}
+
+func TestParseRejectsDeepBulletRun(t *testing.T) {
+	_, err := Parse(repeatToken("- ", maxNestingDepth+1))
+	if err == nil {
+		t.Fatal("Parse: nil error, want nesting too deep")
+	}
+	if got := err.Error(); !strings.Contains(got, "nesting too deep") {
+		t.Fatalf("Parse error = %q, want nesting too deep", got)
+	}
+}
+
+func TestParseRejectsDeepMixedMarkerRun(t *testing.T) {
+	_, err := Parse(repeatToken("> - ", maxNestingDepth+1))
+	if err == nil {
+		t.Fatal("Parse: nil error, want nesting too deep")
+	}
+	if got := err.Error(); !strings.Contains(got, "nesting too deep") {
+		t.Fatalf("Parse error = %q, want nesting too deep", got)
+	}
+}
+
+func TestParseRejectsDeepOrderedMarkerRun(t *testing.T) {
+	_, err := Parse(repeatToken("1. ", maxNestingDepth+1))
+	if err == nil {
+		t.Fatal("Parse: nil error, want nesting too deep")
+	}
+	if got := err.Error(); !strings.Contains(got, "nesting too deep") {
+		t.Fatalf("Parse error = %q, want nesting too deep", got)
+	}
+}
+
+func TestParseAllowsNestingAtLimit(t *testing.T) {
+	if _, err := Parse(repeatToken("> ", maxNestingDepth)); err != nil {
+		t.Fatalf("Parse: %v, want nil at limit", err)
+	}
+	if _, err := Parse(repeatToken("- ", maxNestingDepth)); err != nil {
+		t.Fatalf("Parse: %v, want nil at limit", err)
+	}
+}
+
+func TestParseIgnoresMarkersInsideFences(t *testing.T) {
+	src := []byte("### task\n" +
+		"```bash\n" +
+		"echo hello > out\n" +
+		"rm -rf /\n" +
+		"> not a blockquote\n" +
+		"```\n")
+	tasks, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].Name != "task" {
+		t.Fatalf("tasks = %+v, want one task named task", tasks)
+	}
+}
+
+func TestParseIgnoresMarkersInsideTildeFences(t *testing.T) {
+	src := []byte("### task\n" +
+		"~~~bash\n" +
+		"> not a blockquote\n" +
+		"- not a list\n" +
+		"~~~\n")
+	tasks, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].Name != "task" {
+		t.Fatalf("tasks = %+v, want one task named task", tasks)
+	}
+}
+
+func TestParseTildeFenceCloseLength(t *testing.T) {
+	deep := strings.Repeat("> ", maxNestingDepth+1) + "\n"
+	insideFence := []byte("~~~\n" + deep + "~~\n")
+	if _, err := Parse(insideFence); err != nil {
+		t.Fatalf("Parse: %v, want deep markers skipped while fence stays open", err)
+	}
+	outside := []byte("~~~~\n\n~~~~\n" + deep)
+	_, err := Parse(outside)
+	if err == nil || !strings.Contains(err.Error(), "nesting too deep") {
+		t.Fatalf("Parse outside fence = %v, want nesting too deep", err)
 	}
 }

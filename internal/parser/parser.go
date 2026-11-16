@@ -36,6 +36,9 @@ type Task struct {
 // block becomes the description. Headings of any other level end the current task's
 // scope. A heading with no following code block is skipped.
 func Parse(source []byte) ([]Task, error) {
+	if err := validateNesting(source); err != nil {
+		return nil, err
+	}
 	reader := text.NewReader(source)
 	doc := goldmark.DefaultParser().Parse(reader)
 

@@ -97,6 +97,33 @@ func TestRun(t *testing.T) {
 	})
 }
 
+func writeDeepNestMadefile(t *testing.T, marker string, depth int) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "deep.md")
+	if err := os.WriteFile(path, []byte(strings.Repeat(marker, depth)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestRunRejectsDeepNesting(t *testing.T) {
+	f := writeDeepNestMadefile(t, "> ", 257)
+	checkRunCases(t, []runCase{
+		{
+			name:       "list",
+			args:       []string{"-f", f, "-l"},
+			wantCode:   1,
+			wantStderr: []string{"cannot parse", "nesting too deep"},
+		},
+		{
+			name:       "list-names",
+			args:       []string{"-f", f, "--list-names"},
+			wantCode:   1,
+			wantStderr: []string{"cannot parse", "nesting too deep"},
+		},
+	})
+}
+
 // TestRunTaskArgs runs real bash tasks to check what reaches the script. notStderr
 // rules out a runner error (for example a missing interpreter), which also exits 1.
 func TestRunTaskArgs(t *testing.T) {
