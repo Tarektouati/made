@@ -164,6 +164,10 @@ git hooks (see [Pre-commit and prek](#pre-commit-and-prek)). A task killed by si
 n makes `made` exit with `128+n`, as shells report it: `137` for `kill -9`, `141` for
 `SIGPIPE` (e.g. `made task | head -1`). An unknown task prints an error and the task list, and exits with `1`. If the task's interpreter can't be started, `made` exits with `127` (not on `PATH`) or `126` (found but not executable); see [Supported languages](#supported-languages).
 
+The task list aligns descriptions by terminal display width, so CJK and emoji task
+names line up. Multi-codepoint emoji (ZWJ sequences, flags) and ambiguous-width
+characters may still be off by a cell depending on your terminal.
+
 **Passing arguments.** Everything after the task name is passed to the script: `$1`, `"$@"` in shell tasks,
 `$argv` in fish, `sys.argv[1:]` in Python, `process.argv.slice(1)` in Node, `ARGV` in
 Ruby, and `@ARGV` in Perl. Flags for `made` itself go before the task name; anything

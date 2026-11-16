@@ -23,10 +23,12 @@ import (
 	"strings"
 	"syscall"
 	"text/tabwriter"
+	"unicode"
 
 	"github.com/Tarektouati/made/internal/completion"
 	"github.com/Tarektouati/made/internal/parser"
 	"github.com/Tarektouati/made/internal/runner"
+	"golang.org/x/text/width"
 )
 
 // madefileNames are the task file names discovered without -f, highest priority first.
@@ -577,19 +579,49 @@ func sanitizeDisplay(s string) string {
 	}, s)
 }
 
+// displayWidth approximates the number of terminal cells s occupies: East Asian wide
+// and fullwidth runes take two, combining marks, format characters (such as ZWJ) and
+// variation selectors take none, except that the emoji selector U+FE0F widens a
+// preceding one-cell rune to two. Multi-rune emoji sequences are not clustered.
+func displayWidth(s string) int {
+	n, last := 0, 0
+	for _, r := range s {
+		switch k := width.LookupRune(r).Kind(); {
+		case r == 0xfe0f:
+			if last == 1 {
+				n++
+				last = 2
+			}
+		case unicode.In(r, unicode.Mn, unicode.Me, unicode.Cf), r >= 0xfe00 && r <= 0xfe0e:
+		case k == width.EastAsianWide, k == width.EastAsianFullwidth:
+			n += 2
+			last = 2
+		default:
+			n++
+			last = 1
+		}
+	}
+	return n
+}
+
 func printTasks(stdout, stderr io.Writer, file string, tasks []parser.Task) {
 	if len(tasks) == 0 {
 		fmt.Fprintf(stderr, "made: no tasks found in %s\n", file)
 		return
 	}
 	fmt.Fprintf(stdout, "Tasks in %s:\n", file)
-	w := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
-	for _, t := range tasks {
-		name := sanitizeDisplay(t.Name)
-		desc := sanitizeDisplay(strings.ReplaceAll(t.Description, "\n", " "))
-		fmt.Fprintf(w, "  %s\t%s\n", name, desc)
+	names := make([]string, len(tasks))
+	widths := make([]int, len(tasks))
+	maxW := 0
+	for i, t := range tasks {
+		names[i] = sanitizeDisplay(t.Name)
+		widths[i] = displayWidth(names[i])
+		maxW = max(maxW, widths[i])
 	}
-	_ = w.Flush()
+	for i, t := range tasks {
+		desc := sanitizeDisplay(strings.ReplaceAll(t.Description, "\n", " "))
+		fmt.Fprintf(stdout, "  %s%s%s\n", names[i], strings.Repeat(" ", maxW-widths[i]+2), desc)
+	}
 }
 
 // printNames writes one task per line as "name<TAB>description" for the completion
