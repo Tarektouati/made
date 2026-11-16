@@ -3,6 +3,18 @@
 # Load it with: eval "$(made completion zsh)"   (after compinit, e.g. in ~/.zshrc)
 # or save it as _made in a directory on $fpath.
 
+# _made_list_names runs made --list-names with a 2s limit (timeout(1) or perl);
+# without either it runs unbounded.
+_made_list_names() {
+  if (( $+commands[timeout] )); then
+    command timeout 2 made "$@" --list-names 2>/dev/null
+  elif (( $+commands[perl] )); then
+    command perl -e 'alarm shift; exec @ARGV' 2 made "$@" --list-names 2>/dev/null
+  else
+    command made "$@" --list-names 2>/dev/null
+  fi
+}
+
 _made_tasks() {
   local -a fileargs tasks
   local i line name desc
@@ -16,7 +28,7 @@ _made_tasks() {
   done
   (( $#fileargs )) && fileargs[2]=${fileargs[2]/#\~/$HOME}
 
-  for line in ${(f)"$(command made "${fileargs[@]}" --list-names 2>/dev/null)"}; do
+  for line in ${(f)"$(_made_list_names "${fileargs[@]}")"}; do
     name=${line%%$'\t'*}
     desc=${line#*$'\t'}
     tasks+=("${name//:/\\:}${desc:+:$desc}")
