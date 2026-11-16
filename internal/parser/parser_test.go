@@ -198,6 +198,64 @@ func TestParseEmpty(t *testing.T) {
 	}
 }
 
+func TestParseUTF8BOM(t *testing.T) {
+	const bom = "\xef\xbb\xbf"
+	for _, tc := range []struct {
+		name string
+		src  string
+		want []Task
+	}{
+		{
+			name: "bom before heading",
+			src:  bom + "### bom\n```\necho bom\n```\n",
+			want: []Task{{Name: "bom", Script: "echo bom\n"}},
+		},
+		{
+			name: "bom then blank line",
+			src:  bom + "\n### bom\n```bash\necho bom\n```\n",
+			want: []Task{{Name: "bom", Lang: "bash", Script: "echo bom\n"}},
+		},
+		{
+			name: "bom with description and multiple tasks",
+			src:  bom + "### one\nfirst task\n```bash\necho 1\n```\n\n### two\n```sh\necho 2\n```\n",
+			want: []Task{
+				{Name: "one", Description: "first task", Lang: "bash", Script: "echo 1\n"},
+				{Name: "two", Lang: "sh", Script: "echo 2\n"},
+			},
+		},
+		{
+			name: "no bom unchanged",
+			src:  "### bom\n```\necho bom\n```\n",
+			want: []Task{{Name: "bom", Script: "echo bom\n"}},
+		},
+		{
+			name: "bom only",
+			src:  bom,
+			want: nil,
+		},
+		{
+			name: "mid-document feff not stripped",
+			src:  "### a\n```\necho " + bom + "\n```\n",
+			want: []Task{{Name: "a", Script: "echo " + bom + "\n"}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tasks, err := Parse([]byte(tc.src))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if len(tasks) != len(tc.want) {
+				t.Fatalf("got %d tasks (%+v), want %d", len(tasks), tasks, len(tc.want))
+			}
+			for i, want := range tc.want {
+				if tasks[i] != want {
+					t.Errorf("task %d = %+v, want %+v", i, tasks[i], want)
+				}
+			}
+		})
+	}
+}
+
 func TestParseRejectsDeepBlockquoteNesting(t *testing.T) {
 	_, err := Parse(repeatToken("> ", maxNestingDepth+1))
 	if err == nil {
@@ -260,6 +318,13 @@ func TestParseIgnoresMarkersInsideFences(t *testing.T) {
 	}
 	if len(tasks) != 1 || tasks[0].Name != "task" {
 		t.Fatalf("tasks = %+v, want one task named task", tasks)
+	}
+}
+
+func TestParseBOMBeforeFenceIgnoresMarkers(t *testing.T) {
+	src := []byte("\xef\xbb\xbf```\n" + string(repeatToken("> ", maxNestingDepth+1)) + "```\n")
+	if _, err := Parse(src); err != nil {
+		t.Fatalf("Parse: %v, want deep markers inside a BOM-prefixed fence skipped", err)
 	}
 }
 

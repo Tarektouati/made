@@ -156,6 +156,18 @@ func TestRunTaskCustomFile(t *testing.T) {
 	}
 }
 
+func TestRunTaskWithBOM(t *testing.T) {
+	requireBash(t)
+	dir := writeTasks(t, "bom.md", "\xef\xbb\xbf### bom\n```\necho bom\n```\n")
+	stdout, stderr, code := runMade(t, dir, "-f", "bom.md", "bom")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if stdout != "bom\n" {
+		t.Errorf("stdout = %q, want %q", stdout, "bom\n")
+	}
+}
+
 func TestListNoArgs(t *testing.T) {
 	dir := writeTasks(t, "Madefile.md", madefileMD)
 	stdout, stderr, code := runMade(t, dir)
