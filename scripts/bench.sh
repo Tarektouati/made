@@ -5,8 +5,9 @@
 #   scripts/bench.sh [base-ref] [out-dir]     # defaults: origin/main, bench-out
 #
 # Needs go, hyperfine, benchstat and python3 on PATH. The report is printed and
-# saved as <out-dir>/report.md. Both sides run back to back on this machine, so
-# only the base-vs-head difference is meaningful, never the absolute numbers.
+# saved as <out-dir>/report.md. Both sides run on this machine (Go benchmarks
+# interleaved, in alternating order), so only the base-vs-head difference is
+# meaningful, never the absolute numbers.
 set -euo pipefail
 
 base_ref=${1:-origin/main}
@@ -21,13 +22,18 @@ done
 git worktree add --detach "$base_dir" "$base_ref" >/dev/null
 trap 'git worktree remove --force "$base_dir"' EXIT
 
-# 1. Go micro-benchmarks. A base without benchmarks just yields an empty file. A
-# failing run is not fatal, but leaves a <side>.bench.failed marker for the report.
-rm -f "$out"/*.bench.failed
-for side in base head; do
-  dir=$head_dir; [ "$side" = base ] && dir=$base_dir
-  (cd "$dir" && { go test -run '^$' -bench . -count 10 ./... || touch "$out/$side.bench.failed"; }) \
-    | tee "$out/$side.bench.txt" | grep -v '^ok\|^PASS\|^?' || true
+# 1. Go micro-benchmarks, in 10 interleaved rounds of -count 1 whose order alternates
+# (base head, head base, ...) so runner drift hits both sides equally. A base without
+# benchmarks just yields a file with no Benchmark lines. A failing round is not
+# fatal, but leaves a <side>.bench.failed marker for the report.
+rm -f "$out"/*.bench.failed "$out"/{base,head}.bench.txt
+for i in $(seq 10); do
+  order="base head"; [ $((i % 2)) -eq 0 ] && order="head base"
+  for side in $order; do
+    dir=$head_dir; [ "$side" = base ] && dir=$base_dir
+    (cd "$dir" && { go test -run '^$' -bench . -count 1 ./... || touch "$out/$side.bench.failed"; }) \
+      | tee -a "$out/$side.bench.txt" | grep -v '^ok\|^PASS\|^?' || true
+  done
 done
 
 # 2. Binaries, built like the CI "build" job; also the binary size data.

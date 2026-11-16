@@ -4,7 +4,9 @@
 Usage: bench-report.py <out-dir>
 
 Sources, all lower-is-better:
-  base.bench.txt / head.bench.txt  go benchmarks, compared by `benchstat` (p < 0.05)
+  base.bench.txt / head.bench.txt  go benchmarks, significant when `benchstat` finds
+                                   p < 0.05 and the medians differ by >= 2% (a tiny
+                                   but consistent shift is significant yet only noise)
   hf-<name>.json                   hyperfine runs, significant when the 95% confidence
                                    intervals of the mean do not overlap and the means
                                    differ by >= 5% (single-digit gaps between identical
@@ -23,6 +25,8 @@ import statistics
 import subprocess
 import sys
 from pathlib import Path
+
+GO_MIN_DELTA = 2.0  # percent
 
 out = Path(sys.argv[1])
 rows = []  # (metric, base, head, delta%, verdict) as display strings
@@ -71,7 +75,9 @@ if has_benchmarks(head_txt):
                 h = float(r[3])
             except ValueError:
                 continue  # a header row
-            add(f"go bench `{r[0]}`", b, h, fmt_time(b), fmt_time(h), r[5] != "~")
+            delta = (h - b) / b * 100
+            add(f"go bench `{r[0]}`", b, h, fmt_time(b), fmt_time(h),
+                r[5] != "~" and abs(delta) >= GO_MIN_DELTA)
     else:
         for r in benchstat_csv(head_txt):
             if len(r) >= 2 and r[0] and r[0] != "geomean":
@@ -105,7 +111,8 @@ print("| --- | --- | --- | --- | --- |")
 for r in rows:
     print("| " + " | ".join(r) + " |")
 print("\nBoth sides ran on the same runner in the same job; lower is better. "
-      "Warn only: this never fails the job. Go benchmarks are significant at benchstat p < 0.05, "
+      "Warn only: this never fails the job. Go benchmarks are significant when benchstat finds p < 0.05 "
+      f"and the change is {GO_MIN_DELTA:g}% or more, "
       "hyperfine timings when the 95% confidence intervals of the mean do not overlap and differ by 5% or more, "
       "binary size at a change of 1% or more.")
 for side in ("base", "head"):

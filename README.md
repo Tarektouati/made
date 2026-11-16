@@ -549,6 +549,11 @@ made bench              # or: scripts/bench.sh [base-ref] [out-dir], base defaul
 go test -run '^$' -bench . -count 10 ./...   # just the Go benchmarks
 ```
 
+The Go benchmarks run in 10 interleaved base/head rounds whose order alternates, so
+drift on the runner affects both sides equally. A Go row is flagged only when
+`benchstat` finds p < 0.05 and the change is 2% or more; hyperfine timings need
+non-overlapping confidence intervals and a 5% change, binary size a 1% change.
+
 ## License
 
 MIT
