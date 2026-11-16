@@ -1220,3 +1220,128 @@ func TestPrintTasksStripsControlChars(t *testing.T) {
 		})
 	}
 }
+
+func TestDisplayWidth(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		in   string
+		want int
+	}{
+		{name: "empty", in: "", want: 0},
+		{name: "ascii", in: "build", want: 5},
+		{name: "cjk", in: "日本語", want: 6},
+		{name: "emoji", in: "emoji🚀", want: 7},
+		{name: "fullwidth", in: "ＡＢ", want: 4},
+		{name: "halfwidth katakana", in: "ｱ", want: 1},
+		{name: "combining accent", in: "e\u0301", want: 1},
+		{name: "precomposed accent", in: "é", want: 1},
+		{name: "emoji selector widens narrow symbol", in: "❤\ufe0f", want: 2},
+		{name: "emoji selector on wide rune", in: "🚀\ufe0f", want: 2},
+		{name: "text selector", in: "❤\ufe0e", want: 1},
+		{name: "lone emoji selector", in: "\ufe0f", want: 0},
+		{name: "zwj", in: "\u200d", want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := displayWidth(tt.in); got != tt.want {
+				t.Errorf("displayWidth(%q) = %d, want %d", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPrintTasksAlignment(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		md    string
+		descs []string
+	}{
+		{
+			name:  "cjk and emoji",
+			md:    "### 日本語\nJapanese.\n```bash\ntrue\n```\n### emoji🚀\nRocket.\n```bash\ntrue\n```\n### build\nBuild it.\n```bash\ntrue\n```\n",
+			descs: []string{"Japanese.", "Rocket.", "Build it."},
+		},
+		{
+			name:  "ascii",
+			md:    "### a\nShort.\n```bash\ntrue\n```\n### long-name\nLong.\n```bash\ntrue\n```\n",
+			descs: []string{"Short.", "Long."},
+		},
+		{
+			name:  "wide name without description",
+			md:    "### 日本語\n```bash\ntrue\n```\n### b\nB.\n```bash\ntrue\n```\n",
+			descs: []string{"", "B."},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tasks, err := parser.Parse([]byte(tt.md))
+			if err != nil {
+				t.Fatalf("parser.Parse: %v", err)
+			}
+			var stdout, stderr bytes.Buffer
+			printTasks(&stdout, &stderr, "tasks.md", tasks)
+			rows := strings.Split(strings.TrimSuffix(stdout.String(), "\n"), "\n")[1:]
+			if len(rows) != len(tt.descs) {
+				t.Fatalf("got %d rows, want %d: %q", len(rows), len(tt.descs), &stdout)
+			}
+			want := -1
+			for i, row := range rows {
+				prefix, ok := strings.CutSuffix(row, tt.descs[i])
+				if !ok {
+					t.Fatalf("row %q does not end with %q", row, tt.descs[i])
+				}
+				col := displayWidth(prefix)
+				if want == -1 {
+					want = col
+				} else if col != want {
+					t.Errorf("row %q: description at column %d, want %d", row, col, want)
+				}
+			}
+		})
+	}
+}
+
+func TestPrintTasksExactOutput(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		tasks []parser.Task
+		want  string
+	}{
+		{
+			name:  "ascii matches tabwriter layout",
+			tasks: []parser.Task{{Name: "a", Description: "Short."}, {Name: "long-name"}, {Name: "mid", Description: "Two\nlines."}},
+			want: "  a          Short.\n" +
+				"  long-name  \n" +
+				"  mid        Two lines.\n",
+		},
+		{
+			name:  "cjk and emoji",
+			tasks: []parser.Task{{Name: "日本語", Description: "Japanese."}, {Name: "emoji🚀", Description: "Rocket."}, {Name: "build", Description: "Build it."}},
+			want: "  日本語   Japanese.\n" +
+				"  emoji🚀  Rocket.\n" +
+				"  build    Build it.\n",
+		},
+		{
+			name:  "emoji selector",
+			tasks: []parser.Task{{Name: "⚙\ufe0f setup", Description: "Gear."}, {Name: "build", Description: "Build it."}},
+			want: "  ⚙\ufe0f setup  Gear.\n" +
+				"  build     Build it.\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var stdout, stderr bytes.Buffer
+			printTasks(&stdout, &stderr, "tasks.md", tt.tasks)
+			want := "Tasks in tasks.md:\n" + tt.want
+			if got := stdout.String(); got != want {
+				t.Errorf("printTasks output = %q, want %q", got, want)
+			}
+		})
+	}
+}
