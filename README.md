@@ -152,7 +152,9 @@ file, takes no `-f`, and is reserved: a task named `completion` cannot be run wi
 
 Running `made` with no task lists the tasks, same as `--list`. When a task runs,
 `made` exits with the script's exit code, so it composes with `&&`, CI steps, and
-git hooks (see [Pre-commit and prek](#pre-commit-and-prek)). An unknown task prints an error and the task list, and exits with `1`.
+git hooks (see [Pre-commit and prek](#pre-commit-and-prek)). A task killed by signal
+n makes `made` exit with `128+n`, as shells report it: `137` for `kill -9`, `141` for
+`SIGPIPE` (e.g. `made task | head -1`). An unknown task prints an error and the task list, and exits with `1`.
 
 **Passing arguments.** Everything after the task name is passed to the script: `$1`, `"$@"` in shell tasks,
 `$argv` in fish, `sys.argv[1:]` in Python, `process.argv.slice(1)` in Node, `ARGV` in
@@ -264,6 +266,8 @@ and then `SIGKILL` after a 3-second grace period, so grandchildren spawned by th
 script are not orphaned. When stdin is an interactive terminal, no separate group
 is created — a background group reading the terminal would be stopped by
 `SIGTTIN`, and the terminal already delivers Ctrl-C to the whole foreground group.
+After such a teardown `made` exits with `130` for `SIGINT` (Ctrl-C) or `143` for
+`SIGTERM`, whatever status the task itself ended with.
 
 ## Example output
 

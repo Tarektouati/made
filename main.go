@@ -201,7 +201,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop, received := notifySignal(os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	dir := ""
@@ -225,15 +225,54 @@ func run(args []string, stdout, stderr io.Writer) int {
 		taskArgs = taskArgs[1:]
 	}
 
-	if err := runner.Run(ctx, task, dir, taskArgs); err != nil {
+	runErr := runner.Run(ctx, task, dir, taskArgs)
+	// Interrupted like a shell would be: 128+n for the signal made received, whatever
+	// status the torn-down task ended with.
+	if sig, ok := received().(syscall.Signal); ok {
+		return 128 + int(sig)
+	}
+	if runErr != nil {
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return exitErr.ExitCode()
+		if errors.As(runErr, &exitErr) {
+			return taskExitCode(exitErr)
 		}
-		fmt.Fprintf(stderr, "made: %v\n", err)
+		fmt.Fprintf(stderr, "made: %v\n", runErr)
 		return 1
 	}
 	return 0
+}
+
+// signalReceived is the cancellation cause of a notifySignal context.
+type signalReceived struct{ sig os.Signal }
+
+func (s signalReceived) Error() string { return s.sig.String() + " signal received" }
+
+// notifySignal is signal.NotifyContext that also remembers which signal arrived:
+// ctx is cancelled on the first of sigs, and received reports that signal (nil if
+// none came). stop releases the signal handler and ctx.
+func notifySignal(sigs ...os.Signal) (ctx context.Context, stop func(), received func() os.Signal) {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, sigs...)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	go func() {
+		select {
+		case s := <-ch:
+			cancel(signalReceived{s})
+		case <-ctx.Done():
+		}
+	}()
+	stop = func() {
+		signal.Stop(ch)
+		cancel(nil)
+	}
+	received = func() os.Signal {
+		var s signalReceived
+		if errors.As(context.Cause(ctx), &s) {
+			return s.sig
+		}
+		return nil
+	}
+	return ctx, stop, received
 }
 
 // initMadefile writes madefileTemplate to Madefile.md in the current directory and
