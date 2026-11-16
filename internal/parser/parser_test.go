@@ -94,6 +94,100 @@ func TestParseFirstCodeBlockWins(t *testing.T) {
 	}
 }
 
+func TestParseCRLF(t *testing.T) {
+	tests := []struct {
+		name       string
+		src        string
+		wantName   string
+		wantDesc   string
+		wantLang   string
+		wantScript string
+	}{
+		{
+			name:       "multi-line block",
+			src:        "### crlf\r\n```bash\r\nif true; then\r\n  echo yes\r\nfi\r\n```\r\n",
+			wantName:   "crlf",
+			wantLang:   "bash",
+			wantScript: "if true; then\n  echo yes\nfi\n",
+		},
+		{
+			name:       "single line",
+			src:        "### hi\r\n```bash\r\necho hi\r\n```\r\n",
+			wantName:   "hi",
+			wantLang:   "bash",
+			wantScript: "echo hi\n",
+		},
+		{
+			name:       "heading description and lang",
+			src:        "### say-hello\r\nPrints a friendly greeting.\r\n```bash\r\necho hello\r\n```\r\n",
+			wantName:   "say-hello",
+			wantDesc:   "Prints a friendly greeting.",
+			wantLang:   "bash",
+			wantScript: "echo hello\n",
+		},
+		{
+			name:       "blank line inside block",
+			src:        "### t\r\n```bash\r\necho a\r\n\r\necho b\r\n```\r\n",
+			wantName:   "t",
+			wantLang:   "bash",
+			wantScript: "echo a\n\necho b\n",
+		},
+		{
+			name:       "mixed endings",
+			src:        "### t\n```bash\r\necho a\necho b\r\n```\n",
+			wantName:   "t",
+			wantLang:   "bash",
+			wantScript: "echo a\necho b\n",
+		},
+		{
+			name:       "tilde fence",
+			src:        "### t\r\n~~~bash\r\necho a\r\n~~~\r\n",
+			wantName:   "t",
+			wantLang:   "bash",
+			wantScript: "echo a\n",
+		},
+		{
+			name:       "mid-line CR kept",
+			src:        "### t\r\n```bash\r\nprintf 'a\rb'\r\n```\r\n",
+			wantName:   "t",
+			wantLang:   "bash",
+			wantScript: "printf 'a\rb'\n",
+		},
+		{
+			name:       "LF only unchanged",
+			src:        "### say-hello\nPrints a friendly greeting.\n```bash\necho hello\n```\n",
+			wantName:   "say-hello",
+			wantDesc:   "Prints a friendly greeting.",
+			wantLang:   "bash",
+			wantScript: "echo hello\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tasks, err := Parse([]byte(tt.src))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if len(tasks) != 1 {
+				t.Fatalf("got %d tasks, want 1", len(tasks))
+			}
+			got := tasks[0]
+			if got.Name != tt.wantName {
+				t.Errorf("Name = %q, want %q", got.Name, tt.wantName)
+			}
+			if got.Description != tt.wantDesc {
+				t.Errorf("Description = %q, want %q", got.Description, tt.wantDesc)
+			}
+			if got.Lang != tt.wantLang {
+				t.Errorf("Lang = %q, want %q", got.Lang, tt.wantLang)
+			}
+			if got.Script != tt.wantScript {
+				t.Errorf("Script = %q, want %q", got.Script, tt.wantScript)
+			}
+		})
+	}
+}
+
 func TestParseEmpty(t *testing.T) {
 	tasks, err := Parse([]byte("# just a doc\n\nno tasks here.\n"))
 	if err != nil {

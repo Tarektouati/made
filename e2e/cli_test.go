@@ -132,6 +132,18 @@ func TestRunTask(t *testing.T) {
 	}
 }
 
+func TestRunCRLFTask(t *testing.T) {
+	requireBash(t)
+	dir := writeTasks(t, "crlf.md", "### crlf\r\n```bash\r\nif true; then\r\n  echo yes\r\nfi\r\n```\r\n")
+	stdout, stderr, code := runMade(t, dir, "-f", "crlf.md", "crlf")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (stderr: %s)", code, stderr)
+	}
+	if stdout != "yes\n" {
+		t.Errorf("stdout = %q, want %q", stdout, "yes\n")
+	}
+}
+
 func TestRunTaskCustomFile(t *testing.T) {
 	requireBash(t)
 	dir := writeTasks(t, "tasks.md", tasksMD)
