@@ -665,6 +665,84 @@ func TestInitForceSkipsDirectory(t *testing.T) {
 	}
 }
 
+// initSymlinkMadefileTree mirrors issue #67: Madefile.md symlinks to a file outside repo/.
+func initSymlinkMadefileTree(t *testing.T) (repo, target string) {
+	t.Helper()
+	base := t.TempDir()
+	outDir := filepath.Join(base, "outside")
+	repo = filepath.Join(base, "repo")
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target = filepath.Join(outDir, "target.txt")
+	if err := os.WriteFile(target, []byte("ORIGINAL"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(repo, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(rel, filepath.Join(repo, "Madefile.md")); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
+	return repo, target
+}
+
+// TestWriteTemplateNoFollowRefusesSymlink checks force open flags do not follow a symlink.
+func TestWriteTemplateNoFollowRefusesSymlink(t *testing.T) {
+	if initForceNoFollow == 0 {
+		t.Skip("O_NOFOLLOW not used on this platform")
+	}
+	repo, target := initSymlinkMadefileTree(t)
+	t.Chdir(repo)
+	if err := writeTemplate("Madefile.md", os.O_TRUNC|initForceNoFollow); err == nil {
+		t.Fatal("writeTemplate on symlink with O_NOFOLLOW = nil, want error")
+	}
+	if got, _ := os.ReadFile(target); string(got) != "ORIGINAL" {
+		t.Errorf("symlink target = %q, want %q", got, "ORIGINAL")
+	}
+}
+
+// TestInitForceRefusesSymlink checks made init --force does not follow a symlinked Madefile.
+func TestInitForceRefusesSymlink(t *testing.T) {
+	repo, target := initSymlinkMadefileTree(t)
+	t.Chdir(repo)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"init", "--force"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("run(init --force) = %d, want 1 (stdout: %q, stderr: %q)", code, &stdout, &stderr)
+	}
+	checkContains(t, "stderr", stderr.String(), []string{"Madefile.md", "symlink", "refusing"}, true)
+	if got, _ := os.ReadFile(target); string(got) != "ORIGINAL" {
+		t.Errorf("symlink target = %q, want %q", got, "ORIGINAL")
+	}
+	if info, err := os.Lstat("Madefile.md"); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("Madefile.md is no longer a symlink (err: %v)", err)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", stdout.String())
+	}
+}
+
+// TestInitRefusesSymlinkWithoutFollowing checks plain made init never writes through a symlink.
+func TestInitRefusesSymlinkWithoutFollowing(t *testing.T) {
+	repo, target := initSymlinkMadefileTree(t)
+	t.Chdir(repo)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"init"}, &stdout, &stderr); code != 1 {
+		t.Errorf("run(init) = %d, want 1", code)
+	}
+	checkContains(t, "stderr", stderr.String(), []string{"Madefile.md already exists", "made init --force"}, true)
+	if got, _ := os.ReadFile(target); string(got) != "ORIGINAL" {
+		t.Errorf("symlink target = %q, want %q", got, "ORIGINAL")
+	}
+	if info, err := os.Lstat("Madefile.md"); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("Madefile.md is no longer a symlink (err: %v)", err)
+	}
+}
+
 // TestInitDirectoryOnly checks that a directory named Madefile.md is neither
 // overwritten nor reported as an existing Madefile.
 func TestInitDirectoryOnly(t *testing.T) {

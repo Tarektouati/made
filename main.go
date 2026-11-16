@@ -280,9 +280,18 @@ func initMadefile(stdout, stderr io.Writer, force bool) int {
 	if len(present) > 1 {
 		fmt.Fprintf(stderr, "made: also found %s; left unchanged\n", strings.Join(present[1:], ", "))
 	}
+	if isSymlink(target) {
+		fmt.Fprintf(stderr, "made: %s is a symlink (refusing to overwrite)\n", target)
+		return 1
+	}
 	// No O_CREATE: overwrite the file that is there, never create one under a
-	// different case.
-	if err := writeTemplate(target, os.O_TRUNC); err != nil {
+	// different case. O_NOFOLLOW (on unix) refuses the path if it becomes
+	// a symlink between the check above and open.
+	if err := writeTemplate(target, os.O_TRUNC|initForceNoFollow); err != nil {
+		if isSymlink(target) {
+			fmt.Fprintf(stderr, "made: %s is a symlink (refusing to overwrite)\n", target)
+			return 1
+		}
 		fmt.Fprintf(stderr, "made: cannot write %s: %v\n", target, err)
 		return 1
 	}
@@ -393,6 +402,12 @@ func readMadefile(path string) ([]byte, error) {
 func isRegularFile(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Mode().IsRegular()
+}
+
+// isSymlink reports whether path exists and is a symlink (does not follow the link).
+func isSymlink(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode()&os.ModeSymlink != 0
 }
 
 func find(tasks []parser.Task, name string) (parser.Task, bool) {

@@ -140,8 +140,10 @@ instead, keeping its name (so a `madefile.md` stays `madefile.md`), and prints
 `made: overwrote <name>`. If several Madefile names exist, only the one `made`
 reads (`Madefile.md`, then `madefile.md`, then `MADEFILE.md`) is overwritten; the
 others are named on stderr and left unchanged. Directories with these names are
-not Madefiles and are never overwritten. The flag goes after `init`. With no
-existing Madefile, it behaves like plain `made init`.
+not Madefiles and are never overwritten. A Madefile name that is a **symlink** is
+not overwritten, even with `--force`: `made` exits with `1` and leaves the link and
+its target alone. The flag goes after `init`. With no existing Madefile, it behaves
+like plain `made init`.
 
 **`made completion <shell>`** prints the completion script for `bash`, `zsh`, or
 `fish` (see [Shell completion](#shell-completion)). Like `init`, it needs no task
