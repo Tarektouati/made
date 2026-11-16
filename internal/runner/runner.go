@@ -102,8 +102,10 @@ var interpreters = map[string]interpreter{
 // stdin/stdout/stderr and environment. The script runs in dir; an empty dir inherits
 // the current process's working directory. An unsupported language
 // returns an error before anything runs, and an interpreter missing from PATH returns
-// an error naming it, the task, and its language (wrapping exec.ErrNotFound). A
-// failing script returns an *exec.ExitError whose ExitCode the caller can propagate.
+// an error naming it, the task, and its language (wrapping exec.ErrNotFound). A script
+// too large for the OS argument limit returns an error giving its size, before anything
+// runs. A failing script returns an *exec.ExitError whose ExitCode the caller can
+// propagate.
 //
 // Shell tasks run in strict mode: bash and zsh with errexit and pipefail, sh with
 // errexit only. A failing command therefore stops the task with its exit code rather
@@ -144,6 +146,10 @@ func Run(ctx context.Context, t parser.Task, dir string, args []string) error {
 		if errors.Is(err, exec.ErrNotFound) {
 			return fmt.Errorf("%q was not found on PATH (required by task %q, language %s); install it or change the code fence language: %w",
 				in.cmd, t.Name, langLabel(t.Lang), exec.ErrNotFound)
+		}
+		if argListTooLong(err) {
+			return fmt.Errorf("task %q: script is %d bytes, too large to pass to %q as a command-line argument (the OS limit is about %d bytes); move the bulk of it into a file the task runs: %w",
+				t.Name, len(t.Script), in.cmd, argLimit, err)
 		}
 		return err
 	}
