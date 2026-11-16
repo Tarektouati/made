@@ -269,6 +269,8 @@ func TestSIGINTCancellation(t *testing.T) {
 	}{
 		{"SIGINT", os.Interrupt, 130},
 		{"SIGTERM", syscall.SIGTERM, 143},
+		{"SIGHUP", syscall.SIGHUP, 129},
+		{"SIGQUIT", syscall.SIGQUIT, 131},
 	} {
 		t.Run(tc.name, func(t *testing.T) { checkCancellation(t, tc.sig, tc.want) })
 	}
@@ -485,7 +487,7 @@ func TestVersionFlag(t *testing.T) {
 	}
 }
 
-func TestSIGINTKillsGrandchild(t *testing.T) {
+func TestSignalsKillGrandchild(t *testing.T) {
 	requireBash(t)
 	if runtime.GOOS == "windows" {
 		t.Skip("process-group teardown is unix-only")
@@ -494,7 +496,90 @@ func TestSIGINTKillsGrandchild(t *testing.T) {
 	// The task backgrounds a grandchild that writes a marker after a delay, then waits.
 	// If made tears down the whole process group on cancel, the grandchild is killed
 	// before it can write the marker.
-	content := "### long\n```bash\n( sleep 3; echo alive > marker.txt ) &\necho started\nwait\n```\n"
+	tests := []struct {
+		name string
+		sig  syscall.Signal
+	}{
+		{"SIGINT", syscall.SIGINT},
+		{"SIGTERM", syscall.SIGTERM},
+		{"SIGHUP", syscall.SIGHUP},
+		{"SIGQUIT", syscall.SIGQUIT},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			content := "### long\n```bash\n( sleep 3; echo alive > marker.txt ) &\necho started\nwait\n```\n"
+			dir := writeTasks(t, "Madefile.md", content)
+
+			outPath := filepath.Join(t.TempDir(), "out.txt")
+			outFile, err := os.Create(outPath)
+			if err != nil {
+				t.Fatalf("create out file: %v", err)
+			}
+			defer func() { _ = outFile.Close() }()
+
+			var stderr bytes.Buffer
+			cmd := exec.CommandContext(t.Context(), madeBin, "long")
+			cmd.Dir = dir
+			cmd.Stdout = outFile
+			cmd.Stderr = &stderr
+			output := func() string {
+				b, _ := os.ReadFile(outPath)
+				return string(b)
+			}
+
+			if err := cmd.Start(); err != nil {
+				t.Fatalf("start made: %v", err)
+			}
+			waitErr := make(chan error, 1)
+			go func() { waitErr <- cmd.Wait() }()
+
+			deadline := time.Now().Add(10 * time.Second)
+			for !strings.Contains(output(), "started") {
+				if time.Now().After(deadline) {
+					_ = cmd.Process.Kill()
+					t.Fatal("task never printed 'started'")
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+
+			if err := cmd.Process.Signal(tt.sig); err != nil {
+				t.Fatalf("send %s: %v", tt.name, err)
+			}
+			select {
+			case <-waitErr:
+			case <-time.After(10 * time.Second):
+				_ = cmd.Process.Kill()
+				t.Fatalf("made did not exit within 10s of %s", tt.name)
+			}
+
+			// Go's default SIGQUIT handler dumps goroutines; a handled signal must not.
+			if strings.Contains(stderr.String(), "goroutine ") {
+				t.Errorf("stderr contains a goroutine dump after %s; signal not handled:\n%s", tt.name, stderr.String())
+			}
+
+			// Wait past the grandchild's delay; if its group was torn down it never wrote.
+			time.Sleep(4 * time.Second)
+			marker := filepath.Join(dir, "marker.txt")
+			if _, err := os.Stat(marker); err == nil {
+				t.Errorf("grandchild survived %s and wrote marker.txt; process group not torn down", tt.name)
+			} else if !os.IsNotExist(err) {
+				t.Fatalf("stat marker: %v", err)
+			}
+		})
+	}
+}
+
+// TestSIGHUPIgnoredKeepsTask checks that made started with SIGHUP ignored, as under
+// nohup, does not subscribe to it: a hangup must leave the task running to the end.
+func TestSIGHUPIgnoredKeepsTask(t *testing.T) {
+	requireBash(t)
+	if runtime.GOOS == "windows" {
+		t.Skip("SIGHUP is unix-only")
+	}
+
+	content := "### long\n```bash\necho started; sleep 2; echo done\n```\n"
 	dir := writeTasks(t, "Madefile.md", content)
 
 	outPath := filepath.Join(t.TempDir(), "out.txt")
@@ -504,7 +589,8 @@ func TestSIGINTKillsGrandchild(t *testing.T) {
 	}
 	defer func() { _ = outFile.Close() }()
 
-	cmd := exec.CommandContext(t.Context(), madeBin, "long")
+	// exec keeps the pid and the ignored disposition, so cmd.Process is made itself.
+	cmd := exec.CommandContext(t.Context(), "bash", "-c", `trap "" HUP; exec "$0" long`, madeBin)
 	cmd.Dir = dir
 	cmd.Stdout = outFile
 	output := func() string {
@@ -527,23 +613,20 @@ func TestSIGINTKillsGrandchild(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	if err := cmd.Process.Signal(os.Interrupt); err != nil {
-		t.Fatalf("send SIGINT: %v", err)
+	if err := cmd.Process.Signal(syscall.SIGHUP); err != nil {
+		t.Fatalf("send SIGHUP: %v", err)
 	}
 	select {
-	case <-waitErr:
+	case err := <-waitErr:
+		if err != nil {
+			t.Errorf("made under an ignored SIGHUP: err = %v, want exit 0", err)
+		}
 	case <-time.After(10 * time.Second):
 		_ = cmd.Process.Kill()
-		t.Fatal("made did not exit within 10s of SIGINT")
+		t.Fatal("made did not exit within 10s")
 	}
-
-	// Wait past the grandchild's delay; if its group was torn down it never wrote.
-	time.Sleep(4 * time.Second)
-	marker := filepath.Join(dir, "marker.txt")
-	if _, err := os.Stat(marker); err == nil {
-		t.Error("grandchild survived cancellation and wrote marker.txt; process group not torn down")
-	} else if !os.IsNotExist(err) {
-		t.Fatalf("stat marker: %v", err)
+	if got := output(); !strings.Contains(got, "done") {
+		t.Errorf("output = %q, want the task to finish and print %q", got, "done")
 	}
 }
 
