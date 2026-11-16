@@ -13,6 +13,7 @@ package parser
 import (
 	"bytes"
 	"strings"
+	"unicode"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
@@ -30,7 +31,7 @@ var utf8BOM = []byte("\xef\xbb\xbf")
 type Task struct {
 	Name        string
 	Description string
-	Lang        string // fence info string (e.g. "bash"); captured but unused in v1
+	Lang        string // fence language (first word of the info string, e.g. "bash")
 	Script      string // code block body
 }
 
@@ -70,7 +71,7 @@ func Parse(source []byte) ([]Task, error) {
 			}
 		case *ast.FencedCodeBlock:
 			if cur != nil && cur.Script == "" {
-				cur.Lang = string(node.Language(source))
+				cur.Lang = fenceLanguage(node, source)
 				cur.Description = strings.Join(desc, "\n")
 				cur.Script = codeText(node, source)
 				tasks = append(tasks, *cur)
@@ -95,6 +96,27 @@ func headingText(n ast.Node, source []byte) string {
 		}
 	}
 	return b.String()
+}
+
+// fenceLanguage returns the language word of a fence's info string. It ends at the
+// first whitespace, '{', or ',', so "bash{.x}" and "bash,title" both yield "bash".
+// An info string that starts with '{' or ',' falls back to its first
+// whitespace-delimited word, so the runner rejects it instead of defaulting to bash.
+func fenceLanguage(n *ast.FencedCodeBlock, source []byte) string {
+	if n.Info == nil {
+		return ""
+	}
+	info := n.Info.Segment.Value(source)
+	cut := bytes.IndexFunc(info, func(r rune) bool {
+		return unicode.IsSpace(r) || r == '{' || r == ','
+	})
+	if cut == 0 {
+		cut = bytes.IndexFunc(info, unicode.IsSpace)
+	}
+	if cut < 0 {
+		return string(info)
+	}
+	return string(info[:cut])
 }
 
 // codeText joins the raw lines of a fenced code block, normalising CRLF to LF.
