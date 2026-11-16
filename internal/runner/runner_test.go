@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/Tarektouati/made/internal/parser"
@@ -173,26 +176,166 @@ func TestRunEmptyDirInheritsCwd(t *testing.T) {
 	}
 }
 
-func TestRunMissingInterpreter(t *testing.T) {
-	t.Setenv("PATH", t.TempDir())
+// fakeBin is a file written into a test PATH directory.
+type fakeBin struct {
+	name string
+	mode os.FileMode
+	body string
+}
+
+// fakePath sets PATH to a fresh directory holding bins and returns the directory.
+func fakePath(t *testing.T, bins ...fakeBin) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, b := range bins {
+		p := filepath.Join(dir, b.name)
+		if err := os.WriteFile(p, []byte(b.body), b.mode); err != nil {
+			t.Fatalf("write %s: %v", p, err)
+		}
+		if err := os.Chmod(p, b.mode); err != nil { // WriteFile's mode is subject to umask
+			t.Fatalf("chmod %s: %v", p, err)
+		}
+	}
+	t.Setenv("PATH", dir)
+	return dir
+}
+
+func TestRunInterpreterStartErrors(t *testing.T) {
 	tests := []struct {
-		name, lang string
-		want       []string
+		name     string
+		lang     string
+		bins     []fakeBin
+		unixOnly bool
+		wantIs   error
+		wantCode int
+		want     []string
+		notWant  []string
 	}{
-		{"python", "python", []string{`"python3" was not found on PATH`, `task "py"`, `language "python"`}},
-		{"plain fence", "", []string{`"bash" was not found on PATH`, `task "py"`, `"bash" (default for a plain fence)`}},
+		{
+			name: "python not found", lang: "python",
+			wantIs: exec.ErrNotFound, wantCode: 127,
+			want:    []string{`neither "python3" nor "python" was found on PATH`, `task "py"`, `language "python"`},
+			notWant: []string{"executable file not found"},
+		},
+		{
+			name: "python3 fence does not fall back", lang: "python3",
+			bins:     []fakeBin{{"python", 0o755, "#!/bin/sh\nexit 0\n"}},
+			unixOnly: true,
+			wantIs:   exec.ErrNotFound, wantCode: 127,
+			want:    []string{`"python3" was not found on PATH`, `language "python3"`},
+			notWant: []string{"executable file not found", "neither"},
+		},
+		{
+			name:   "plain fence not found",
+			wantIs: exec.ErrNotFound, wantCode: 127,
+			want:    []string{`"bash" was not found on PATH`, `task "py"`, `"bash" (default for a plain fence)`},
+			notWant: []string{"executable file not found"},
+		},
+		{
+			name:     "not executable",
+			bins:     []fakeBin{{"bash", 0o644, "#!/bin/sh\nexit 0\n"}},
+			unixOnly: true,
+			wantIs:   fs.ErrPermission, wantCode: 126,
+			want:    []string{`"bash" at `, "is not executable", `task "py"`},
+			notWant: []string{"was not found"},
+		},
+		{
+			name:     "broken shebang",
+			bins:     []fakeBin{{"bash", 0o755, "#!/nonexistent/interp\n"}},
+			unixOnly: true,
+			wantIs:   fs.ErrNotExist, wantCode: 126,
+			want:    []string{`cannot run "bash" at `, `task "py"`, "#! line"},
+			notWant: []string{"fork/exec"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.unixOnly && runtime.GOOS == "windows" {
+				t.Skip("needs Unix permission bits and shebangs")
+			}
+			dir := fakePath(t, tt.bins...)
 			err := Run(context.Background(), parser.Task{Name: "py", Lang: tt.lang, Script: "x"}, "", nil)
-			if !errors.Is(err, exec.ErrNotFound) {
-				t.Fatalf("Run: error = %v, want it to wrap exec.ErrNotFound", err)
+			if !errors.Is(err, tt.wantIs) {
+				t.Fatalf("Run: error = %v, want it to wrap %v", err, tt.wantIs)
+			}
+			var ie *InterpreterError
+			if !errors.As(err, &ie) {
+				t.Fatalf("Run: error = %v (%T), want *InterpreterError", err, err)
+			}
+			if got := ie.ExitCode(); got != tt.wantCode {
+				t.Errorf("ExitCode = %d, want %d", got, tt.wantCode)
+			}
+			msg := err.Error()
+			if len(tt.bins) > 0 && tt.wantIs != exec.ErrNotFound && !strings.Contains(msg, filepath.Join(dir, tt.bins[0].name)) {
+				t.Errorf("error = %q, want it to name the path in %s", msg, dir)
 			}
 			for _, w := range tt.want {
-				if !strings.Contains(err.Error(), w) {
-					t.Errorf("error = %q, want it to contain %q", err.Error(), w)
+				if !strings.Contains(msg, w) {
+					t.Errorf("error = %q, want it to contain %q", msg, w)
 				}
 			}
+			for _, w := range tt.notWant {
+				if strings.Contains(msg, w) {
+					t.Errorf("error = %q, want it not to contain %q", msg, w)
+				}
+			}
+		})
+	}
+}
+
+func TestInterpreterErrorMessage(t *testing.T) {
+	// A start errno that matches fs.ErrPermission (EACCES, e.g. a noexec mount) is not
+	// the "not executable" case, which only a PATH scan finding the file reports.
+	tests := []struct {
+		name    string
+		err     *InterpreterError
+		want    string
+		notWant string
+	}{
+		{"not executable", &InterpreterError{Cmd: "bash", Path: "/x/bash", Err: fs.ErrPermission, NotExecutable: true}, `"bash" at /x/bash is not executable`, "cannot run"},
+		{"start EACCES", &InterpreterError{Cmd: "bash", Path: "/x/bash", Err: syscall.EACCES}, `cannot run "bash" at /x/bash`, "is not executable"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := tt.err.Error()
+			if !strings.Contains(msg, tt.want) {
+				t.Errorf("error = %q, want it to contain %q", msg, tt.want)
+			}
+			if strings.Contains(msg, tt.notWant) {
+				t.Errorf("error = %q, want it not to contain %q", msg, tt.notWant)
+			}
+			if got := tt.err.ExitCode(); got != 126 {
+				t.Errorf("ExitCode = %d, want 126", got)
+			}
+		})
+	}
+}
+
+func TestRunPythonFallback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake interpreters are shell scripts")
+	}
+	// Each fake interpreter exits with its own code, so the error tells which one ran.
+	tests := []struct {
+		name     string
+		bins     []fakeBin
+		wantCode int // 0: Run returns nil
+	}{
+		{"only python", []fakeBin{{"python", 0o755, "#!/bin/sh\nexit 0\n"}}, 0},
+		{"python3 preferred", []fakeBin{{"python3", 0o755, "#!/bin/sh\nexit 0\n"}, {"python", 0o755, "#!/bin/sh\nexit 7\n"}}, 0},
+		{"python used when python3 missing", []fakeBin{{"python", 0o755, "#!/bin/sh\nexit 7\n"}}, 7},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakePath(t, tt.bins...)
+			err := Run(context.Background(), parser.Task{Name: "py", Lang: "python", Script: "x"}, "", nil)
+			if tt.wantCode == 0 {
+				if err != nil {
+					t.Fatalf("Run: %v, want nil", err)
+				}
+				return
+			}
+			wantExitCode(t, err, tt.wantCode)
 		})
 	}
 }

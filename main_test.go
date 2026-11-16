@@ -138,6 +138,39 @@ func TestRunTaskArgs(t *testing.T) {
 	})
 }
 
+// TestRunInterpreterExitCodes checks that an interpreter start failure exits with the
+// shell's codes: 127 when it is not on PATH, 126 when it is there but not executable.
+func TestRunInterpreterExitCodes(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "tasks.md")
+	content := "### py\n```python\nprint('hi')\n```\n\n### plain\n```\necho hi\n```\n"
+	if err := os.WriteFile(f, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("not found", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		checkRunCases(t, []runCase{
+			{name: "python", args: []string{"-f", f, "py"}, wantCode: 127, wantStderr: []string{`made: neither "python3" nor "python" was found on PATH`}, notStderr: []string{"executable file not found"}},
+			{name: "plain fence", args: []string{"-f", f, "plain"}, wantCode: 127, wantStderr: []string{`made: "bash" was not found on PATH`}, notStderr: []string{"executable file not found"}},
+		})
+	})
+
+	t.Run("not executable", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("needs Unix permission bits")
+		}
+		dir := t.TempDir()
+		bash := filepath.Join(dir, "bash")
+		if err := os.WriteFile(bash, []byte("#!/bin/sh\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", dir)
+		checkRunCases(t, []runCase{
+			{name: "plain fence", args: []string{"-f", f, "plain"}, wantCode: 126, wantStderr: []string{`"bash" at ` + bash + " is not executable"}},
+		})
+	})
+}
+
 // TestRunIsReentrant guards against a return to package-global flag state, which
 // panics with "flag redefined" on the second call.
 func TestRunIsReentrant(t *testing.T) {

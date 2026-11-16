@@ -243,7 +243,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return taskExitCode(exitErr)
 		}
 		fmt.Fprintf(stderr, "made: %v\n", runErr)
-		return 1
+		code := 1
+		var interpErr *runner.InterpreterError
+		if errors.As(runErr, &interpErr) {
+			code = interpErr.ExitCode()
+		}
+		return code
 	}
 	return 0
 }
