@@ -192,6 +192,12 @@ The code fence's language selects the interpreter. Matching is case-insensitive.
 A fence with no language defaults to `bash`. An unsupported language (e.g. `yaml`)
 is an error rather than being run under bash.
 
+Only the first word of the fence's info string selects the language. It ends at the
+first space, `{`, or `,`, so `bash title="x"`, `bash {1,3}`, `bash{.x}`, and
+`bash,title` all run as `bash`. A fence whose info string starts with `{` (e.g.
+Pandoc's `{.python}`) is reported as an unsupported language rather than run under
+bash.
+
 **Shell tasks fail fast.** `bash`, `sh`, and `zsh` tasks run in strict mode: the task
 stops at the first failing command and `made` exits with that command's code, so a
 later successful line can't hide an earlier failure. The shell's usual `errexit`

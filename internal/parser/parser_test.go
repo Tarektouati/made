@@ -33,6 +33,40 @@ func TestParseBasic(t *testing.T) {
 	}
 }
 
+func TestParseFenceLanguage(t *testing.T) {
+	tests := []struct {
+		name     string
+		open     string
+		close    string
+		wantLang string
+	}{
+		{"plain", "```bash", "```", "bash"},
+		{"space attrs", "```bash title=\"x\"", "```", "bash"},
+		{"space braces", "```bash {1,3}", "```", "bash"},
+		{"brace attrs", "```bash{.x}", "```", "bash"},
+		{"comma opts", "```bash,title", "```", "bash"},
+		{"tilde fence brace", "~~~python{.x}", "~~~", "python"},
+		{"case preserved", "```Bash,x", "```", "Bash"},
+		{"no language", "```", "```", ""},
+		{"pandoc class only", "```{.python}", "```", "{.python}"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := []byte("### t\n" + tt.open + "\necho hi\n" + tt.close + "\n")
+			tasks, err := Parse(src)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if len(tasks) != 1 {
+				t.Fatalf("got %d tasks, want 1", len(tasks))
+			}
+			if got := tasks[0].Lang; got != tt.wantLang {
+				t.Errorf("Lang = %q, want %q", got, tt.wantLang)
+			}
+		})
+	}
+}
+
 func TestParseMultipleTasks(t *testing.T) {
 	src := []byte("# Title\n\n## Section\n\n### one\n```bash\necho 1\n```\n\n### two\nsecond task\n```sh\necho 2\n```\n")
 	tasks, err := Parse(src)
