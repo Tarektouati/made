@@ -81,30 +81,34 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("made", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&file, "file", "", "Markdown file to read tasks from (default: nearest Madefile.md, searched up to the repository root, or the filesystem root outside a repository)")
-	fs.StringVar(&file, "f", "", "shorthand for -file")
+	fs.StringVar(&file, "f", "", "shorthand for --file")
 	fs.BoolVar(&noChdir, "no-chdir", false, "run the task in the current directory instead of the task file's directory")
 	fs.BoolVar(&list, "list", false, "list available tasks")
-	fs.BoolVar(&list, "l", false, "list available tasks (shorthand)")
+	fs.BoolVar(&list, "l", false, "shorthand for --list")
 	fs.BoolVar(&showVersion, "version", false, "print version and exit")
-	fs.BoolVar(&showVersion, "V", false, "print version and exit (shorthand)")
+	fs.BoolVar(&showVersion, "V", false, "shorthand for --version")
 	// list-names is for the completion scripts and stays out of the usage text.
 	fs.BoolVar(&listNames, "list-names", false, "print task names and descriptions, tab-separated, one per line")
-	fs.Usage = func() {
-		fmt.Fprintf(stderr, "Usage: made [-f file] [--no-chdir] [task [--] [args...]]\n")
-		fmt.Fprintf(stderr, "       made init [--force]\n")
-		fmt.Fprintf(stderr, "       made completion <%s>\n\n", strings.Join(completion.Shells, "|"))
-		fmt.Fprintf(stderr, "Run a task defined as an H3 heading + code block in a Markdown file.\n")
-		fmt.Fprintf(stderr, "`made init` creates a starter Madefile.md in the current directory;\n")
-		fmt.Fprintf(stderr, "--force overwrites an existing one.\n")
-		fmt.Fprintf(stderr, "`made completion <shell>` prints a shell completion script.\n\n")
-		printVisibleDefaults(fs, stderr, "list-names")
+	printUsage := func(w io.Writer) {
+		fmt.Fprintf(w, "Usage: made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]\n")
+		fmt.Fprintf(w, "       made init [--force]\n")
+		fmt.Fprintf(w, "       made completion <%s>\n\n", strings.Join(completion.Shells, "|"))
+		fmt.Fprintf(w, "Run a task defined as an H3 heading + code block in a Markdown file.\n")
+		fmt.Fprintf(w, "`made init` creates a starter Madefile.md in the current directory;\n")
+		fmt.Fprintf(w, "--force overwrites an existing one.\n")
+		fmt.Fprintf(w, "`made completion <shell>` prints a shell completion script.\n\n")
+		printOptions(w, fs, mainOptions)
 	}
+	// fs still reports parse errors on stderr; the usage is printed below so that help
+	// can go to stdout.
+	fs.Usage = func() {}
 	if err := fs.Parse(args); err != nil {
-		// fs has already reported the error and the usage on stderr. Keep the exit
-		// codes flag.ExitOnError used: 0 for -h/-help, 2 for a bad flag.
+		// Keep the exit codes flag.ExitOnError used: 0 for -h/-help, 2 for a bad flag.
 		if errors.Is(err, flag.ErrHelp) {
+			printUsage(stdout)
 			return 0
 		}
+		printUsage(stderr)
 		return 2
 	}
 
@@ -140,15 +144,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 		ifs := flag.NewFlagSet("made init", flag.ContinueOnError)
 		ifs.SetOutput(stderr)
 		ifs.BoolVar(&force, "force", false, "overwrite an existing Madefile in the current directory")
-		ifs.Usage = func() {
-			fmt.Fprintf(stderr, "Usage: made init [--force]\n\n")
-			fmt.Fprintf(stderr, "Create a starter %s in the current directory.\n\n", madefileNames[0])
-			ifs.PrintDefaults()
+		printInitUsage := func(w io.Writer) {
+			fmt.Fprintf(w, "Usage: made init [--force]\n\n")
+			fmt.Fprintf(w, "Create a starter %s in the current directory.\n\n", madefileNames[0])
+			printOptions(w, ifs, initOptions)
 		}
+		ifs.Usage = func() {}
 		if err := ifs.Parse(fs.Args()[1:]); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
+				printInitUsage(stdout)
 				return 0
 			}
+			printInitUsage(stderr)
 			return 2
 		}
 		if ifs.NArg() > 0 {
@@ -529,18 +536,47 @@ func printNames(stdout io.Writer, tasks []parser.Task) {
 	}
 }
 
-// printVisibleDefaults is fs.PrintDefaults without the flags named in hidden.
-func printVisibleDefaults(fs *flag.FlagSet, w io.Writer, hidden ...string) {
-	visible := flag.NewFlagSet(fs.Name(), flag.ContinueOnError)
-	visible.SetOutput(w)
-	fs.VisitAll(func(f *flag.Flag) {
-		if slices.Contains(hidden, f.Name) {
-			return
+// usageOption is one line of the options list in the usage text: an optional short
+// name, the long name, and an optional argument placeholder.
+type usageOption struct{ short, long, arg string }
+
+// mainOptions are the flags shown by made --help, in display order. Flags left out
+// (list-names) stay hidden.
+var mainOptions = []usageOption{
+	{short: "f", long: "file", arg: "file"},
+	{long: "no-chdir"},
+	{short: "l", long: "list"},
+	{short: "V", long: "version"},
+	{short: "h", long: "help"},
+}
+
+// initOptions are the flags shown by made init --help.
+var initOptions = []usageOption{
+	{long: "force"},
+	{short: "h", long: "help"},
+}
+
+// printOptions writes opts as an aligned "-s, --long <arg>  description" list. The
+// description is the usage registered on fs for the long name; help is built into
+// package flag and has no registration.
+func printOptions(w io.Writer, fs *flag.FlagSet, opts []usageOption) {
+	fmt.Fprintln(w, "Options:")
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	for _, o := range opts {
+		names := "    --" + o.long
+		if o.short != "" {
+			names = "-" + o.short + ", --" + o.long
 		}
-		visible.Var(f.Value, f.Name, f.Usage)
-		visible.Lookup(f.Name).DefValue = f.DefValue // f.Value may hold a parsed value
-	})
-	visible.PrintDefaults()
+		if o.arg != "" {
+			names += " <" + o.arg + ">"
+		}
+		desc := "print this help and exit"
+		if f := fs.Lookup(o.long); f != nil {
+			desc = f.Usage
+		}
+		fmt.Fprintf(tw, "  %s\t%s\n", names, desc)
+	}
+	_ = tw.Flush()
 }
 
 // firstSetFlag returns the first flag set on fs's command line, written as "-x" or

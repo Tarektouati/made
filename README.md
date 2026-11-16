@@ -80,6 +80,10 @@ completions for bash, zsh, and fish automatically. Otherwise, load the script th
 
 Release archives also include the scripts, in `completions/`.
 
+To get task names, the scripts run `made [-f file] --list-names`, which prints one
+`name<TAB>description` line per task with no header. The flag is meant for the
+scripts and is not shown in `made --help`.
+
 ## Quick start
 
 Create a starter `Madefile.md` at the root of your repository:
@@ -124,8 +128,11 @@ made completion <bash|zsh|fish>
 | `--no-chdir` | | Run the task in the current directory instead of the task file's directory |
 | `-l`, `--list` | | List available tasks and exit |
 | `-V`, `--version` | | Print the version and exit |
+| `-h`, `--help` | | Print usage to stdout and exit |
 | `task` | | Name of the task to run (the H3 heading text) |
 | `args` | | Passed to the task's script as positional parameters |
+
+Long flags also work with a single dash (`-file`, `-list`).
 
 **`made init`** writes a starter `Madefile.md` (a short header and one `hello`
 task) in the current directory and prints `made: created Madefile.md`. It needs no

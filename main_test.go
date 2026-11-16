@@ -91,8 +91,8 @@ func TestRun(t *testing.T) {
 		{name: "list when no task", args: []string{"-f", f}, wantStdout: []string{"Tasks in " + f, "hello", "Say hello."}},
 		{name: "list flag wins over task", args: []string{"-f", f, "-l", "check"}, wantStdout: []string{"Tasks in", "checkdash"}},
 		{name: "unknown task", args: []string{"-f", f, "nope"}, wantCode: 1, wantStdout: []string{"Tasks in"}, wantStderr: []string{`unknown task "nope"`}},
-		{name: "bad flag", args: []string{"-bogus"}, wantCode: 2, wantStderr: []string{"flag provided but not defined: -bogus", "Usage: made", "-no-chdir"}},
-		{name: "help", args: []string{"-h"}, wantStderr: []string{"Usage: made", "-no-chdir", "-file"}},
+		{name: "bad flag", args: []string{"-bogus"}, wantCode: 2, wantStderr: []string{"flag provided but not defined: -bogus", "Usage: made", "--no-chdir"}, notStdout: []string{"Usage"}},
+		{name: "help", args: []string{"-h"}, wantStdout: []string{"Usage: made", "--no-chdir", "--file"}, notStderr: []string{"Usage"}},
 		{name: "missing file", args: []string{"-f", missing}, wantCode: 1, wantStderr: []string{"cannot read " + missing}},
 		// The package dir has a Madefile.md, so falling back to discovery would list it.
 		{name: "empty -f", args: []string{"-f", ""}, wantCode: 2, wantStderr: []string{"-f requires a file path"}, notStdout: []string{"Tasks in"}},
@@ -101,6 +101,52 @@ func TestRun(t *testing.T) {
 		{name: "empty -f with task", args: []string{"-f", "", "hello"}, wantCode: 2, wantStderr: []string{"-f requires a file path"}, notStdout: []string{"Tasks in"}},
 		{name: "empty -f with -l", args: []string{"-f", "", "-l"}, wantCode: 2, wantStderr: []string{"-f requires a file path"}, notStdout: []string{"Tasks in"}},
 	})
+}
+
+// TestUsage checks the help text: on stdout for -h, in the README's synopsis, with
+// paired short and long names and no hidden or single-dash long flags.
+func TestUsage(t *testing.T) {
+	f := writeRunTasks(t)
+	wantHelp := []string{
+		"Usage: made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]",
+		"made init [--force]",
+		"made completion <bash|zsh|fish>",
+		"-f, --file <file>",
+		"    --no-chdir",
+		"-l, --list",
+		"-V, --version",
+		"-h, --help",
+	}
+	notHelp := []string{"list-names", "\n  -file", "\n  -list", "\n  -version", "\n  -no-chdir"}
+
+	var cases []runCase
+	for _, arg := range []string{"-h", "--help", "-help"} {
+		cases = append(cases, runCase{name: arg, args: []string{arg}, wantStdout: wantHelp, notStdout: notHelp, notStderr: []string{"Usage"}})
+	}
+	cases = append(cases,
+		runCase{name: "single-dash -file", args: []string{"-file", f}, wantStdout: []string{"Tasks in " + f}},
+		runCase{name: "single-dash -version", args: []string{"-version"}, wantStdout: []string{"made "}},
+		runCase{name: "init --help", args: []string{"init", "--help"}, wantStdout: []string{"Usage: made init [--force]", "    --force", "-h, --help"}, notStdout: []string{"\n  -force"}, notStderr: []string{"Usage"}},
+		runCase{name: "init bad flag", args: []string{"init", "--bogus"}, wantCode: 2, wantStderr: []string{"Usage: made init [--force]"}, notStdout: []string{"Usage"}},
+	)
+	checkRunCases(t, cases)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"--help"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
+		t.Fatalf("run(--help) = %d, stderr %q; want 0 and empty", code, &stderr)
+	}
+	_, opts, ok := strings.Cut(stdout.String(), "Options:")
+	if !ok {
+		t.Fatalf("usage has no Options: section\n%s", &stdout)
+	}
+	prev := -1
+	for _, name := range []string{"--file", "--no-chdir", "--list", "--version", "--help"} {
+		i := strings.Index(opts, name)
+		if i <= prev {
+			t.Errorf("%s at %d in the options list, want it after the previous flag (at %d)\n%s", name, i, prev, opts)
+		}
+		prev = i
+	}
 }
 
 func writeDeepNestMadefile(t *testing.T, marker string, depth int) string {
@@ -582,7 +628,7 @@ func TestInitUsageErrors(t *testing.T) {
 		{name: "force with extra args", args: []string{"init", "--force", "extra"}, wantCode: 2, wantStderr: []string{"init takes no arguments"}},
 		{name: "unknown init flag", args: []string{"init", "--bogus"}, wantCode: 2, wantStderr: []string{"flag provided but not defined: -bogus", "Usage: made init [--force]"}},
 		{name: "-f after init", args: []string{"init", "-f", "x"}, wantCode: 2, wantStderr: []string{"flag provided but not defined: -f"}},
-		{name: "init help", args: []string{"init", "-h"}, wantCode: 0, wantStderr: []string{"Usage: made init [--force]", "-force"}},
+		{name: "init help", args: []string{"init", "-h"}, wantCode: 0, wantStdout: []string{"Usage: made init [--force]", "--force"}},
 		{name: "-l before init", args: []string{"-l", "init"}, wantCode: 2, wantStderr: []string{"init does not take -l"}},
 		{name: "--list before init", args: []string{"--list", "init"}, wantCode: 2, wantStderr: []string{"init does not take --list"}},
 		{name: "--no-chdir before init", args: []string{"--no-chdir", "init"}, wantCode: 2, wantStderr: []string{"init does not take --no-chdir"}},
@@ -837,7 +883,7 @@ func TestCompletion(t *testing.T) {
 		{name: "-l before completion", args: []string{"-l", "completion", "bash"}, wantCode: 2, wantStderr: []string{"completion does not take -l"}, notStdout: []string{"complete -o default"}},
 		{name: "--no-chdir before completion", args: []string{"--no-chdir", "completion", "zsh"}, wantCode: 2, wantStderr: []string{"completion does not take --no-chdir"}, notStdout: []string{"#compdef"}},
 		{name: "--list-names before completion", args: []string{"--list-names", "completion", "fish"}, wantCode: 2, wantStderr: []string{"completion does not take --list-names"}, notStdout: []string{"complete -c made"}},
-		{name: "help shows usage", args: []string{"-h"}, wantStderr: []string{"made completion <bash|zsh|fish>"}, notStderr: []string{"list-names"}},
+		{name: "help shows usage", args: []string{"-h"}, wantStdout: []string{"made completion <bash|zsh|fish>"}, notStdout: []string{"list-names"}},
 	})
 }
 
