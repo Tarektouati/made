@@ -132,7 +132,8 @@ task) in the current directory and prints `made: created Madefile.md`. It needs 
 existing task file. If `Madefile.md`, `madefile.md`, or `MADEFILE.md` already exists
 in the current directory, it exits with `1` and leaves the file alone; parent
 directories are not checked, so you can create a nested Madefile on purpose. It
-takes no `-f` and no arguments. `init` is reserved: a task named `init` cannot be
+takes no top-level flags (such as `-f`, `-l` or `--no-chdir`) and no arguments;
+these exit with `2`. `init` is reserved: a task named `init` cannot be
 run with `made init`, so give it another name.
 
 **`made init --force`** overwrites the existing file with the starter template
@@ -147,7 +148,7 @@ like plain `made init`.
 
 **`made completion <shell>`** prints the completion script for `bash`, `zsh`, or
 `fish` (see [Shell completion](#shell-completion)). Like `init`, it needs no task
-file, takes no `-f`, and is reserved: a task named `completion` cannot be run with
+file, takes no top-level flags, and is reserved: a task named `completion` cannot be run with
 `made completion`.
 
 Running `made` with no task lists the tasks, same as `--list`. When a task runs,

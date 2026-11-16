@@ -583,6 +583,11 @@ func TestInitUsageErrors(t *testing.T) {
 		{name: "unknown init flag", args: []string{"init", "--bogus"}, wantCode: 2, wantStderr: []string{"flag provided but not defined: -bogus", "Usage: made init [--force]"}},
 		{name: "-f after init", args: []string{"init", "-f", "x"}, wantCode: 2, wantStderr: []string{"flag provided but not defined: -f"}},
 		{name: "init help", args: []string{"init", "-h"}, wantCode: 0, wantStderr: []string{"Usage: made init [--force]", "-force"}},
+		{name: "-l before init", args: []string{"-l", "init"}, wantCode: 2, wantStderr: []string{"init does not take -l"}},
+		{name: "--list before init", args: []string{"--list", "init"}, wantCode: 2, wantStderr: []string{"init does not take --list"}},
+		{name: "--no-chdir before init", args: []string{"--no-chdir", "init"}, wantCode: 2, wantStderr: []string{"init does not take --no-chdir"}},
+		{name: "--list-names before init", args: []string{"--list-names", "init"}, wantCode: 2, wantStderr: []string{"init does not take --list-names"}},
+		{name: "-l after init", args: []string{"init", "-l"}, wantCode: 2, wantStderr: []string{"flag provided but not defined: -l"}},
 	})
 	if entries, _ := os.ReadDir("."); len(entries) != 0 {
 		t.Errorf("cwd has %d entries after usage errors, want none", len(entries))
@@ -829,6 +834,9 @@ func TestCompletion(t *testing.T) {
 		{name: "extra args", args: []string{"completion", "zsh", "extra"}, wantCode: 2, wantStderr: []string{"completion takes one of"}},
 		{name: "with -f", args: []string{"-f", "tasks.md", "completion", "zsh"}, wantCode: 2, wantStderr: []string{"completion does not take -f"}},
 		{name: "with empty -f", args: []string{"-f", "", "completion", "zsh"}, wantCode: 2, wantStderr: []string{"-f requires a file path"}},
+		{name: "-l before completion", args: []string{"-l", "completion", "bash"}, wantCode: 2, wantStderr: []string{"completion does not take -l"}, notStdout: []string{"complete -o default"}},
+		{name: "--no-chdir before completion", args: []string{"--no-chdir", "completion", "zsh"}, wantCode: 2, wantStderr: []string{"completion does not take --no-chdir"}, notStdout: []string{"#compdef"}},
+		{name: "--list-names before completion", args: []string{"--list-names", "completion", "fish"}, wantCode: 2, wantStderr: []string{"completion does not take --list-names"}, notStdout: []string{"complete -c made"}},
 		{name: "help shows usage", args: []string{"-h"}, wantStderr: []string{"made completion <bash|zsh|fish>"}, notStderr: []string{"list-names"}},
 	})
 }
