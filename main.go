@@ -113,6 +113,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
+	// An explicit empty -f (often an unset variable) must not fall back to discovery.
+	fileSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "f" || f.Name == "file" {
+			fileSet = true
+		}
+	})
+	if fileSet && file == "" {
+		fmt.Fprintln(stderr, "made: -f requires a file path")
+		return 2
+	}
+
 	// init is reserved: it scaffolds even when a task named "init" exists, and needs no
 	// task file, like --version.
 	if fs.NArg() > 0 && fs.Arg(0) == "init" {
