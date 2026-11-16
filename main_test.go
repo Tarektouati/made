@@ -5,8 +5,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Tarektouati/made/internal/parser"
 )
@@ -245,13 +247,117 @@ func TestFindMadefilePriority(t *testing.T) {
 	}
 }
 
-func TestIsRegularFileSkipsDir(t *testing.T) {
+func TestIsRegularFile(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(dir, madefileNames[0]), 0o755); err != nil {
+	regular := filepath.Join(dir, "regular.md")
+	if err := os.WriteFile(regular, []byte("ok"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if isRegularFile(filepath.Join(dir, madefileNames[0])) {
+	if !isRegularFile(regular) {
+		t.Error("isRegularFile(regular file) = false, want true")
+	}
+
+	dirPath := filepath.Join(dir, madefileNames[0])
+	if err := os.Mkdir(dirPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if isRegularFile(dirPath) {
 		t.Error("isRegularFile(directory) = true, want false")
+	}
+
+	if runtime.GOOS != "windows" {
+		fifo := filepath.Join(dir, "pipe.md")
+		mkFIFO(t, fifo)
+		if isRegularFile(fifo) {
+			t.Error("isRegularFile(FIFO) = true, want false")
+		}
+	}
+}
+
+func TestFindMadefileSkipsFIFO(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("FIFOs are not supported on Windows")
+	}
+	root := t.TempDir()
+	mkTree(t, root, ".git/", "Madefile.md", "a/b/")
+	mkFIFO(t, filepath.Join(root, "a", "Madefile.md"))
+	dir, name, others, ok := findMadefile(filepath.Join(root, "a", "b"))
+	wantDir := filepath.Join(root)
+	if !ok || dir != wantDir || name != "Madefile.md" || len(others) != 0 {
+		t.Errorf("findMadefile = (%q, %q, %q, %v), want (%q, %q, [], true)",
+			dir, name, others, ok, wantDir, "Madefile.md")
+	}
+}
+
+func TestRunSkipsFIFOForDiscovery(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("FIFOs are not supported on Windows")
+	}
+	t.Run("fifo only", func(t *testing.T) {
+		dir := t.TempDir()
+		mkTree(t, dir, ".git/")
+		mkFIFO(t, filepath.Join(dir, "Madefile.md"))
+		t.Chdir(dir)
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"-l"}, &stdout, &stderr)
+		if code != 1 {
+			t.Errorf("run(-l) = %d, want 1", code)
+		}
+		checkContains(t, "stderr", stderr.String(), []string{"no Madefile.md found"}, true)
+	})
+	t.Run("fifo in subdir parent wins", func(t *testing.T) {
+		dir := t.TempDir()
+		content := "# Tasks\n\n### hello\n```bash\necho hi\n```\n"
+		if err := os.WriteFile(filepath.Join(dir, "Madefile.md"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mkTree(t, dir, ".git/", "sub/nested/")
+		mkFIFO(t, filepath.Join(dir, "sub", "Madefile.md"))
+		t.Chdir(filepath.Join(dir, "sub", "nested"))
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"-l"}, &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("run(-l) = %d, want 0 (stderr: %s)", code, stderr.String())
+		}
+		checkContains(t, "stdout", stdout.String(), []string{"hello"}, true)
+	})
+}
+
+func TestRunRejectsNonRegularExplicitFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("FIFOs are not supported on Windows")
+	}
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "tasks.md")
+	mkFIFO(t, fifo)
+	t.Chdir(dir)
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"-f", fifo, "-l"}, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("run(-f fifo -l) = %d, want 1", code)
+	}
+	checkContains(t, "stderr", stderr.String(), []string{"not a regular file"}, true)
+}
+
+func TestReadMadefileRejectsOversize(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "huge.md")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.Truncate(maxMadefileBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err = readMadefile(path)
+	if err == nil {
+		t.Fatal("readMadefile(oversize) = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum size") {
+		t.Errorf("readMadefile error = %q, want mentions maximum size", err)
 	}
 }
 
@@ -546,6 +652,26 @@ func TestInitDirectoryOnly(t *testing.T) {
 	if info, err := os.Stat("Madefile.md"); err != nil || !info.IsDir() {
 		t.Errorf("Madefile.md is no longer a directory (err: %v)", err)
 	}
+}
+
+// TestInitForceFIFO checks that init --force refuses a FIFO named Madefile.md
+// instead of blocking on opening it for writing.
+func TestInitForceFIFO(t *testing.T) {
+	dir := t.TempDir()
+	mkFIFO(t, filepath.Join(dir, "Madefile.md"))
+	t.Chdir(dir)
+	var stdout, stderr bytes.Buffer
+	done := make(chan int, 1)
+	go func() { done <- run([]string{"init", "--force"}, &stdout, &stderr) }()
+	select {
+	case code := <-done:
+		if code != 1 {
+			t.Errorf("run(init --force) = %d, want 1", code)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("made init --force hung on a FIFO Madefile.md")
+	}
+	checkContains(t, "stderr", stderr.String(), []string{"cannot create Madefile.md"}, true)
 }
 
 func TestCompletion(t *testing.T) {

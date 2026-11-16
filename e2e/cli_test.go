@@ -781,3 +781,30 @@ func TestInit(t *testing.T) {
 		t.Error("made custom after --force exited 0, want the custom task gone")
 	}
 }
+
+func TestListDoesNotHangOnFIFOMadefile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("FIFOs are not supported on Windows")
+	}
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mkFIFO(t, filepath.Join(dir, "Madefile.md"))
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, madeBin, "-l")
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("made -l hung on a FIFO Madefile.md")
+	}
+	if err == nil {
+		t.Errorf("made -l on FIFO Madefile exited 0, want failure")
+	}
+	if !strings.Contains(stderr.String(), "no Madefile.md found") {
+		t.Errorf("stderr = %q, want no Madefile.md found", stderr.String())
+	}
+}
