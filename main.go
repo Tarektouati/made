@@ -201,7 +201,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	ctx, stop, received := notifySignal(os.Interrupt, syscall.SIGTERM)
+	sigs := []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT}
+	// Subscribing un-ignores a signal, so leave SIGHUP alone when it is already
+	// ignored (nohup); otherwise logging out would tear down the task.
+	if !signal.Ignored(syscall.SIGHUP) {
+		sigs = append(sigs, syscall.SIGHUP)
+	}
+	ctx, stop, received := notifySignal(sigs...)
 	defer stop()
 
 	dir := ""

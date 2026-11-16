@@ -260,14 +260,17 @@ you pass `-f README.md`.
 An explicit `-f` path is relative to the current directory, read exactly as given,
 and never looked up in parent directories.
 
-**Signals.** On `SIGINT` or `SIGTERM`, `made` tears down the whole task, not just
-the interpreter: the task runs in its own process group, which is sent `SIGTERM`
-and then `SIGKILL` after a 3-second grace period, so grandchildren spawned by the
+**Signals.** On `SIGINT`, `SIGTERM`, `SIGHUP` (for example, a closed SSH session
+or terminal) or `SIGQUIT`, `made` tears down the whole task, not just the
+interpreter: the task runs in its own process group, which is sent `SIGTERM` and
+then `SIGKILL` after a 3-second grace period, so grandchildren spawned by the
 script are not orphaned. When stdin is an interactive terminal, no separate group
 is created — a background group reading the terminal would be stopped by
 `SIGTTIN`, and the terminal already delivers Ctrl-C to the whole foreground group.
-After such a teardown `made` exits with `130` for `SIGINT` (Ctrl-C) or `143` for
-`SIGTERM`, whatever status the task itself ended with.
+If `SIGHUP` is already ignored when `made` starts (as under `nohup`), it stays
+ignored and the task keeps running. After such a teardown `made` exits with
+128+n for the signal — `130` for `SIGINT` (Ctrl-C), `143` for `SIGTERM`, `129`
+for `SIGHUP`, `131` for `SIGQUIT` — whatever status the task itself ended with.
 
 ## Example output
 
