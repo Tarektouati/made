@@ -236,6 +236,15 @@ character is `-` or `+` gets a single leading space prepended (except for `pytho
 that would be an indentation error), so the interpreter doesn't read it as an
 option; line numbers are unaffected.
 
+Because the script is a single command-line argument, the OS caps its size: 128 KiB
+per argument on Linux, about 1 MiB of total arguments on macOS, and about 32K
+characters on Windows. A larger task fails before running, with an error giving the
+script's size; keep the bulk in a separate file and have the task run it (e.g.
+`bash scripts/build.sh "$@"`). For the same reason, other users on the machine can
+read the script text with `ps` or `/proc/<pid>/cmdline` while the task runs, so
+don't embed secrets in a Madefile; read them from environment variables or files at
+run time.
+
 **Working directory.** A task runs in the directory that contains its task file,
 not in the directory `made` was started from. Relative paths in a script
 therefore resolve the same way wherever you invoke `made`:

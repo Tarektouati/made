@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -188,6 +189,46 @@ func TestRunMissingInterpreter(t *testing.T) {
 				t.Fatalf("Run: error = %v, want it to wrap exec.ErrNotFound", err)
 			}
 			for _, w := range tt.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("error = %q, want it to contain %q", err.Error(), w)
+				}
+			}
+		})
+	}
+}
+
+func TestRunScriptSize(t *testing.T) {
+	// 4 MiB exceeds the argument limit on Linux (per argument), macOS (total), and
+	// Windows; half of argLimit leaves room for the rest of the command line.
+	requireCmd(t, "bash")
+	tests := []struct {
+		name, script string
+		wantErr      bool
+	}{
+		{"one 4 MiB line", strings.Repeat("x", 4<<20), true},
+		{"many lines", strings.Repeat("echo x >/dev/null\n", 250_000), true},
+		{"under limit", strings.Repeat(":\n", argLimit/4), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Run(context.Background(), parser.Task{Name: "big", Script: tt.script}, "", nil)
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("Run: %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("Run: want error for oversized script, got nil")
+			}
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				t.Fatalf("Run: error = %v, want a start error, not an exit status", err)
+			}
+			if !argListTooLong(err) {
+				t.Errorf("Run: error = %v, want it to wrap the OS argument-size error", err)
+			}
+			for _, w := range []string{"too large", `task "big"`, strconv.Itoa(len(tt.script)) + " bytes"} {
 				if !strings.Contains(err.Error(), w) {
 					t.Errorf("error = %q, want it to contain %q", err.Error(), w)
 				}
