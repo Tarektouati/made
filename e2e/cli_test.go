@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -254,12 +255,29 @@ func TestExitCodePropagation(t *testing.T) {
 	}
 }
 
+// TestSIGINTCancellation checks that a signal sent to made tears the task down and
+// makes made exit with 128+n for that signal, as a shell would.
 func TestSIGINTCancellation(t *testing.T) {
 	requireBash(t)
 	if runtime.GOOS == "windows" {
 		t.Skip("os.Interrupt cannot be delivered to a child the same way on windows")
 	}
+	for _, tc := range []struct {
+		name string
+		sig  os.Signal
+		want int
+	}{
+		{"SIGINT", os.Interrupt, 130},
+		{"SIGTERM", syscall.SIGTERM, 143},
+	} {
+		t.Run(tc.name, func(t *testing.T) { checkCancellation(t, tc.sig, tc.want) })
+	}
+}
 
+// checkCancellation starts a long task, sends sig to made once the task is running,
+// and checks made exits promptly with code and the task did not finish.
+func checkCancellation(t *testing.T, sig os.Signal, code int) {
+	t.Helper()
 	// "started" proves the task began; "done" must never appear once interrupted.
 	content := "### long\n```bash\necho started; sleep 30; echo done\n```\n"
 	dir := writeTasks(t, "Madefile.md", content)
@@ -301,21 +319,25 @@ func TestSIGINTCancellation(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	if err := cmd.Process.Signal(os.Interrupt); err != nil {
-		t.Fatalf("send SIGINT: %v", err)
+	if err := cmd.Process.Signal(sig); err != nil {
+		t.Fatalf("send %v: %v", sig, err)
 	}
 
 	select {
 	case err := <-waitErr:
 		if elapsed := time.Since(begin); elapsed > 10*time.Second {
-			t.Errorf("made took %v to exit after SIGINT; want well under the 30s sleep", elapsed)
+			t.Errorf("made took %v to exit after %v; want well under the 30s sleep", elapsed, sig)
 		}
-		if err == nil {
-			t.Error("made exited 0 after SIGINT; want non-zero")
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) {
+			t.Fatalf("made after %v: err = %v, want exit code %d", sig, err, code)
+		}
+		if ee.ExitCode() != code {
+			t.Errorf("exit after %v = %d, want %d", sig, ee.ExitCode(), code)
 		}
 	case <-time.After(10 * time.Second):
 		_ = cmd.Process.Kill()
-		t.Fatal("made did not exit within 10s of SIGINT")
+		t.Fatalf("made did not exit within 10s of %v", sig)
 	}
 
 	got := output()
@@ -325,6 +347,45 @@ func TestSIGINTCancellation(t *testing.T) {
 	if strings.Contains(got, "done") {
 		t.Errorf("output = %q, should not contain %q after cancellation", got, "done")
 	}
+}
+
+// TestSignalledTaskExitCode checks that a task killed by signal n makes made exit
+// with 128+n rather than 255.
+func TestSignalledTaskExitCode(t *testing.T) {
+	requireBash(t)
+	if runtime.GOOS == "windows" {
+		t.Skip("windows has no POSIX signals")
+	}
+	for _, tc := range []struct {
+		name, script string
+		want         int
+	}{
+		{"SIGKILL", "kill -KILL $$", 137},
+		{"SIGPIPE", "kill -PIPE $$", 141},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := writeTasks(t, "Madefile.md", "### die\n```bash\n"+tc.script+"\n```\n")
+			_, stderr, code := runMade(t, dir, "die")
+			if code != tc.want {
+				t.Errorf("exit = %d, want %d (stderr: %s)", code, tc.want, stderr)
+			}
+		})
+	}
+
+	// A task writing into a closed pipe dies of SIGPIPE, as in `made task | head -1`.
+	t.Run("pipeline", func(t *testing.T) {
+		dir := writeTasks(t, "Madefile.md", "### lines\n```bash\nyes\n```\n")
+		script := `"$0" lines | head -1 >/dev/null; echo "${PIPESTATUS[0]}"`
+		cmd := exec.CommandContext(t.Context(), "bash", "-c", script, madeBin)
+		cmd.Dir = dir
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("pipeline: %v", err)
+		}
+		if got := strings.TrimSpace(string(out)); got != "141" {
+			t.Errorf("made exit in pipeline = %s, want 141", got)
+		}
+	})
 }
 
 func TestRunShFence(t *testing.T) {
