@@ -260,17 +260,28 @@ you pass `-f README.md`.
 An explicit `-f` path is relative to the current directory, read exactly as given,
 and never looked up in parent directories.
 
-**Signals.** On `SIGINT`, `SIGTERM`, `SIGHUP` (for example, a closed SSH session
-or terminal) or `SIGQUIT`, `made` tears down the whole task, not just the
-interpreter: the task runs in its own process group, which is sent `SIGTERM` and
-then `SIGKILL` after a 3-second grace period, so grandchildren spawned by the
-script are not orphaned. When stdin is an interactive terminal, no separate group
-is created — a background group reading the terminal would be stopped by
-`SIGTTIN`, and the terminal already delivers Ctrl-C to the whole foreground group.
-If `SIGHUP` is already ignored when `made` starts (as under `nohup`), it stays
-ignored and the task keeps running. After such a teardown `made` exits with
-128+n for the signal — `130` for `SIGINT` (Ctrl-C), `143` for `SIGTERM`, `129`
-for `SIGHUP`, `131` for `SIGQUIT` — whatever status the task itself ended with.
+**Signals.** On `SIGINT`, `SIGTERM`, `SIGHUP` (for example, a closed SSH session or
+terminal) or `SIGQUIT`, `made` tears down the whole task, not just the interpreter: the task runs in its own process group, which is sent `SIGTERM`,
+and whatever is still running 3 seconds later (even if the interpreter itself
+exited at once) is sent `SIGKILL`, so grandchildren spawned by the script are not
+orphaned. When stdin is an interactive terminal, no separate group is created — a
+background group reading the terminal would be stopped by `SIGTTIN` — so Ctrl-Z
+and reading stdin behave as if you had run the script yourself. Ctrl-C and Ctrl-\
+do too: the terminal already sends `SIGINT` or `SIGQUIT` to every process of the
+task, so `made` only signals the interpreter (`SIGTERM`, then `SIGKILL` after the
+grace period) and leaves the rest to shut down on their own, like
+`docker compose up` stopping its containers. A `SIGTERM` or `SIGHUP`, which does
+not come from the terminal (`kill`, a supervisor, a closed session), still tears
+down the whole task: `made` freezes the interpreter and all its descendants with
+`SIGSTOP`, sends them `SIGTERM`, and sends `SIGKILL` to whatever outlives the
+same grace period. This descendant teardown works on Linux and macOS; on other
+Unix systems only the interpreter is signaled. A process that fully detaches
+(`setsid`, a double fork whose parent has already exited, or a new process group)
+is not reached. If `SIGHUP` is already ignored when `made` starts (as under
+`nohup`), it stays ignored and the task keeps running.
+After such a teardown `made` exits with `128+n` for signal `n`: `130` for
+`SIGINT` (Ctrl-C), `143` for `SIGTERM`, `129` for `SIGHUP` and `131` for
+`SIGQUIT`, whatever status the task itself ended with.
 
 ## Example output
 

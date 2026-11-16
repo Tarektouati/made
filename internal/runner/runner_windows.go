@@ -11,14 +11,20 @@ func configureProcessGroup(cmd *exec.Cmd) bool {
 	return false
 }
 
-func signalTerm(cmd *exec.Cmd, grouped bool) {
+func signalTerm(cmd *exec.Cmd, td *teardown) {
 	if cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}
 }
 
-func signalKill(cmd *exec.Cmd, grouped bool) {
+func signalKill(cmd *exec.Cmd, td *teardown) {
 	if cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}
+}
+
+// survivors always reports false: without process groups only the interpreter, which
+// has already exited, is tracked.
+func survivors(cmd *exec.Cmd, td *teardown) bool {
+	return false
 }

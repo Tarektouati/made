@@ -253,6 +253,10 @@ type signalReceived struct{ sig os.Signal }
 
 func (s signalReceived) Error() string { return s.sig.String() + " signal received" }
 
+// Signal reports the signal to runner.Run, which tears a task down differently when the
+// terminal itself sent it.
+func (s signalReceived) Signal() os.Signal { return s.sig }
+
 // notifySignal is signal.NotifyContext that also remembers which signal arrived:
 // ctx is cancelled on the first of sigs, and received reports that signal (nil if
 // none came). stop releases the signal handler and ctx.

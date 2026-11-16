@@ -15,9 +15,33 @@ import (
 	"github.com/Tarektouati/made/internal/parser"
 )
 
-// killGrace is how long a cancelled task's process group is given to exit on SIGTERM
-// before it is force-killed with SIGKILL.
+// killGrace is how long a cancelled task is given to exit on SIGTERM before whatever is
+// left of it is force-killed with SIGKILL.
 const killGrace = 3 * time.Second
+
+// survivorPoll is how often a cancelled task is checked for members that outlived the
+// interpreter during the grace period.
+const survivorPoll = 50 * time.Millisecond
+
+// teardown records how a running task is torn down on cancellation: as a process group
+// when it has one, otherwise through pids, the interpreter's descendants captured when
+// SIGTERM is sent so the same set can be force-killed after they are orphaned. sig is
+// the signal that cancelled the task, if known.
+type teardown struct {
+	grouped bool
+	pids    []int
+	sig     os.Signal
+}
+
+// cancelSignal returns the signal that cancelled ctx, or nil. It is found through the
+// context's cause: an error in its chain with a Signal() os.Signal method.
+func cancelSignal(ctx context.Context) os.Signal {
+	var s interface{ Signal() os.Signal }
+	if errors.As(context.Cause(ctx), &s) {
+		return s.Signal()
+	}
+	return nil
+}
 
 // interpreter is the program that runs a script passed as a single inline argument.
 type interpreter struct {
@@ -87,9 +111,13 @@ var interpreters = map[string]interpreter{
 // $argv in fish, sys.argv[1:] in python, process.argv.slice(1) in node, ARGV in ruby,
 // and @ARGV in perl.
 //
-// Cancelling ctx (e.g. on SIGINT) tears down the task's whole process group, not just
-// the interpreter, so spawned grandchildren are not orphaned: the group is sent SIGTERM
-// and then SIGKILL.
+// Cancelling ctx (e.g. on SIGINT) tears down the whole task, not just the interpreter,
+// so spawned grandchildren are not orphaned: the task's process group, or when stdin is
+// a terminal (and the task shares made's group) the interpreter and its descendants, is
+// sent SIGTERM, and whatever outlives the grace period is sent SIGKILL. When stdin is a
+// terminal and the cancelling signal (see cancelSignal) is one the terminal itself sends
+// to the whole foreground group (SIGINT, SIGQUIT), only the interpreter is signaled, so
+// the task's processes handle Ctrl-C as if they had been run directly.
 func Run(ctx context.Context, t parser.Task, dir string, args []string) error {
 	in, ok := interpreters[strings.ToLower(strings.TrimSpace(t.Lang))]
 	if !ok {
@@ -107,7 +135,7 @@ func Run(ctx context.Context, t parser.Task, dir string, args []string) error {
 	// We tear down the process group ourselves on cancellation; neutralize os/exec's
 	// built-in kill, which would target only the interpreter and orphan its children.
 	cmd.Cancel = func() error { return nil }
-	grouped := configureProcessGroup(cmd)
+	td := &teardown{grouped: configureProcessGroup(cmd)}
 
 	if err := cmd.Start(); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
@@ -124,16 +152,31 @@ func Run(ctx context.Context, t parser.Task, dir string, args []string) error {
 	case err := <-done:
 		return err
 	case <-ctx.Done():
-		signalTerm(cmd, grouped)
+		td.sig = cancelSignal(ctx)
+		signalTerm(cmd, td)
+		deadline := time.After(killGrace)
 		select {
 		case err := <-done:
-			// Leader exited on SIGTERM; force-kill any group member that survived it
-			// (ESRCH is harmless if the group is already empty).
-			signalKill(cmd, grouped)
+			// Leader exited on SIGTERM; the rest of the task keeps the remainder of the
+			// grace period before any survivor is force-killed.
+			awaitSurvivors(cmd, td, deadline)
+			signalKill(cmd, td)
 			return err
-		case <-time.After(killGrace):
-			signalKill(cmd, grouped)
+		case <-deadline:
+			signalKill(cmd, td)
 			return <-done
+		}
+	}
+}
+
+// awaitSurvivors returns once no member of the cancelled task outlives its interpreter,
+// or when deadline fires.
+func awaitSurvivors(cmd *exec.Cmd, td *teardown, deadline <-chan time.Time) {
+	for survivors(cmd, td) {
+		select {
+		case <-deadline:
+			return
+		case <-time.After(survivorPoll):
 		}
 	}
 }
