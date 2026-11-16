@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -91,6 +92,8 @@ func TestRun(t *testing.T) {
 		{name: "version", args: []string{"-V"}, wantStdout: []string{"made "}},
 		{name: "list when no task", args: []string{"-f", f}, wantStdout: []string{"Tasks in " + f, "hello", "Say hello."}},
 		{name: "list flag wins over task", args: []string{"-f", f, "-l", "check"}, wantStdout: []string{"Tasks in", "checkdash"}},
+		{name: "list flag ignores unknown task", args: []string{"-f", f, "-l", "nope"}, wantStdout: []string{"Tasks in"}, notStderr: []string{"unknown task"}},
+		{name: "list flag does not run task", args: []string{"-f", f, "-l", "hello"}, wantStdout: []string{"Tasks in", "Say hello."}},
 		{name: "unknown task", args: []string{"-f", f, "nope"}, wantCode: 1, wantStdout: []string{"Tasks in"}, wantStderr: []string{`unknown task "nope"`}},
 		{name: "bad flag", args: []string{"-bogus"}, wantCode: 2, wantStderr: []string{"flag provided but not defined: -bogus", "Usage: made", "--no-chdir"}, notStdout: []string{"Usage"}},
 		{name: "help", args: []string{"-h"}, wantStdout: []string{"Usage: made", "--no-chdir", "--file"}, notStderr: []string{"Usage"}},
@@ -222,6 +225,58 @@ func TestRunInterpreterExitCodes(t *testing.T) {
 			{name: "plain fence", args: []string{"-f", f, "plain"}, wantCode: 126, wantStderr: []string{`"bash" at ` + bash + " is not executable"}},
 		})
 	})
+}
+
+// TestRunDashTaskName checks that a task whose name starts with "-" runs only after "--".
+func TestRunDashTaskName(t *testing.T) {
+	requireCmd(t, "bash")
+	f := filepath.Join(t.TempDir(), "tasks.md")
+	if err := os.WriteFile(f, []byte("### -x\n```bash\nexit 0\n```\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	checkRunCases(t, []runCase{
+		{name: "after --", args: []string{"-f", f, "--", "-x"}, notStdout: []string{"Tasks in"}, notStderr: []string{"made: "}},
+		{name: "taken as a flag", args: []string{"-f", f, "-x"}, wantCode: 2, wantStderr: []string{"flag provided but not defined: -x"}},
+	})
+}
+
+func TestWatchSignals(t *testing.T) {
+	tests := []struct {
+		signals    int
+		wantCancel bool
+		wantForce  bool
+	}{
+		{signals: 0},
+		{signals: 1, wantCancel: true},
+		{signals: 2, wantCancel: true, wantForce: true},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("signals=%d", tt.signals), func(t *testing.T) {
+			sigs := make(chan os.Signal, 2)
+			ctx, force, stop, received := watchSignals(sigs)
+			defer stop()
+			for range tt.signals {
+				sigs <- os.Interrupt
+			}
+			closed := func(c <-chan struct{}) bool {
+				select {
+				case <-c:
+					return true
+				case <-time.After(200 * time.Millisecond):
+					return false
+				}
+			}
+			if got := closed(ctx.Done()); got != tt.wantCancel {
+				t.Errorf("ctx cancelled = %v, want %v", got, tt.wantCancel)
+			}
+			if got := closed(force); got != tt.wantForce {
+				t.Errorf("force closed = %v, want %v", got, tt.wantForce)
+			}
+			if got, want := received() != nil, tt.wantCancel; got != want {
+				t.Errorf("received() = %v, want a signal: %v", received(), want)
+			}
+		})
+	}
 }
 
 // TestRunIsReentrant guards against a return to package-global flag state, which

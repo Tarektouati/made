@@ -170,6 +170,12 @@ Running `made` with no task lists the tasks, same as `--list`. When a task runs,
 git hooks (see [Pre-commit and prek](#pre-commit-and-prek)). A task killed by signal
 n makes `made` exit with `128+n`, as shells report it: `137` for `kill -9`, `141` for
 `SIGPIPE` (e.g. `made task | head -1`). An unknown task prints an error and the task list, and exits with `1`. If the task's interpreter can't be started, `made` exits with `127` (not on `PATH`) or `126` (found but not executable); see [Supported languages](#supported-languages).
+`-l`/`--list` always lists and ignores any task name after it, even an unknown one:
+`made -l build` lists the tasks without running `build`.
+
+A closed stdout or stderr (`made build >&-`) is not reported: the Go runtime reopens
+it as `/dev/null` before `made` starts, so the output is discarded and `made` exits
+with the task's code. Use `>/dev/null` to discard output on purpose.
 
 The task list aligns descriptions by terminal display width, so CJK and emoji task
 names line up. Multi-codepoint emoji (ZWJ sequences, flags) and ambiguous-width
@@ -179,7 +185,9 @@ characters may still be off by a cell depending on your terminal.
 `$argv` in fish, `sys.argv[1:]` in Python, `process.argv.slice(1)` in Node, `ARGV` in
 Ruby, and `@ARGV` in Perl. Flags for `made` itself go before the task name; anything
 after it, including `-x`-style flags, belongs to the task. A single `--` right after
-the task name is optional and dropped (`made test -- -run Foo`).
+the task name is optional and dropped (`made test -- -run Foo`). A task whose name
+starts with `-` must come after `--` (`made -- -x`); otherwise `made` reads it as one of
+its own flags.
 
 ````markdown
 ### deploy
@@ -265,7 +273,8 @@ strict-mode options are passed to the shell rather than prepended to the script,
 so line numbers in error messages match the code block. A script whose first
 character is `-` or `+` gets a single leading space prepended (except for `python`, where
 that would be an indentation error), so the interpreter doesn't read it as an
-option; line numbers are unaffected.
+option; line numbers are unaffected. A script containing a NUL byte can't be passed as an
+argument, so `made` refuses it with an error giving its line within the script.
 
 Because the script is a single command-line argument, the OS caps its size: 128 KiB
 per argument on Linux, about 1 MiB of total arguments on macOS, and about 32K
@@ -338,6 +347,11 @@ is not reached. If `SIGHUP` is already ignored when `made` starts (as under
 After such a teardown `made` exits with `128+n` for signal `n`: `130` for
 `SIGINT` (Ctrl-C), `143` for `SIGTERM`, `129` for `SIGHUP` and `131` for
 `SIGQUIT`, whatever status the task itself ended with.
+A second Ctrl-C (or any second handled signal) during the grace period sends `SIGKILL` right away.
+
+`SIGKILL` sent to `made` itself can't be handled. On Linux the interpreter is still
+killed when `made` dies (via `PR_SET_PDEATHSIG`), but processes the script spawned
+may survive; macOS has no equivalent, so there the task keeps running.
 
 ## Example output
 

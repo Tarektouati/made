@@ -51,7 +51,7 @@ func cancelTask(t *testing.T, script string, cause error) (dir string, cancelled
 	ctx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(nil)
 	done := make(chan error, 1)
-	go func() { done <- Run(ctx, parser.Task{Name: "gc", Script: script}, dir, nil) }()
+	go func() { done <- Run(ctx, nil, parser.Task{Name: "gc", Script: script}, dir, nil) }()
 
 	waitForFile(t, filepath.Join(dir, "ready"))
 	cancelled = time.Now()
