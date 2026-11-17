@@ -190,7 +190,13 @@ characters may still be off by a cell depending on your terminal.
 
 **Passing arguments.** Everything after the task name is passed to the script: `$1`, `"$@"` in shell tasks,
 `$argv` in fish, `sys.argv[1:]` in Python, `process.argv.slice(1)` in Node, `ARGV` in
-Ruby, and `@ARGV` in Perl. Flags for `made` itself go before the task name; anything
+Ruby, and `@ARGV` in Perl.
+
+The zero-th element is not the script name: in `sh` and `bash` tasks `$0` is `made`,
+Python's `sys.argv[0]` is `-c`, and Ruby's and Perl's `$0` is `-e`. Node's `process.argv`
+has no script entry, so `process.argv.slice(1)` is exactly your arguments.
+
+Flags for `made` itself go before the task name; anything
 after it, including `-x`-style flags, belongs to the task. A single `--` right after
 the task name is optional and dropped (`made test -- -run Foo`). A task whose name
 starts with `-` must come after `--` (`made -- -x`); otherwise `made` reads it as one of
