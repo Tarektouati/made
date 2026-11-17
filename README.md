@@ -494,8 +494,10 @@ made -f ../../Madefile.md lint # the root tasks
 **Show code samples without creating tasks**
 
 Any H3 followed by a code block is a task. To document code under a heading
-without making it runnable, use an H2 or H4 heading, or wrap the example in a
-four-backtick fence as the Quick start section above does.
+without making it runnable, use an H2 or H4 heading. A four-backtick fence only helps
+under a heading that is not an H3 (as in the Quick start section above): directly under
+an H3 it is still the first fenced block, so it becomes the task script (a
+` ````markdown ` fence fails with `unsupported language "markdown"`).
 
 **Leave a blank line after raw HTML**
 
