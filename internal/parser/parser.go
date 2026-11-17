@@ -85,6 +85,86 @@ func Parse(source []byte) ([]Task, error) {
 	return tasks, nil
 }
 
+// Fence is a fenced code block found under a task heading.
+type Fence struct {
+	Line   int    // 1-based line of the opening fence
+	Lang   string // as Task.Lang
+	Script string // as Task.Script
+}
+
+// RawTask is an H3 heading with its source position and every top-level fenced code
+// block between it and the next heading. It describes what Parse sees, for tools that
+// report on a task file (made --check) rather than run it.
+type RawTask struct {
+	Line int    // 1-based line of the heading
+	Raw  string // the heading's source text, whitespace-normalized
+	Name string // the task name Parse gives this heading
+	// Altered is set when the heading has inline markup (code span, emphasis, link,
+	// raw HTML) whose text is left out of Name.
+	Altered bool
+	// Fences are the top-level fenced code blocks before the next heading, in order.
+	// Parse runs only Fences[0]; a heading with none is not a task.
+	Fences []Fence
+}
+
+// ParseDetailed walks source like Parse but keeps every H3 heading, including ones
+// without a code block, with line positions and all of their fences. A leading UTF-8
+// byte order mark is ignored and does not shift line numbers. Like Parse, it rejects
+// over-deep nesting with a *NestingError before parsing.
+func ParseDetailed(source []byte) ([]RawTask, error) {
+	source = bytes.TrimPrefix(source, utf8BOM)
+	if err := validateNesting(source); err != nil {
+		return nil, err
+	}
+	doc := goldmark.DefaultParser().Parse(text.NewReader(source))
+	lineOf := func(n ast.Node) int {
+		pos := n.Pos()
+		if pos < 0 {
+			return 0
+		}
+		return 1 + bytes.Count(source[:pos], []byte("\n"))
+	}
+
+	var tasks []RawTask
+	cur := -1 // index in tasks of the heading in scope, or -1
+	for n := doc.FirstChild(); n != nil; n = n.NextSibling() {
+		switch node := n.(type) {
+		case *ast.Heading:
+			cur = -1
+			if node.Level != taskHeadingLevel {
+				continue
+			}
+			tasks = append(tasks, RawTask{
+				Line:    lineOf(node),
+				Raw:     normalizeSpace(string(node.Lines().Value(source))),
+				Name:    normalizeSpace(headingText(node, source)),
+				Altered: hasMarkup(node),
+			})
+			cur = len(tasks) - 1
+		case *ast.FencedCodeBlock:
+			if cur >= 0 {
+				tasks[cur].Fences = append(tasks[cur].Fences, Fence{
+					Line:   lineOf(node),
+					Lang:   fenceLanguage(node, source),
+					Script: codeText(node, source),
+				})
+			}
+		}
+	}
+	return tasks, nil
+}
+
+// hasMarkup reports whether n has an inline child other than plain text, whose
+// content headingText drops.
+func hasMarkup(n ast.Node) bool {
+	for c := n.FirstChild(); c != nil; c = c.NextSibling() {
+		if _, ok := c.(*ast.Text); !ok {
+			return true
+		}
+	}
+	return false
+}
+
 // headingText concatenates the text of a node's inline children, decoding backslash
 // escapes and entity references. It works for any node whose meaningful content is
 // plain text segments (headings, paragraphs).

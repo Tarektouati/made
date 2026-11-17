@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tarektouati/made/internal/lint"
 	"github.com/Tarektouati/made/internal/parser"
 )
 
@@ -113,10 +114,13 @@ func TestUsage(t *testing.T) {
 	f := writeRunTasks(t)
 	wantHelp := []string{
 		"Usage: made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]",
+		"made [-f file] --check [--strict]",
 		"made init [--force]",
 		"made completion <bash|zsh|fish>",
 		"-f, --file <file>",
 		"    --no-chdir",
+		"    --check",
+		"    --strict",
 		"-l, --list",
 		"-V, --version",
 		"-h, --help",
@@ -144,7 +148,7 @@ func TestUsage(t *testing.T) {
 		t.Fatalf("usage has no Options: section\n%s", &stdout)
 	}
 	prev := -1
-	for _, name := range []string{"--file", "--no-chdir", "--list", "--version", "--help"} {
+	for _, name := range []string{"--file", "--no-chdir", "--check", "--strict", "--list", "--version", "--help"} {
 		i := strings.Index(opts, name)
 		if i <= prev {
 			t.Errorf("%s at %d in the options list, want it after the previous flag (at %d)\n%s", name, i, prev, opts)
@@ -676,6 +680,71 @@ func TestReadMadefileRejectsOversize(t *testing.T) {
 	}
 }
 
+// writeTemp writes content to name in a new temporary directory and returns its path.
+func writeTemp(t *testing.T, name, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestCheck(t *testing.T) {
+	clean := writeRunTasks(t)
+	bad := writeTemp(t, "bad.md", "### a\n```yaml\nk\n```\n")
+	warn := writeTemp(t, "warn.md", "### a\n```bash\nx\n```\n```bash\ny\n```\n")
+	docs := writeTemp(t, "docs.md", "### a\n```bash\nx\n```\n## Options\n### `--verbose`\nPrints more.\n")
+	checkRunCases(t, []runCase{
+		{name: "clean", args: []string{"-f", clean, "--check"}, notStdout: []string{clean}, notStderr: []string{"made: "}},
+		{name: "clean strict", args: []string{"--check", "--strict", "-f", clean}},
+		{name: "no-chdir allowed", args: []string{"--no-chdir", "--check", "-f", clean}},
+		{name: "errors", args: []string{"--check", "-f", bad}, wantCode: 1, wantStdout: []string{bad + ":2: error: unsupported-language: ", "1 problem (1 error, 0 warnings)"}},
+		{name: "warnings only", args: []string{"--check", "-f", warn}, wantStdout: []string{warn + ":5: warning: extra-code-block: "}},
+		{name: "fence-less docs heading", args: []string{"--check", "-f", docs}, wantStdout: []string{docs + ":6: warning: no-code-block: ", "(0 errors, 1 warning)"}, notStdout: []string{"empty-name"}},
+		{name: "warnings strict", args: []string{"--check", "--strict", "-f", warn}, wantCode: 1, wantStdout: []string{"1 problem (0 errors, 1 warning)"}},
+		{name: "missing file", args: []string{"--check", "-f", filepath.Join(t.TempDir(), "none.md")}, wantCode: 1, wantStderr: []string{"made: cannot read "}},
+		{name: "strict alone", args: []string{"--strict", "-f", clean}, wantCode: 2, wantStderr: []string{"made: --strict requires --check"}},
+		{name: "task name", args: []string{"--check", "-f", clean, "hello"}, wantCode: 2, wantStderr: []string{"made: --check takes no task name"}},
+		{name: "init", args: []string{"--check", "init"}, wantCode: 2, wantStderr: []string{"made: --check takes no task name"}},
+		{name: "completion", args: []string{"--check", "completion", "bash"}, wantCode: 2, wantStderr: []string{"made: --check takes no task name"}},
+		{name: "list", args: []string{"--check", "-l", "-f", clean}, wantCode: 2, wantStderr: []string{"made: --check does not take -l"}},
+		{name: "version", args: []string{"-V", "--check"}, wantCode: 2, wantStderr: []string{"made: --check does not take -V"}},
+		{name: "list-names", args: []string{"--check", "--list-names", "-f", clean}, wantCode: 2, wantStderr: []string{"made: --check does not take --list-names"}},
+	})
+}
+
+func TestCheckExactOutput(t *testing.T) {
+	f := writeTemp(t, "tasks.md", "### a\n```bash\nx\n```\n### a\n```bash\n```\n### b\nprose\n")
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"--check", "-f", f}, &stdout, &stderr)
+	want := f + `:5: error: duplicate-task: "a" already defined at line 1` + "\n" +
+		f + `:6: error: empty-script: task "a" has an empty code block` + "\n" +
+		f + `:8: warning: no-code-block: heading "b" has no code block, so it is not a task` + "\n" +
+		"3 problems (2 errors, 1 warning)\n"
+	if code != 1 || stdout.String() != want || stderr.Len() != 0 {
+		t.Errorf("run = %d\nstdout:\n%s\nwant:\n%s\nstderr: %q", code, &stdout, want, &stderr)
+	}
+}
+
+func TestCheckFileTooLarge(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "huge.md")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.Truncate(maxMadefileBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	checkRunCases(t, []runCase{{
+		name: "too large", args: []string{"--check", "-f", path}, wantCode: 1,
+		wantStdout: []string{path + ": error: file-too-large: ", "1 problem (1 error, 0 warnings)"},
+	}})
+}
+
 func TestResolveFileExplicitIsUnchanged(t *testing.T) {
 	t.Chdir(t.TempDir())
 	got, err := resolveFile("some/tasks.md")
@@ -862,6 +931,9 @@ func TestInitTemplateIsValid(t *testing.T) {
 			if len(tasks) != 1 || tasks[0].Name != "hello" ||
 				tasks[0].Description != "Prints a friendly greeting." || tasks[0].Script == "" {
 				t.Errorf("template tasks = %+v, want one task %q with its description and a script", tasks, "hello")
+			}
+			if diags := lint.Check([]byte(got)); diags != nil {
+				t.Errorf("lint.Check(template) = %+v, want no findings", diags)
 			}
 		})
 	}

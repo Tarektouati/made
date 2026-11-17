@@ -459,6 +459,26 @@ func TestUnsupportedLanguageFails(t *testing.T) {
 	}
 }
 
+func TestCheckReportsProblems(t *testing.T) {
+	content := "### data\n```yaml\nkey: value\n```\n### data\n```bash\necho\n```\n"
+	dir := writeTasks(t, "Madefile.md", content)
+	stdout, stderr, code := runMade(t, dir, "--check")
+	want := "Madefile.md:2: error: unsupported-language: task \"data\" uses \"yaml\"; supported: "
+	if code != 1 || !strings.HasPrefix(stdout, want) || stderr != "" {
+		t.Fatalf("exit = %d, stdout = %q, stderr = %q; want 1 and stdout starting %q", code, stdout, stderr, want)
+	}
+	for _, s := range []string{"Madefile.md:5: error: duplicate-task: ", "2 problems (2 errors, 0 warnings)\n"} {
+		if !strings.Contains(stdout, s) {
+			t.Errorf("stdout = %q, want it to contain %q", stdout, s)
+		}
+	}
+
+	clean := writeTasks(t, "Madefile.md", "### ok\n```bash\necho ok\n```\n")
+	if stdout, stderr, code := runMade(t, clean, "--check", "--strict"); code != 0 || stdout != "" || stderr != "" {
+		t.Errorf("clean file: exit = %d, stdout = %q, stderr = %q; want 0 and no output", code, stdout, stderr)
+	}
+}
+
 func TestMissingInterpreterFails(t *testing.T) {
 	content := "### pytask\n```python\nprint('hi')\n```\n"
 	dir := writeTasks(t, "Madefile.md", content)

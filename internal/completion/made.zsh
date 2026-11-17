@@ -47,6 +47,8 @@ _made() {
   _arguments -C -S -A '-*' \
     '(-f -file --file)'{-f+,-file=,--file=}'[Markdown file to read tasks from]:file:_files' \
     '--no-chdir[run the task in the current directory]' \
+    '(-l --list -V --version 1 *)--check[check the task file for problems]' \
+    '--strict[with --check, fail on warnings too]' \
     '(-l --list)'{-l,--list}'[list available tasks]' \
     '(- *)'{-V,--version}'[print version and exit]' \
     '(- *)'{-h,--help}'[show help]' \

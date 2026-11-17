@@ -13,10 +13,18 @@ type fenceState struct {
 	length int
 }
 
+// NestingError reports container nesting (blockquotes, lists) deeper than the parser
+// accepts. Line is the 1-based line where the limit is first exceeded.
+type NestingError struct{ Line int }
+
+func (e *NestingError) Error() string {
+	return fmt.Sprintf("nesting too deep (max %d)", maxNestingDepth)
+}
+
 func validateNesting(source []byte) error {
 	var maxSeen int
 	var fence *fenceState
-	for len(source) > 0 {
+	for n := 1; len(source) > 0; n++ {
 		var line []byte
 		line, source = nextLine(source)
 		if fence == nil {
@@ -35,7 +43,7 @@ func validateNesting(source []byte) error {
 			maxSeen = d
 		}
 		if maxSeen > maxNestingDepth {
-			return fmt.Errorf("nesting too deep (max %d)", maxNestingDepth)
+			return &NestingError{Line: n}
 		}
 	}
 	return nil
