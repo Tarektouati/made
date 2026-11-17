@@ -412,6 +412,7 @@ Tasks in Madefile.md:
   build      Compiles all packages.
   test       Runs the test suite.
   check      Builds, vets, and tests in one go.
+  bench      Benchmarks the working tree against a base ref (default origin/main): Go benchmarks (benchstat), CLI timings (hyperfine) and binary size. Needs hyperfine and benchstat on PATH. Usage: made bench [base-ref].
 ```
 
 Running an unknown task:
@@ -425,6 +426,7 @@ Tasks in Madefile.md:
   build      Compiles all packages.
   test       Runs the test suite.
   check      Builds, vets, and tests in one go.
+  bench      Benchmarks the working tree against a base ref (default origin/main): Go benchmarks (benchstat), CLI timings (hyperfine) and binary size. Needs hyperfine and benchstat on PATH. Usage: made bench [base-ref].
 ```
 
 ## Common patterns
