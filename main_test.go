@@ -818,6 +818,9 @@ func TestResolveFileNotFoundThroughSymlinkedCwd(t *testing.T) {
 }
 
 func TestInitCreatesMadefile(t *testing.T) {
+	saved := version
+	t.Cleanup(func() { version = saved })
+	version = "1.2.3" // as goreleaser injects it: no leading "v"
 	dir := t.TempDir()
 	t.Chdir(dir)
 	var stdout, stderr bytes.Buffer
@@ -831,19 +834,36 @@ func TestInitCreatesMadefile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != madefileTemplate {
-		t.Errorf("Madefile.md = %q, want the template", got)
+	if want := "<!-- made v1.2.3 -->\n\n" + madefileTemplate; string(got) != want {
+		t.Errorf("Madefile.md = %q, want %q", got, want)
 	}
 }
 
-// TestInitTemplateIsValid checks the template parses to exactly the example task.
+// TestInitTemplateIsValid checks the init template, with and without the version
+// note, and that both parse to exactly the example task.
 func TestInitTemplateIsValid(t *testing.T) {
-	tasks, err := parser.Parse([]byte(madefileTemplate))
-	if err != nil {
-		t.Fatalf("parser.Parse(template): %v", err)
+	tests := []struct {
+		version string
+		want    string
+	}{
+		{version: "dev", want: madefileTemplate},
+		{version: "v1.2.3", want: "<!-- made v1.2.3 -->\n\n" + madefileTemplate},
 	}
-	if len(tasks) != 1 || tasks[0].Name != "hello" || tasks[0].Script == "" {
-		t.Errorf("template tasks = %+v, want one task %q with a script", tasks, "hello")
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			got := initTemplate(tt.version)
+			if got != tt.want {
+				t.Fatalf("initTemplate(%q) = %q, want %q", tt.version, got, tt.want)
+			}
+			tasks, err := parser.Parse([]byte(got))
+			if err != nil {
+				t.Fatalf("parser.Parse(template): %v", err)
+			}
+			if len(tasks) != 1 || tasks[0].Name != "hello" ||
+				tasks[0].Description != "Prints a friendly greeting." || tasks[0].Script == "" {
+				t.Errorf("template tasks = %+v, want one task %q with its description and a script", tasks, "hello")
+			}
+		})
 	}
 }
 
@@ -952,7 +972,7 @@ func TestInitForceOverwrites(t *testing.T) {
 			if want := "made: overwrote " + name + "\n"; stdout.String() != want {
 				t.Errorf("stdout = %q, want %q", stdout.String(), want)
 			}
-			if got, _ := os.ReadFile(path); string(got) != madefileTemplate {
+			if got, _ := os.ReadFile(path); string(got) != initTemplate(resolveVersion()) {
 				t.Errorf("%s = %q, want the template", name, got)
 			}
 			if entries, _ := os.ReadDir(dir); len(entries) != 1 {
@@ -972,7 +992,7 @@ func TestInitForceWithoutExisting(t *testing.T) {
 	if got := stdout.String(); got != "made: created Madefile.md\n" {
 		t.Errorf("stdout = %q, want %q", got, "made: created Madefile.md\n")
 	}
-	if got, _ := os.ReadFile(filepath.Join(dir, "Madefile.md")); string(got) != madefileTemplate {
+	if got, _ := os.ReadFile(filepath.Join(dir, "Madefile.md")); string(got) != initTemplate(resolveVersion()) {
 		t.Errorf("Madefile.md = %q, want the template", got)
 	}
 }
@@ -996,7 +1016,7 @@ func TestInitForceMultiple(t *testing.T) {
 		t.Errorf("stdout = %q, want %q", got, "made: overwrote Madefile.md\n")
 	}
 	checkContains(t, "stderr", stderr.String(), []string{"also found madefile.md; left unchanged"}, true)
-	if got, _ := os.ReadFile("Madefile.md"); string(got) != madefileTemplate {
+	if got, _ := os.ReadFile("Madefile.md"); string(got) != initTemplate(resolveVersion()) {
 		t.Errorf("Madefile.md = %q, want the template", got)
 	}
 	if got, _ := os.ReadFile("madefile.md"); string(got) != "old madefile.md" {
@@ -1021,7 +1041,7 @@ func TestInitForceSkipsDirectory(t *testing.T) {
 	if got := stdout.String(); got != "made: overwrote madefile.md\n" {
 		t.Errorf("stdout = %q, want %q", got, "made: overwrote madefile.md\n")
 	}
-	if got, _ := os.ReadFile("madefile.md"); string(got) != madefileTemplate {
+	if got, _ := os.ReadFile("madefile.md"); string(got) != initTemplate(resolveVersion()) {
 		t.Errorf("madefile.md = %q, want the template", got)
 	}
 	if info, err := os.Stat("Madefile.md"); err != nil || !info.IsDir() {
