@@ -534,7 +534,7 @@ Add the hook to `.pre-commit-config.yaml`, pinning `rev` to a release tag:
 ```yaml
 repos:
   - repo: https://github.com/Tarektouati/made
-    rev: v0.1.0
+    rev: v0.5.0
     hooks:
       - id: made
         args: [-f, Madefile.md, check]
@@ -547,7 +547,7 @@ In `prek.toml`:
 ```toml
 [[repos]]
 repo = "https://github.com/Tarektouati/made"
-rev = "v0.1.0"
+rev = "v0.5.0"
 hooks = [
   { id = "made", args = ["-f", "Madefile.md", "check"] },
 ]
