@@ -150,6 +150,10 @@ takes no top-level flags (such as `-f`, `-l` or `--no-chdir`) and no arguments;
 these exit with `2`. `init` is reserved: a task named `init` cannot be
 run with `made init`, so give it another name.
 
+The generated file starts with `<!-- made vX.Y.Z -->`, which records the version of
+`made` that created it. The comment is invisible when the Markdown is rendered, and
+it is safe to edit or delete. Local `dev` builds leave it out.
+
 **`made init --force`** overwrites the existing file with the starter template
 instead, keeping its name (so a `madefile.md` stays `madefile.md`), and prints
 `made: overwrote <name>`. If several Madefile names exist, only the one `made`

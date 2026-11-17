@@ -40,8 +40,8 @@ var madefileNames = []string{"Madefile.md", "madefile.md", "MADEFILE.md"}
 // maxMadefileBytes is the largest task file made will read (discovery or -f).
 const maxMadefileBytes = 10 << 20 // 10 MiB
 
-// madefileTemplate is what `made init` writes: a short header and one example task,
-// valid as is.
+// madefileTemplate is the body `made init` writes: a short header and one example
+// task, valid as is. initTemplate prepends the version note.
 const madefileTemplate = "# Tasks\n\n" +
 	"Tasks for this project. Run `made` to list them,\n" +
 	"or `made <task>` to run one.\n\n" +
@@ -76,6 +76,18 @@ func normalizeVersion(v string) string {
 		return "v" + v
 	}
 	return v
+}
+
+// initTemplate returns the file `made init` writes for made version v: the template
+// headed by an HTML comment recording v, so a Madefile says which made it was written
+// for. The comment is hidden when rendered and the parser skips it; the blank line
+// after it ends the HTML block before "# Tasks". Dev builds have no meaningful
+// version, so they get the bare template.
+func initTemplate(v string) string {
+	if v == "dev" {
+		return madefileTemplate
+	}
+	return "<!-- made " + v + " -->\n\n" + madefileTemplate
 }
 
 func main() {
@@ -354,7 +366,7 @@ func watchSignals(ch <-chan os.Signal) (ctx context.Context, force <-chan struct
 	return ctx, forceCh, stop, received
 }
 
-// initMadefile writes madefileTemplate to Madefile.md in the current directory and
+// initMadefile writes the init template (see initTemplate) to Madefile.md in the current directory and
 // returns the exit code. Existing files are matched against madefileNames exactly, and
 // only regular files count, like findMadefile; parent directories are not searched, so a nested Madefile can be
 // created on purpose. When one already exists, it refuses (exit 1) unless force is
@@ -418,13 +430,13 @@ func initMadefile(stdout, stderr io.Writer, force bool) int {
 }
 
 // writeTemplate opens name for writing with the extra open flags and writes
-// madefileTemplate to it. New files get mode 0644.
+// the init template for this build's version to it. New files get mode 0644.
 func writeTemplate(name string, flags int) error {
 	f, err := os.OpenFile(name, os.O_WRONLY|flags, 0o644)
 	if err != nil {
 		return err
 	}
-	_, err = io.WriteString(f, madefileTemplate)
+	_, err = io.WriteString(f, initTemplate(resolveVersion()))
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}

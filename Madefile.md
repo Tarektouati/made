@@ -1,3 +1,5 @@
+<!-- made v0.4.1 -->
+
 # Tasks
 
 The development tasks for `made` itself. Run `made` anywhere in the repository to
