@@ -23,6 +23,7 @@ jobs:
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20 # a lost runner otherwise burns ~45 min
     strategy:
       fail-fast: false
       matrix:
@@ -44,7 +45,29 @@ jobs:
           if [ "$RUNNER_OS" = Linux ]; then sudo apt-get update && sudo apt-get install -y fish
           else brew install fish; fi
       - name: Run tests
+        if: runner.os == 'Windows'
         run: go test -v ${{ matrix.race }} -count=1 ./...
+      # On unix, run one step per package. When the macOS runner dies, its log
+      # is lost, but the jobs API still records step names and status, so we
+      # can see which package killed it. Each step runs in its own session
+      # (setsid), so a signal sent to a session or process group can't reach
+      # Runner.Worker.
+      - name: Test ./internal/runner
+        if: runner.os != 'Windows'
+        timeout-minutes: 8
+        run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' go test -v ${{ matrix.race }} -count=1 -timeout 5m ./internal/runner
+      - name: Test ./e2e
+        if: runner.os != 'Windows'
+        timeout-minutes: 8
+        run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' go test -v ${{ matrix.race }} -count=1 -timeout 5m ./e2e
+      - name: Test . (root)
+        if: runner.os != 'Windows'
+        timeout-minutes: 8
+        run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' go test -v ${{ matrix.race }} -count=1 -timeout 5m .
+      - name: Test ./internal/parser ./internal/completion
+        if: runner.os != 'Windows'
+        timeout-minutes: 8
+        run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' go test -v ${{ matrix.race }} -count=1 -timeout 5m ./internal/parser ./internal/completion
 
   build:
     name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
