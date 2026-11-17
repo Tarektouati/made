@@ -4,3 +4,10 @@
   entry: made
   language: golang
   pass_filenames: false
+- id: made-check
+  name: made --check
+  description: Check a Markdown task file for problems
+  entry: made --check
+  language: golang
+  files: '^(Madefile|madefile|MADEFILE)\.md$'
+  pass_filenames: false

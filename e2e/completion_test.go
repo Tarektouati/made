@@ -99,7 +99,7 @@ printf '%s\n' "${COMPREPLY[@]}"`
 		{line: []string{"made", "b"}, want: []string{"build"}, not: []string{"say-hello"}},
 		{line: []string{"made", "-f", "other.md", ""}, want: []string{"ns:task"}, not: []string{"build"}},
 		{line: []string{"made", "--file", "=", "other.md", ""}, want: []string{"ns:task"}, not: []string{"build"}},
-		{line: []string{"made", "--"}, want: []string{"--file", "--list", "--version", "--no-chdir"}, not: []string{"--list-names"}},
+		{line: []string{"made", "--"}, want: []string{"--file", "--list", "--version", "--no-chdir", "--check", "--strict"}, not: []string{"--list-names"}},
 		{line: []string{"made", "completion", ""}, want: []string{"bash", "zsh", "fish"}, not: []string{"build"}},
 		{line: []string{"made", "build", ""}, not: []string{"build", "--file"}},
 		{line: []string{"made", "init", ""}, want: []string{"--force"}, not: []string{"build"}},
@@ -154,7 +154,7 @@ func TestCompletionFish(t *testing.T) {
 		{line: []string{"made -f other.md "}, want: []string{"ns:task\tHas a colon: here."}, not: []string{"build\tCompiles all packages."}},
 		{line: []string{"made --file=other.md "}, want: []string{"ns:task\tHas a colon: here."}},
 		{line: []string{"made -f 'my tasks.md' "}, want: []string{"ns:task\tHas a colon: here."}, not: []string{"build\tCompiles all packages."}},
-		{line: []string{"made --"}, want: []string{"--file\tMarkdown file to read tasks from", "--list\tList available tasks"}, not: []string{"--list-names"}},
+		{line: []string{"made --"}, want: []string{"--file\tMarkdown file to read tasks from", "--list\tList available tasks", "--check\tCheck the task file for problems"}, not: []string{"--list-names"}},
 		{line: []string{"made completion "}, want: []string{"bash", "zsh", "fish"}, not: []string{"build\tCompiles all packages."}},
 		{line: []string{"made build "}, want: []string{"Madefile.md", "other.md"}, not: []string{"build\tCompiles all packages."}},
 		// fish lists options only once a "-" is typed.

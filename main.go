@@ -27,6 +27,7 @@ import (
 	"unicode"
 
 	"github.com/Tarektouati/made/internal/completion"
+	"github.com/Tarektouati/made/internal/lint"
 	"github.com/Tarektouati/made/internal/parser"
 	"github.com/Tarektouati/made/internal/runner"
 	"golang.org/x/text/width"
@@ -104,11 +105,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var showVersion bool
 	var noChdir bool
 	var listNames bool
+	var check bool
+	var strict bool
 	fs := flag.NewFlagSet("made", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&file, "file", "", "Markdown file to read tasks from (default: nearest Madefile.md, searched up to the repository root, or the filesystem root outside a repository)")
 	fs.StringVar(&file, "f", "", "shorthand for --file")
 	fs.BoolVar(&noChdir, "no-chdir", false, "run the task in the current directory instead of the task file's directory")
+	fs.BoolVar(&check, "check", false, "check the task file for problems instead of running a task")
+	fs.BoolVar(&strict, "strict", false, "with --check, fail on warnings too")
 	fs.BoolVar(&list, "list", false, "list available tasks")
 	fs.BoolVar(&list, "l", false, "shorthand for --list")
 	fs.BoolVar(&showVersion, "version", false, "print version and exit")
@@ -117,12 +122,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.BoolVar(&listNames, "list-names", false, "print task names and descriptions, tab-separated, one per line")
 	printUsage := func(w io.Writer) {
 		fmt.Fprintf(w, "Usage: made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]\n")
+		fmt.Fprintf(w, "       made [-f file] --check [--strict]\n")
 		fmt.Fprintf(w, "       made init [--force]\n")
 		fmt.Fprintf(w, "       made completion <%s>\n\n", strings.Join(completion.Shells, "|"))
 		fmt.Fprintf(w, "Run a task defined as an H3 heading + code block in a Markdown file.\n")
 		fmt.Fprintf(w, "`made init` creates a starter Madefile.md in the current directory;\n")
 		fmt.Fprintf(w, "--force overwrites an existing one.\n")
-		fmt.Fprintf(w, "`made completion <shell>` prints a shell completion script.\n\n")
+		fmt.Fprintf(w, "`made completion <shell>` prints a shell completion script.\n")
+		fmt.Fprintf(w, "`made --check` reports problems in the task file without running anything.\n\n")
 		printOptions(w, fs, mainOptions)
 	}
 	// fs still reports parse errors on stderr; the usage is printed below so that help
@@ -136,6 +143,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		printUsage(stderr)
 		return 2
+	}
+
+	if strict && !check {
+		fmt.Fprintln(stderr, "made: --strict requires --check")
+		return 2
+	}
+	if check {
+		if fs.NArg() > 0 {
+			fmt.Fprintln(stderr, "made: --check takes no task name")
+			return 2
+		}
+		if f := firstSetFlag(fs, "f", "file", "no-chdir", "check", "strict"); f != "" {
+			fmt.Fprintf(stderr, "made: --check does not take %s\n", f)
+			return 2
+		}
 	}
 
 	if showVersion {
@@ -226,6 +248,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "made: using %s (also found %s)\n", res.path, strings.Join(res.others, ", "))
 	}
 	file = res.path
+
+	if check {
+		return runCheck(stdout, stderr, file, strict)
+	}
 
 	source, err := readMadefile(file)
 	if err != nil {
@@ -544,9 +570,66 @@ func readMadefile(path string) ([]byte, error) {
 		return nil, fmt.Errorf("%s is not a regular file", path)
 	}
 	if info.Size() > maxMadefileBytes {
-		return nil, fmt.Errorf("%s exceeds maximum size (%d bytes)", path, maxMadefileBytes)
+		return nil, fmt.Errorf("%s %w (%d bytes)", path, errTooLarge, maxMadefileBytes)
 	}
 	return os.ReadFile(path)
+}
+
+// errTooLarge is wrapped by readMadefile for a file over maxMadefileBytes.
+var errTooLarge = errors.New("exceeds maximum size")
+
+// runCheck lints the task file at path for made --check, prints the findings to
+// stdout, and returns the exit code: 1 if there is an error (or, with strict, a
+// warning), otherwise 0. A file that cannot be read is reported on stderr, exit 1.
+func runCheck(stdout, stderr io.Writer, path string, strict bool) int {
+	var diags []lint.Diagnostic
+	source, err := readMadefile(path)
+	switch {
+	case errors.Is(err, errTooLarge):
+		diags = []lint.Diagnostic{{Severity: lint.Error, Rule: "file-too-large",
+			Msg: fmt.Sprintf("file exceeds the maximum size of %d bytes", maxMadefileBytes)}}
+	case err != nil:
+		fmt.Fprintf(stderr, "made: cannot read %s: %v\n", path, err)
+		return 1
+	default:
+		diags = lint.Check(source)
+	}
+	errs, warns := printDiagnostics(stdout, path, diags)
+	if errs > 0 || (strict && warns > 0) {
+		return 1
+	}
+	return 0
+}
+
+// printDiagnostics writes one "path:line: severity: rule: message" line per finding
+// (without ":line" for a whole-file finding) and a summary, and returns the error and
+// warning counts. It prints nothing when diags is empty.
+func printDiagnostics(w io.Writer, path string, diags []lint.Diagnostic) (errs, warns int) {
+	if len(diags) == 0 {
+		return 0, 0
+	}
+	for _, d := range diags {
+		loc := path
+		if d.Line > 0 {
+			loc = fmt.Sprintf("%s:%d", path, d.Line)
+		}
+		fmt.Fprintf(w, "%s: %s: %s: %s\n", loc, d.Severity, d.Rule, sanitizeDisplay(d.Msg))
+		if d.Severity == lint.Warning {
+			warns++
+		} else {
+			errs++
+		}
+	}
+	fmt.Fprintf(w, "%s (%s, %s)\n", plural(len(diags), "problem"), plural(errs, "error"), plural(warns, "warning"))
+	return errs, warns
+}
+
+// plural formats n with noun, adding "s" unless n is 1.
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 // isRegularFile reports whether path exists and is a regular file.
@@ -676,6 +759,8 @@ type usageOption struct{ short, long, arg string }
 var mainOptions = []usageOption{
 	{short: "f", long: "file", arg: "file"},
 	{long: "no-chdir"},
+	{long: "check"},
+	{long: "strict"},
 	{short: "l", long: "list"},
 	{short: "V", long: "version"},
 	{short: "h", long: "help"},

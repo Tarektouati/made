@@ -138,7 +138,7 @@ var fallbacks = map[string][]string{"python": {"python"}}
 // A script containing a NUL byte cannot be passed as an argument and returns an error
 // before anything runs. On Linux the interpreter is also killed if made itself dies.
 func Run(ctx context.Context, force <-chan struct{}, t parser.Task, dir string, args []string) error {
-	lang := strings.ToLower(strings.TrimSpace(t.Lang))
+	lang := NormalizeLang(t.Lang)
 	in, ok := interpreters[lang]
 	if !ok {
 		return fmt.Errorf("unsupported language %q; supported: %s", t.Lang, supportedLanguages())
@@ -224,6 +224,24 @@ func inlineScript(in interpreter, script string) string {
 // supportedLanguages returns the named languages, sorted, for error messages; the
 // empty default is omitted.
 func supportedLanguages() string {
+	return strings.Join(Languages(), ", ")
+}
+
+// NormalizeLang folds a fence language the way Run and Supported match it: trimmed
+// and lowercased.
+func NormalizeLang(lang string) string {
+	return strings.ToLower(strings.TrimSpace(lang))
+}
+
+// Supported reports whether Run accepts a fence language. Matching ignores case and
+// surrounding whitespace; the empty language is supported (it runs with bash).
+func Supported(lang string) bool {
+	_, ok := interpreters[NormalizeLang(lang)]
+	return ok
+}
+
+// Languages returns the supported fence languages, sorted, without the empty default.
+func Languages() []string {
 	keys := make([]string, 0, len(interpreters))
 	for k := range interpreters {
 		if k != "" {
@@ -231,7 +249,7 @@ func supportedLanguages() string {
 		}
 	}
 	sort.Strings(keys)
-	return strings.Join(keys, ", ")
+	return keys
 }
 
 // langLabel describes a fence language for error messages, naming the bash default

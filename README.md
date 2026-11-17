@@ -125,6 +125,7 @@ made --version       # print the version
 
 ```
 made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]
+made [-f file] --check [--strict]
 made init [--force]
 made completion <bash|zsh|fish>
 ```
@@ -133,6 +134,8 @@ made completion <bash|zsh|fish>
 |---|---|---|
 | `-f`, `--file` | nearest `Madefile.md` | Markdown file to read tasks from. Without `-f`, `made` uses the `Madefile.md` in the current directory or the closest parent directory, up to the repository root (or the filesystem root outside a repository; see [How it works](#how-it-works)) |
 | `--no-chdir` | | Run the task in the current directory instead of the task file's directory |
+| `--check` | | Check the task file for problems instead of running a task; see [Checking a Madefile](#checking-a-madefile) |
+| `--strict` | | With `--check`, fail on warnings too |
 | `-l`, `--list` | | List available tasks and exit |
 | `-V`, `--version` | | Print the version and exit |
 | `-h`, `--help` | | Print usage to stdout and exit |
@@ -357,6 +360,41 @@ A second Ctrl-C (or any second handled signal) during the grace period sends `SI
 killed when `made` dies (via `PR_SET_PDEATHSIG`), but processes the script spawned
 may survive; macOS has no equivalent, so there the task keeps running.
 
+## Checking a Madefile
+
+`made --check` reads the task file the same way a run does (`-f` and discovery
+apply) and reports mistakes the parser would otherwise accept silently, without
+running anything. Each finding is one line on stdout, followed by a summary:
+
+```
+Madefile.md:12: error: duplicate-task: "build" already defined at line 4
+Madefile.md:20: warning: extra-code-block: ignored: task "test" runs only its first code block (line 16)
+2 problems (1 error, 1 warning)
+```
+
+A clean file prints nothing. `made --check` exits with `1` if there is any error,
+or with `--strict` any warning, and `0` otherwise. A file that can't be read is
+reported on stderr like any other run (exit `1`). `--check` takes no task name and
+can't be combined with `-l` or `-V`, and `--strict` needs `--check`; these exit
+with `2`.
+
+| Rule | Severity | Reported when |
+|---|---|---|
+| `duplicate-task` | error | A task has the same name as an earlier one, which is the one `made` runs |
+| `unsupported-language` | error | The code block's language isn't one of the [supported languages](#supported-languages) |
+| `empty-name` | error | The heading's name is empty, e.g. `` ### `build` `` (inline code is not part of the name) |
+| `empty-script` | error | The task's code block is empty or blank |
+| `nul-byte` | error | The script contains a NUL byte, which can't be run |
+| `nesting-too-deep` | error | Lists or blockquotes nest deeper than 256 levels |
+| `file-too-large` | error | The file is larger than 10 MiB |
+| `name-altered` | warning | Inline markup (code, emphasis, links, HTML) is dropped from the heading, so the task name differs from what it shows |
+| `unreachable-name` | warning | The name is `init` or `completion` (reserved), or starts with `-` (run it as `made -- -x`) |
+| `no-code-block` | warning | An H3 heading has no code block before the next heading, so it isn't a task |
+| `extra-code-block` | warning | A task has more than one code block; only the first runs |
+| `docs-fence` | warning | The task's code block is `markdown`, `md`, `text`, `txt`, `plaintext`, `console` or `output`, so it is probably documentation |
+
+To run the check on commit, see [Pre-commit and prek](#pre-commit-and-prek).
+
 ## Example output
 
 Listing the tasks in this repository:
@@ -524,6 +562,27 @@ command; the task runs as written. `args` are passed to `made`: use `-f` to pick
 the task file and end with the task name. The hook fails when the task exits with
 a non-zero code. It runs when any file is staged; set `always_run: true` or
 `files` in your config to change that.
+
+**Checking the Madefile**
+
+The `made-check` hook runs [`made --check`](#checking-a-madefile) on the
+repository's root Madefile whenever it is staged (`Madefile.md`, `madefile.md` or
+`MADEFILE.md`). Add `args: [--strict]` to fail on warnings too:
+
+```yaml
+      - id: made-check
+        args: [--strict]
+```
+
+The hook checks one file and runs from the repository root, so a nested Madefile
+or a different file name needs its own entry, with `-f` naming the file and
+`files` matching it:
+
+```yaml
+      - id: made-check
+        args: [-f, services/api/Madefile.md]
+        files: ^services/api/Madefile\.md$
+```
 
 ## Migrating from 0.2
 

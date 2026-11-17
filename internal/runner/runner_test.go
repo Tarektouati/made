@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -573,5 +574,30 @@ func TestRunNoArgsSeparatorNotPassed(t *testing.T) {
 				t.Fatalf("Run: %v, want no arguments", err)
 			}
 		})
+	}
+}
+
+func TestSupported(t *testing.T) {
+	for _, lang := range []string{"", "bash", "BASH", " python ", "Node"} {
+		if !Supported(lang) {
+			t.Errorf("Supported(%q) = false, want true", lang)
+		}
+	}
+	for _, lang := range []string{"yaml", "text", "bash{.x}", "go"} {
+		if Supported(lang) {
+			t.Errorf("Supported(%q) = true, want false", lang)
+		}
+	}
+}
+
+func TestLanguages(t *testing.T) {
+	langs := Languages()
+	if !slices.IsSorted(langs) || slices.Contains(langs, "") || !slices.Contains(langs, "bash") {
+		t.Errorf("Languages() = %q, want sorted, without \"\", including bash", langs)
+	}
+	for _, l := range langs {
+		if !Supported(l) {
+			t.Errorf("Languages() lists %q, which Supported rejects", l)
+		}
 	}
 }

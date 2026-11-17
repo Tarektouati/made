@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -461,5 +462,77 @@ func TestParseTildeFenceCloseLength(t *testing.T) {
 	_, err := Parse(outside)
 	if err == nil || !strings.Contains(err.Error(), "nesting too deep") {
 		t.Fatalf("Parse outside fence = %v, want nesting too deep", err)
+	}
+}
+
+func TestParseDetailedPositions(t *testing.T) {
+	const doc = "# Title\n\n### build\nBuilds it.\n```bash\necho a\n```\n\n```sh\necho b\n```\n\n## Section\n\n### `x` step\n\n### docs\n```text\nhi\n```\n"
+	for _, tc := range []struct{ name, src string }{
+		{"lf", doc},
+		{"crlf", strings.ReplaceAll(doc, "\n", "\r\n")},
+		{"bom", "\xef\xbb\xbf" + doc},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tasks, err := ParseDetailed([]byte(tc.src))
+			if err != nil {
+				t.Fatalf("ParseDetailed: %v", err)
+			}
+			if len(tasks) != 3 {
+				t.Fatalf("got %d headings, want 3: %+v", len(tasks), tasks)
+			}
+			build, step, docs := tasks[0], tasks[1], tasks[2]
+			if build.Line != 3 || build.Name != "build" || build.Altered || len(build.Fences) != 2 ||
+				build.Fences[0].Line != 5 || build.Fences[0].Lang != "bash" || build.Fences[0].Script != "echo a\n" ||
+				build.Fences[1].Line != 9 || build.Fences[1].Lang != "sh" {
+				t.Errorf("build = %+v", build)
+			}
+			if step.Line != 15 || step.Name != "step" || step.Raw != "`x` step" || !step.Altered || len(step.Fences) != 0 {
+				t.Errorf("step = %+v", step)
+			}
+			if docs.Line != 17 || len(docs.Fences) != 1 || docs.Fences[0].Line != 18 || docs.Fences[0].Lang != "text" {
+				t.Errorf("docs = %+v", docs)
+			}
+		})
+	}
+}
+
+// TestParseDetailedMatchesParse checks ParseDetailed's first fences are Parse's tasks.
+func TestParseDetailedMatchesParse(t *testing.T) {
+	src := []byte("### a\n```bash\necho a\n```\n```sh\nx\n```\n### none\n# H1\n```bash\nignored\n```\n### b\n> ```bash\n> quoted\n> ```\n```python\nprint(1)\n```\n")
+	want, err := Parse(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := ParseDetailed(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []Task
+	for _, r := range raw {
+		if len(r.Fences) > 0 {
+			f := r.Fences[0]
+			got = append(got, Task{Name: r.Name, Lang: f.Lang, Script: f.Script})
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("ParseDetailed tasks %+v, Parse tasks %+v", got, want)
+	}
+	for i := range want {
+		want[i].Description = ""
+		if got[i] != want[i] {
+			t.Errorf("task %d: ParseDetailed %+v, Parse %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestNestingErrorLine(t *testing.T) {
+	src := append([]byte("### a\n\n"), repeatToken("> ", maxNestingDepth+1)...)
+	_, err := ParseDetailed(src)
+	var nest *NestingError
+	if !errors.As(err, &nest) || nest.Line != 3 {
+		t.Fatalf("ParseDetailed error = %v, want *NestingError at line 3", err)
+	}
+	if _, err := Parse(src); err == nil || err.Error() != "nesting too deep (max 256)" {
+		t.Errorf("Parse error = %v, want the unchanged message", err)
 	}
 }
