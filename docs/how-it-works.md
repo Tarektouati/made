@@ -7,7 +7,9 @@ signals. [← Back to README](../README.md)
 [goldmark](https://github.com/yuin/goldmark) and walks the top-level blocks in
 document order. Each H3 heading starts a task named after its text, with Markdown
 escapes and HTML entities decoded (`&amp;` becomes `&`, `\*` becomes `*`) and
-whitespace collapsed to single spaces; that is the name you pass to `made`. Paragraphs
+whitespace collapsed to single spaces. Inline markup keeps its text
+(`` ### Build `all` now `` is the task `Build all now`), and code spans are taken
+literally, with no decoding; that is the name you pass to `made`. Paragraphs
 between the heading and the first fenced code block become the task's
 description, and that code block becomes its script. Any heading of another level
 ends the current task's scope, and an H3 with no code block after it is skipped.

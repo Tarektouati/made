@@ -99,8 +99,8 @@ type RawTask struct {
 	Line int    // 1-based line of the heading
 	Raw  string // the heading's source text, whitespace-normalized
 	Name string // the task name Parse gives this heading
-	// Altered is set when the heading has inline markup (code span, emphasis, link,
-	// raw HTML) whose text is left out of Name.
+	// Altered is set when the heading has raw HTML tags or an image, whose visible
+	// rendering is lost from Name. Code spans, emphasis and links keep their text.
 	Altered bool
 	// Fences are the top-level fenced code blocks before the next heading, in order.
 	// Parse runs only Fences[0]; a heading with none is not a task.
@@ -154,24 +154,35 @@ func ParseDetailed(source []byte) ([]RawTask, error) {
 	return tasks, nil
 }
 
-// hasMarkup reports whether n has an inline child other than plain text, whose
-// content headingText drops.
+// hasMarkup reports whether n contains inline markup whose visible rendering
+// headingText does not keep: raw HTML tags, or an image replaced by its alt text.
 func hasMarkup(n ast.Node) bool {
 	for c := n.FirstChild(); c != nil; c = c.NextSibling() {
-		if _, ok := c.(*ast.Text); !ok {
+		switch c.(type) {
+		case *ast.RawHTML, *ast.Image:
+			return true
+		}
+		if hasMarkup(c) {
 			return true
 		}
 	}
 	return false
 }
 
-// headingText concatenates the text of a node's inline children, decoding backslash
-// escapes and entity references. It works for any node whose meaningful content is
-// plain text segments (headings, paragraphs).
+// headingText concatenates the text of a node's inline descendants (code spans,
+// emphasis, link and image text included), decoding backslash escapes and entity
+// references outside code spans. Raw HTML tags are left out. It works for any node
+// whose content is inline (headings, paragraphs).
 func headingText(n ast.Node, source []byte) string {
 	var b strings.Builder
+	writeInlineText(&b, n, source)
+	return b.String()
+}
+
+func writeInlineText(b *strings.Builder, n ast.Node, source []byte) {
 	for c := n.FirstChild(); c != nil; c = c.NextSibling() {
-		if t, ok := c.(*ast.Text); ok {
+		switch t := c.(type) {
+		case *ast.Text:
 			if t.IsRaw() {
 				b.Write(t.Segment.Value(source))
 			} else {
@@ -180,9 +191,12 @@ func headingText(n ast.Node, source []byte) string {
 			if t.SoftLineBreak() || t.HardLineBreak() {
 				b.WriteByte(' ')
 			}
+		case *ast.AutoLink:
+			b.Write(t.Label(source))
+		default:
+			writeInlineText(b, c, source)
 		}
 	}
-	return b.String()
 }
 
 // fenceLanguage returns the language word of a fence's info string. It ends at the

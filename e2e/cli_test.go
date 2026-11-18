@@ -479,6 +479,13 @@ func TestCheckReportsProblems(t *testing.T) {
 	}
 }
 
+func TestCheckStrictAcceptsInlineMarkupName(t *testing.T) {
+	dir := writeTasks(t, "Madefile.md", "### `build`\n```bash\necho ok\n```\n")
+	if stdout, stderr, code := runMade(t, dir, "--check", "--strict"); code != 0 || stdout != "" || stderr != "" {
+		t.Errorf("exit = %d, stdout = %q, stderr = %q; want 0 and no output", code, stdout, stderr)
+	}
+}
+
 func TestMissingInterpreterFails(t *testing.T) {
 	content := "### pytask\n```python\nprint('hi')\n```\n"
 	dir := writeTasks(t, "Madefile.md", content)
