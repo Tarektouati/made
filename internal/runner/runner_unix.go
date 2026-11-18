@@ -89,15 +89,15 @@ func signalKill(cmd *exec.Cmd, td *teardown) {
 
 // survivors reports whether part of the cancelled task is still running after its
 // interpreter exited: a member of its process group, or a recorded descendant still in
-// made's group.
+// made's group. Zombies have already exited and do not count.
 func survivors(cmd *exec.Cmd, td *teardown) bool {
 	if cmd.Process == nil {
 		return false
 	}
 	if td.grouped {
-		return syscall.Kill(-cmd.Process.Pid, 0) == nil
+		return groupAlive(cmd.Process.Pid)
 	}
-	return slices.ContainsFunc(td.pids, inOwnGroup)
+	return slices.ContainsFunc(td.pids, func(pid int) bool { return inOwnGroup(pid) && !zombie(pid) })
 }
 
 // fromTerminal reports whether sig is one the terminal sends to its whole foreground

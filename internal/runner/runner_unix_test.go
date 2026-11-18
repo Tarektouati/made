@@ -5,8 +5,11 @@ package runner
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -162,6 +165,59 @@ func TestRunCancelGivesSurvivorsGrace(t *testing.T) {
 			t.Errorf("Run took %v after cancel, want it to return once the child exited, before %v", elapsed, killGrace)
 		}
 	})
+}
+
+// TestSurvivorsIgnoresZombies checks that a task member which has exited but not yet
+// been reaped does not count as a survivor, so a cancel does not wait for the reaper.
+func TestSurvivorsIgnoresZombies(t *testing.T) {
+	t.Run("grouped", func(t *testing.T) {
+		leader := startProc(t, "sleep", []string{"30"}, &syscall.SysProcAttr{Setpgid: true})
+		zombie := startProc(t, "true", nil, &syscall.SysProcAttr{Setpgid: true, Pgid: leader.Process.Pid})
+		waitZombie(t, zombie.Process.Pid)
+		_ = leader.Process.Kill()
+		_ = leader.Wait()
+		if survivors(leader, &teardown{grouped: true}) {
+			t.Error("survivors = true for a group whose only member left is a zombie, want false")
+		}
+	})
+	t.Run("tty", func(t *testing.T) {
+		zombie := startProc(t, "true", nil, nil)
+		waitZombie(t, zombie.Process.Pid)
+		if survivors(zombie, &teardown{pids: []int{zombie.Process.Pid}}) {
+			t.Error("survivors = true for a recorded descendant that is a zombie, want false")
+		}
+	})
+}
+
+// startProc starts name with args and attr, leaving it unreaped until the test ends.
+func startProc(t *testing.T, name string, args []string, attr *syscall.SysProcAttr) *exec.Cmd {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), name, args...)
+	cmd.SysProcAttr = attr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start %s: %v", name, err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+	return cmd
+}
+
+// waitZombie polls ps until pid has exited and is waiting to be reaped, failing after 10s.
+func waitZombie(t *testing.T, pid int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		out, _ := exec.CommandContext(t.Context(), "ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
+		if strings.HasPrefix(strings.TrimSpace(string(out)), "Z") {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pid %d never became a zombie (ps stat %q)", pid, out)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // waitForFile polls until path exists and is non-empty, failing after 10s.
