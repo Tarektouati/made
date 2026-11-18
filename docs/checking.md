@@ -25,12 +25,12 @@ with `2`.
 |---|---|---|
 | `duplicate-task` | error | A task has the same name as an earlier one, which is the one `made` runs |
 | `unsupported-language` | error | The code block's language isn't one of the [supported languages](languages.md) |
-| `empty-name` | error | The heading's name is empty, e.g. `` ### `build` `` (inline code is not part of the name) |
+| `empty-name` | error | The heading's name is empty, e.g. `### <br>` (HTML tags are not part of the name) |
 | `empty-script` | error | The task's code block is empty or blank |
 | `nul-byte` | error | The script contains a NUL byte, which can't be run |
 | `nesting-too-deep` | error | Lists or blockquotes nest deeper than 256 levels |
 | `file-too-large` | error | The file is larger than 10 MiB |
-| `name-altered` | warning | Inline markup (code, emphasis, links, HTML) is dropped from the heading, so the task name differs from what it shows |
+| `name-altered` | warning | The heading has HTML tags or an image, which the task name leaves out (an image becomes its alt text), so the name differs from what it shows. Code spans, emphasis and links keep their text and are not flagged |
 | `unreachable-name` | warning | The name is `init` or `completion` (reserved), or starts with `-` (run it as `made -- -x`) |
 | `no-code-block` | warning | An H3 heading has no code block before the next heading, so it isn't a task |
 | `extra-code-block` | warning | A task has more than one code block; only the first runs |

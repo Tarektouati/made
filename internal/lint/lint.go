@@ -75,7 +75,7 @@ func Check(src []byte) []Diagnostic {
 		case t.Name == "":
 			add(t.Line, Error, "empty-name", "heading %q gives an empty task name", t.Raw)
 		case t.Altered:
-			add(t.Line, Warning, "name-altered", "heading %q is read as task %q; inline markup is dropped from names", t.Raw, t.Name)
+			add(t.Line, Warning, "name-altered", "heading %q is read as task %q; HTML tags and images are not part of names", t.Raw, t.Name)
 		}
 		if slices.Contains(reservedNames, t.Name) {
 			add(t.Line, Warning, "unreachable-name", "task %q cannot be run: made %s is reserved", t.Name, t.Name)

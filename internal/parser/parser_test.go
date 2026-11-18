@@ -293,6 +293,52 @@ func TestParseHeadingTextDecoding(t *testing.T) {
 	}
 }
 
+func TestParseInlineMarkupText(t *testing.T) {
+	tests := []struct {
+		name     string
+		heading  string
+		desc     string
+		wantName string
+		wantDesc string
+	}{
+		{"code span", "`build`", "d", "build", "d"},
+		{"code span with text", "run `go test` now", "d", "run go test now", "d"},
+		{"code span keeps escapes and entities", "`a\\*b &amp;`", "d", "a\\*b &amp;", "d"},
+		{"emphasis", "*build* all", "d", "build all", "d"},
+		{"underscore emphasis", "_build_", "d", "build", "d"},
+		{"strong", "**deploy** prod", "d", "deploy prod", "d"},
+		{"link", "[docs](https://example.com) site", "d", "docs site", "d"},
+		{"autolink", "see <https://example.com>", "d", "see https://example.com", "d"},
+		{"image alt text", "![logo](x.png) img", "d", "logo img", "d"},
+		{"raw html dropped", "a <b>bold</b> c", "d", "a bold c", "d"},
+		{"emphasis decodes entities", "*a &amp; b*", "d", "a & b", "d"},
+		{"strong inside emphasis", "*a **b** c*", "d", "a b c", "d"},
+		{"code span inside strong", "**`x`** y", "d", "x y", "d"},
+		{"emphasis inside link", "[*go* `vet`](u)", "d", "go vet", "d"},
+		{"description code span", "t", "Runs `go test` on **all** [pkgs](u).", "t", "Runs go test on all pkgs."},
+		{"description soft break inside emphasis", "t", "*a\nb*", "t", "a b"},
+		{"description hard break inside strong", "t", "**a\\\nb**", "t", "a b"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			src := []byte("### " + tt.heading + "\n" + tt.desc + "\n\n```bash\necho\n```\n")
+			tasks, err := Parse(src)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if len(tasks) != 1 {
+				t.Fatalf("got %d tasks, want 1", len(tasks))
+			}
+			if tasks[0].Name != tt.wantName {
+				t.Errorf("Name = %q, want %q", tasks[0].Name, tt.wantName)
+			}
+			if tasks[0].Description != tt.wantDesc {
+				t.Errorf("Description = %q, want %q", tasks[0].Description, tt.wantDesc)
+			}
+		})
+	}
+}
+
 func TestParseHTMLBlockSwallowsFence(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -507,11 +553,44 @@ func TestParseDetailedPositions(t *testing.T) {
 				build.Fences[1].Line != 9 || build.Fences[1].Lang != "sh" {
 				t.Errorf("build = %+v", build)
 			}
-			if step.Line != 15 || step.Name != "step" || step.Raw != "`x` step" || !step.Altered || len(step.Fences) != 0 {
+			if step.Line != 15 || step.Name != "x step" || step.Raw != "`x` step" || step.Altered || len(step.Fences) != 0 {
 				t.Errorf("step = %+v", step)
 			}
 			if docs.Line != 17 || len(docs.Fences) != 1 || docs.Fences[0].Line != 18 || docs.Fences[0].Lang != "text" {
 				t.Errorf("docs = %+v", docs)
+			}
+		})
+	}
+}
+
+func TestParseDetailedAltered(t *testing.T) {
+	tests := []struct {
+		heading string
+		want    bool
+	}{
+		{"plain", false},
+		{`a\_b &amp; c`, false},
+		{"`code`", false},
+		{"*em* and **strong**", false},
+		{"[link](u)", false},
+		{"<https://example.com>", false},
+		{"*a [`b`](u)*", false},
+		{"<b>html</b>", true},
+		{"![alt](x.png)", true},
+		{"*nested <br> html*", true},
+		{"[![alt](x.png)](u)", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.heading, func(t *testing.T) {
+			tasks, err := ParseDetailed([]byte("### " + tt.heading + "\n"))
+			if err != nil {
+				t.Fatalf("ParseDetailed: %v", err)
+			}
+			if len(tasks) != 1 {
+				t.Fatalf("got %d headings, want 1", len(tasks))
+			}
+			if tasks[0].Altered != tt.want {
+				t.Errorf("Altered = %v, want %v (Name %q)", tasks[0].Altered, tt.want, tasks[0].Name)
 			}
 		})
 	}
