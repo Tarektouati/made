@@ -483,7 +483,7 @@ func TestParseAllowsNestingAtLimit(t *testing.T) {
 	}
 }
 
-func TestParseIgnoresMarkersInsideFences(t *testing.T) {
+func TestParseAllowsShallowMarkersInsideFences(t *testing.T) {
 	src := []byte("### task\n" +
 		"```bash\n" +
 		"echo hello > out\n" +
@@ -499,14 +499,7 @@ func TestParseIgnoresMarkersInsideFences(t *testing.T) {
 	}
 }
 
-func TestParseBOMBeforeFenceIgnoresMarkers(t *testing.T) {
-	src := []byte("\xef\xbb\xbf```\n" + string(repeatToken("> ", maxNestingDepth+1)) + "```\n")
-	if _, err := Parse(src); err != nil {
-		t.Fatalf("Parse: %v, want deep markers inside a BOM-prefixed fence skipped", err)
-	}
-}
-
-func TestParseIgnoresMarkersInsideTildeFences(t *testing.T) {
+func TestParseAllowsShallowMarkersInsideTildeFences(t *testing.T) {
 	src := []byte("### task\n" +
 		"~~~bash\n" +
 		"> not a blockquote\n" +
@@ -518,19 +511,6 @@ func TestParseIgnoresMarkersInsideTildeFences(t *testing.T) {
 	}
 	if len(tasks) != 1 || tasks[0].Name != "task" {
 		t.Fatalf("tasks = %+v, want one task named task", tasks)
-	}
-}
-
-func TestParseTildeFenceCloseLength(t *testing.T) {
-	deep := strings.Repeat("> ", maxNestingDepth+1) + "\n"
-	insideFence := []byte("~~~\n" + deep + "~~\n")
-	if _, err := Parse(insideFence); err != nil {
-		t.Fatalf("Parse: %v, want deep markers skipped while fence stays open", err)
-	}
-	outside := []byte("~~~~\n\n~~~~\n" + deep)
-	_, err := Parse(outside)
-	if err == nil || !strings.Contains(err.Error(), "nesting too deep") {
-		t.Fatalf("Parse outside fence = %v, want nesting too deep", err)
 	}
 }
 
@@ -636,5 +616,111 @@ func TestNestingErrorLine(t *testing.T) {
 	}
 	if _, err := Parse(src); err == nil || err.Error() != "nesting too deep (max 256)" {
 		t.Errorf("Parse error = %v, want the unchanged message", err)
+	}
+}
+
+// TestParseRejectsDeepNestingAroundFences covers inputs where an earlier version of
+// the scan skipped lines as fenced code that goldmark parses as Markdown.
+func TestParseRejectsDeepNestingAroundFences(t *testing.T) {
+	deep := strings.Repeat("> ", maxNestingDepth+1) + "\n"
+	for _, tc := range []struct{ name, src string }{
+		{"tab-indented fence", "\t```\n" + deep},
+		{"space and tab indented fence", "  \t```\n" + deep},
+		{"backtick in backtick info string", "```a`b\n" + deep},
+		{"list item fence then dedent", "- a\n\n  ```\n" + deep},
+		{"fence inside html block", "<div>\n```\n\n" + deep},
+		{"fence inside html block in list item", "- <div>\n  ```\n\n  " + deep},
+		{"fence inside html comment", "<!--\n```\n-->\n" + deep},
+		{"fence inside pre block", "<pre>\n\n```\n</pre>\n" + deep},
+		{"tab-indented closer does not reopen", "```\n\t```\n```\n" + deep},
+		{"list item fence closed at 4 columns", "- a\n\n  ```\n    ```\n  " + deep},
+		{"list item fence closed at 5 columns", "- a\n\n  ```\n     ```\n  " + deep},
+		{"ordered list item fence closed at 6 columns", "1. a\n\n   ```\n      ```\n   " + deep},
+		{"closer after a fence ended early is not an opener", " ```\n0\n```\n" + deep},
+		{"indent before an end-of-line marker counts", "*\n  " + strings.Repeat("> ", maxNestingDepth) + "*\n"},
+		{"early-closed fence", "  ```\n     ```\n```\n" + deep},
+		{"fence after a container marker", "0) ```\n   ```\n   " + deep},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var nest *NestingError
+			if _, err := Parse([]byte(tc.src)); !errors.As(err, &nest) {
+				t.Fatalf("Parse error = %v, want *NestingError", err)
+			}
+		})
+	}
+}
+
+// TestParseBlankLinesDoNotNest checks a whitespace-only line adds no depth, however
+// wide: it cannot open or continue a container.
+func TestParseBlankLinesDoNotNest(t *testing.T) {
+	for _, line := range []string{strings.Repeat(" ", 600), strings.Repeat("\t", 200), " \t \t" + strings.Repeat(" ", 600)} {
+		src := "### t\n" + line + "\n```bash\necho ok\n```\n"
+		if _, err := Parse([]byte(src)); err != nil {
+			t.Errorf("Parse(%d-byte blank line): %v, want nil", len(line), err)
+		}
+	}
+}
+
+// TestParseRejectsDeeplyIndentedText pins a deliberate trade-off: non-blank text
+// indented 514+ columns counts as deep nesting, because the scan cannot tell list
+// item continuation from other indentation.
+func TestParseRejectsDeeplyIndentedText(t *testing.T) {
+	src := strings.Repeat(" ", 514) + "x\n"
+	var nest *NestingError
+	if _, err := Parse([]byte(src)); !errors.As(err, &nest) {
+		t.Fatalf("Parse error = %v, want *NestingError", err)
+	}
+}
+
+// TestParseTrailingWhitespaceDoesNotNest checks whitespace after the last marker on a
+// line adds no depth, while indent before an end-of-line marker still does.
+func TestParseTrailingWhitespaceDoesNotNest(t *testing.T) {
+	if _, err := Parse([]byte("> " + strings.Repeat(" ", 600) + "\n")); err != nil {
+		t.Errorf("Parse(marker then 600 spaces): %v, want nil", err)
+	}
+	src := strings.Repeat(" ", 300) + strings.Repeat("> ", 110) + "-\n"
+	var nest *NestingError
+	if _, err := Parse([]byte(src)); !errors.As(err, &nest) {
+		t.Errorf("Parse(indent then markers ending in an empty item) = %v, want *NestingError", err)
+	}
+}
+
+// TestParseCountsMarkersInsideFences pins a deliberate trade-off: the scan counts
+// lines inside code blocks too, so a code line nested past the limit is rejected.
+func TestParseCountsMarkersInsideFences(t *testing.T) {
+	deep := strings.Repeat("> ", maxNestingDepth+1) + "\n"
+	for _, tc := range []struct{ name, src string }{
+		{"backtick fence", "### t\n```bash\n" + deep + "```\n"},
+		{"tilde fence", "~~~\n" + deep + "~~~\n"},
+		{"BOM-prefixed fence", "\xef\xbb\xbf```\n" + deep + "```\n"},
+		{"list item fence", "- a\n\n  ```\n  " + deep + "  ```\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var nest *NestingError
+			if _, err := Parse([]byte(tc.src)); !errors.As(err, &nest) {
+				t.Fatalf("Parse error = %v, want *NestingError", err)
+			}
+		})
+	}
+}
+
+// TestParseRejectsIndentedNesting covers nesting the scan only sees by counting markers
+// and indent together: markers after four or more columns of indent (inside a list
+// item), and list items continued through indentation.
+func TestParseRejectsIndentedNesting(t *testing.T) {
+	deep := strings.Repeat("> ", maxNestingDepth+1) + "\n"
+	stair := strings.Repeat("- ", 150) + "x\n" +
+		strings.Repeat(" ", 300) + strings.Repeat("- ", 150) + "x\n"
+	for _, tc := range []struct{ name, src string }{
+		{"blockquotes inside a list item", "- - x\n\n    " + deep},
+		{"blockquotes after a tab", "- - x\n\n\t" + deep},
+		{"list items continued by indent", stair},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var nest *NestingError
+			if _, err := Parse([]byte(tc.src)); !errors.As(err, &nest) {
+				t.Fatalf("Parse error = %v, want *NestingError", err)
+			}
+		})
 	}
 }
