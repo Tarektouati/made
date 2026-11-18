@@ -2,6 +2,7 @@ package parser
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -722,5 +723,18 @@ func TestParseRejectsIndentedNesting(t *testing.T) {
 				t.Fatalf("Parse error = %v, want *NestingError", err)
 			}
 		})
+	}
+}
+
+func BenchmarkParseDetailedManyTasks(b *testing.B) {
+	var sb strings.Builder
+	for i := range 50000 {
+		fmt.Fprintf(&sb, "### t%d\n```bash\necho\n```\n", i)
+	}
+	src := []byte(sb.String())
+	for b.Loop() {
+		if _, err := ParseDetailed(src); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
