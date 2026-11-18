@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -21,10 +22,12 @@ import (
 // installVersion is the release served by the fake curl.
 const installVersion = "1.2.3"
 
-// curlStub stands in for curl: it logs each call, answers the latest-release redirect
-// with installVersion, and serves release files from @RELEASE@.
+// curlStub stands in for curl: it logs each call, optionally sends @SIGNAL@ to the
+// calling shell, answers the latest-release redirect with installVersion, and serves
+// release files from @RELEASE@.
 const curlStub = `#!/bin/sh
 echo "$*" >>'@LOG@'
+[ -z '@SIGNAL@' ] || { kill -@SIGNAL@ "$PPID"; exit 22; }
 out= url=
 while [ $# -gt 0 ]; do
 	case $1 in
@@ -49,7 +52,8 @@ cp '@RELEASE@'/"${url##*/}" "$out"
 var installTools = []string{"tar", "uname", "mkdir", "install", "awk", "cut", "mktemp", "rm", "cp"}
 
 type installOpts struct {
-	noGzip      bool
+	// omit lists commands (from installTools or gzip) left off PATH.
+	omit        []string
 	failingSudo bool
 	unsetHome   bool
 	// shadowMade puts a stub made on PATH, as an older install would be.
@@ -58,25 +62,61 @@ type installOpts struct {
 	stdin []byte
 	// script, when set, is run instead of install.sh.
 	script string
+	// shell names the shell that runs the script (default sh).
+	shell string
+	// signal, when set (e.g. INT), is sent by curl to the shell running install.sh.
+	signal string
+	// path is prepended to PATH.
+	path string
+	// noexecTmp wraps tar to strip the exec bit from the extracted made, so running it
+	// from the temp dir fails as it would on a noexec TMPDIR.
+	noexecTmp bool
 }
 
+// tarNoexecStub runs the real tar, then makes the extracted made non-executable.
+const tarNoexecStub = `#!/bin/sh
+'@TAR@' "$@" || exit
+while [ $# -gt 0 ]; do
+	[ "$1" = -C ] && '@CHMOD@' a-x "$2/made"
+	shift
+done
+`
+
 type installResult struct {
-	stdout, stderr string
-	code           int
-	home, work     string
-	curlCalls      int
+	stdout, stderr  string
+	code            int
+	home, work, tmp string
+	curlCalls       int
+}
+
+// releaseOpts alters the fake release written by customRelease.
+type releaseOpts struct {
+	// bin replaces the made binary in the archive.
+	bin []byte
+	// archive replaces the whole archive.
+	archive []byte
+	// checksums rewrites the checksums.txt line for the archive.
+	checksums func(line string) string
 }
 
 // releaseDir writes a fake made release for the host platform (the archive holding the
 // binary under test, and checksums.txt) and returns its directory.
 func releaseDir(t *testing.T) string {
 	t.Helper()
+	return customRelease(t, releaseOpts{})
+}
+
+func customRelease(t *testing.T, opts releaseOpts) string {
+	t.Helper()
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		t.Skipf("install.sh does not support %s", runtime.GOOS)
 	}
-	bin, err := os.ReadFile(madeBin)
-	if err != nil {
-		t.Fatal(err)
+	bin := opts.bin
+	if bin == nil {
+		var err error
+		if bin, err = os.ReadFile(madeBin); err != nil {
+			t.Fatal(err)
+		}
 	}
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
@@ -93,12 +133,20 @@ func releaseDir(t *testing.T) string {
 	if err := gz.Close(); err != nil {
 		t.Fatal(err)
 	}
+	data := buf.Bytes()
+	if opts.archive != nil {
+		data = opts.archive
+	}
 	archive := fmt.Sprintf("made_%s_%s_%s.tar.gz", installVersion, runtime.GOOS, runtime.GOARCH)
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, archive), buf.Bytes(), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, archive), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(dir, "checksums.txt"), fmt.Sprintf("%x  %s\n", sha256.Sum256(buf.Bytes()), archive))
+	line := fmt.Sprintf("%x  %s\n", sha256.Sum256(data), archive)
+	if opts.checksums != nil {
+		line = opts.checksums(line)
+	}
+	writeFile(t, filepath.Join(dir, "checksums.txt"), line)
 	return dir
 }
 
@@ -126,9 +174,13 @@ func writeExec(t *testing.T, path, content string) {
 // (KEY=VALUE) appended.
 func runInstall(t *testing.T, release string, opts installOpts, env ...string) installResult {
 	t.Helper()
-	sh, err := exec.LookPath("sh")
+	shell := opts.shell
+	if shell == "" {
+		shell = "sh"
+	}
+	sh, err := exec.LookPath(shell)
 	if err != nil {
-		t.Skip("sh not found on PATH; skipping")
+		t.Skipf("%s not found on PATH; skipping", shell)
 	}
 	script := opts.script
 	if script == "" {
@@ -138,12 +190,22 @@ func runInstall(t *testing.T, release string, opts installOpts, env ...string) i
 	}
 
 	bin := t.TempDir()
-	tools := installTools
-	if !opts.noGzip {
-		tools = append(tools[:len(tools):len(tools)], "gzip")
+	for _, name := range append(installTools[:len(installTools):len(installTools)], "gzip") {
+		if !slices.Contains(opts.omit, name) && (name != "tar" || !opts.noexecTmp) {
+			linkTool(t, bin, name)
+		}
 	}
-	for _, name := range tools {
-		linkTool(t, bin, name)
+	if opts.noexecTmp {
+		var tarPath, chmodPath string
+		if tarPath, err = exec.LookPath("tar"); err != nil {
+			t.Skip("tar not found on PATH; skipping")
+		}
+		if chmodPath, err = exec.LookPath("chmod"); err != nil {
+			t.Skip("chmod not found on PATH; skipping")
+		}
+		writeExec(t, filepath.Join(bin, "tar"), strings.NewReplacer(
+			"@TAR@", tarPath, "@CHMOD@", chmodPath,
+		).Replace(tarNoexecStub))
 	}
 	switch {
 	case lookPath("sha256sum"):
@@ -155,7 +217,7 @@ func runInstall(t *testing.T, release string, opts installOpts, env ...string) i
 	}
 	log := filepath.Join(t.TempDir(), "curl.log")
 	writeExec(t, filepath.Join(bin, "curl"), strings.NewReplacer(
-		"@LOG@", log, "@RELEASE@", release, "@VERSION@", installVersion,
+		"@LOG@", log, "@RELEASE@", release, "@VERSION@", installVersion, "@SIGNAL@", opts.signal,
 	).Replace(curlStub))
 	if opts.failingSudo {
 		writeExec(t, filepath.Join(bin, "sudo"), "#!/bin/sh\nexit 1\n")
@@ -164,8 +226,12 @@ func runInstall(t *testing.T, release string, opts installOpts, env ...string) i
 		writeExec(t, filepath.Join(bin, "made"), "#!/bin/sh\necho made v0.0.1\n")
 	}
 
-	res := installResult{home: t.TempDir(), work: t.TempDir()}
-	cmdEnv := []string{"PATH=" + bin, "TMPDIR=" + t.TempDir()}
+	res := installResult{home: t.TempDir(), work: t.TempDir(), tmp: t.TempDir()}
+	path := bin
+	if opts.path != "" {
+		path = opts.path + ":" + bin
+	}
+	cmdEnv := []string{"PATH=" + path, "TMPDIR=" + res.tmp}
 	if !opts.unsetHome {
 		cmdEnv = append(cmdEnv, "HOME="+res.home)
 	}
@@ -220,18 +286,20 @@ func requireNotInstalled(t *testing.T, path string) {
 	}
 }
 
+type installCase struct {
+	name string
+	// env returns the extra environment for a run that should install into dir.
+	env        func(t *testing.T, dir string) []string
+	opts       installOpts
+	wantCode   int
+	wantStdout string
+	wantStderr []string
+	noCurl     bool
+}
+
 func TestInstallScript(t *testing.T) {
 	release := releaseDir(t)
-	cases := []struct {
-		name string
-		// env returns the extra environment for a run that should install into dir.
-		env        func(t *testing.T, dir string) []string
-		opts       installOpts
-		wantCode   int
-		wantStdout string
-		wantStderr []string
-		noCurl     bool
-	}{
+	cases := []installCase{
 		{
 			name: "explicit dir",
 			env: func(_ *testing.T, dir string) []string {
@@ -323,13 +391,22 @@ func TestInstallScript(t *testing.T) {
 			wantStdout: "takes precedence over ",
 		},
 		{
-			name:       "missing gzip",
-			env:        func(_ *testing.T, dir string) []string { return []string{"MADE_INSTALL_DIR=" + dir} },
-			opts:       installOpts{noGzip: true},
-			wantCode:   1,
-			wantStderr: []string{"required command not found: gzip"},
-			noCurl:     true,
+			name: "uppercase V",
+			env: func(_ *testing.T, dir string) []string {
+				return []string{"MADE_VERSION=V1.2.3", "MADE_INSTALL_DIR=" + dir}
+			},
+			wantStdout: "Downloading made v1.2.3",
 		},
+	}
+	for _, tool := range []string{"gzip", "awk", "cut", "mktemp", "install"} {
+		cases = append(cases, installCase{
+			name:       "missing " + tool,
+			env:        func(_ *testing.T, dir string) []string { return []string{"MADE_INSTALL_DIR=" + dir} },
+			opts:       installOpts{omit: []string{tool}},
+			wantCode:   1,
+			wantStderr: []string{"made-install: required command not found: " + tool},
+			noCurl:     true,
+		})
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -428,4 +505,146 @@ func TestInstallScriptTruncated(t *testing.T) {
 			requireNotInstalled(t, filepath.Join(dir, "made"))
 		})
 	}
+}
+
+// TestInstallScriptSignal runs under dash, which skips the EXIT trap when killed by a
+// signal, and checks the temp dir is still removed.
+func TestInstallScriptSignal(t *testing.T) {
+	release := releaseDir(t)
+	cases := []struct {
+		signal   string
+		wantCode int
+	}{
+		{signal: "INT", wantCode: 130},
+		{signal: "TERM", wantCode: 143},
+		{signal: "HUP", wantCode: 129},
+	}
+	for _, tc := range cases {
+		t.Run(tc.signal, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "bin")
+			res := runInstall(t, release, installOpts{shell: "dash", signal: tc.signal},
+				"MADE_VERSION=v1.2.3", "MADE_INSTALL_DIR="+dir)
+			if res.code != tc.wantCode {
+				t.Errorf("exit = %d, want %d\nstdout: %s\nstderr: %s", res.code, tc.wantCode, res.stdout, res.stderr)
+			}
+			entries, err := os.ReadDir(res.tmp)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 0 {
+				t.Errorf("TMPDIR holds %d entries after the signal, want 0 (first: %s)", len(entries), entries[0].Name())
+			}
+			requireNotInstalled(t, filepath.Join(dir, "made"))
+		})
+	}
+}
+
+func TestInstallScriptRelease(t *testing.T) {
+	cases := []struct {
+		name    string
+		release releaseOpts
+		opts    installOpts
+		// existing, when set, is a made already installed in the target dir.
+		existing   string
+		wantCode   int
+		wantStderr []string
+	}{
+		{
+			name:    "CRLF checksums",
+			release: releaseOpts{checksums: func(line string) string { return strings.ReplaceAll(line, "\n", "\r\n") }},
+		},
+		{
+			name: "uppercase checksum",
+			release: releaseOpts{checksums: func(line string) string {
+				sum, rest, _ := strings.Cut(line, " ")
+				return strings.ToUpper(sum) + " " + rest
+			}},
+		},
+		{
+			name:       "corrupt archive",
+			release:    releaseOpts{archive: []byte("not a tarball")},
+			wantCode:   1,
+			wantStderr: []string{"made-install: cannot extract made from made_"},
+		},
+		{
+			name:       "binary fails to run",
+			release:    releaseOpts{bin: []byte("#!/bin/sh\necho boom >&2\nexit 3\n")},
+			wantCode:   1,
+			wantStderr: []string{"made-install: ", "failed to run", "boom"},
+		},
+		{
+			name:       "binary fails to run over a working made",
+			release:    releaseOpts{bin: []byte("#!/bin/sh\necho boom >&2\nexit 3\n")},
+			existing:   "#!/bin/sh\necho made v0.0.1\n",
+			wantCode:   1,
+			wantStderr: []string{"made-install: ", "failed to run", "boom"},
+		},
+		{
+			name: "noexec TMPDIR",
+			opts: installOpts{noexecTmp: true},
+		},
+		{
+			name: "noexec TMPDIR under dash",
+			opts: installOpts{noexecTmp: true, shell: "dash"},
+		},
+		{
+			name:       "noexec TMPDIR and binary fails to run",
+			release:    releaseOpts{bin: []byte("#!/bin/sh\necho boom >&2\nexit 3\n")},
+			opts:       installOpts{noexecTmp: true},
+			wantCode:   1,
+			wantStderr: []string{"made-install: installed ", "failed to run", "boom"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			release := customRelease(t, tc.release)
+			dir := filepath.Join(t.TempDir(), "bin")
+			if tc.existing != "" {
+				mkdir(t, dir)
+				writeExec(t, filepath.Join(dir, "made"), tc.existing)
+			}
+			res := runInstall(t, release, tc.opts, "MADE_INSTALL_DIR="+dir)
+			if tc.existing != "" {
+				got, err := os.ReadFile(filepath.Join(dir, "made"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(got) != tc.existing {
+					t.Errorf("existing made was replaced: %q", got)
+				}
+			}
+			if res.code != tc.wantCode {
+				t.Fatalf("exit = %d, want %d\nstdout: %s\nstderr: %s", res.code, tc.wantCode, res.stdout, res.stderr)
+			}
+			for _, want := range tc.wantStderr {
+				if !strings.Contains(res.stderr, want) {
+					t.Errorf("stderr = %q, want it to contain %q", res.stderr, want)
+				}
+			}
+			if tc.wantCode == 0 {
+				if !strings.Contains(res.stdout, "Installed made ") {
+					t.Errorf("stdout = %q, want it to report the installed version", res.stdout)
+				}
+				requireInstalled(t, filepath.Join(dir, "made"))
+			} else if strings.Contains(res.stdout, "Installed ") {
+				t.Errorf("stdout = %q, want no success message", res.stdout)
+			}
+		})
+	}
+}
+
+func TestInstallScriptTrailingSlash(t *testing.T) {
+	release := releaseDir(t)
+	dir := filepath.Join(t.TempDir(), "bin")
+	res := runInstall(t, release, installOpts{path: dir}, "MADE_INSTALL_DIR="+dir+"//")
+	if res.code != 0 {
+		t.Fatalf("exit = %d, want 0\nstdout: %s\nstderr: %s", res.code, res.stdout, res.stderr)
+	}
+	if want := " to " + dir + "/made\n"; !strings.Contains(res.stdout, want) {
+		t.Errorf("stdout = %q, want it to contain %q", res.stdout, want)
+	}
+	if strings.Contains(res.stdout, "Note:") {
+		t.Errorf("stdout = %q, want no PATH note", res.stdout)
+	}
+	requireInstalled(t, filepath.Join(dir, "made"))
 }

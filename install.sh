@@ -43,10 +43,14 @@ main() {
 		[!/]*) err "MADE_INSTALL_DIR must be an absolute path (got '$MADE_INSTALL_DIR')" ;;
 	esac
 
-	need curl
-	need tar
-	need gzip
-	need uname
+	install_dir="${MADE_INSTALL_DIR:-}"
+	while [ "$install_dir" != / ] && [ "${install_dir%/}" != "$install_dir" ]; do
+		install_dir="${install_dir%/}"
+	done
+
+	for cmd in curl tar gzip uname awk cut mktemp install; do
+		need "$cmd"
+	done
 
 	case "$(uname -s)" in
 		Darwin) os=darwin ;;
@@ -79,6 +83,7 @@ main() {
 	fi
 	case "$tag" in
 		v*) ;;
+		V*) tag="v${tag#V}" ;;
 		*) tag="v$tag" ;;
 	esac
 	case "$tag" in
@@ -95,20 +100,33 @@ main() {
 
 	tmp=$(mktemp -d)
 	trap 'rm -rf "$tmp"' EXIT
+	# dash skips the EXIT trap when killed by a signal, so turn signals into exits.
+	trap 'exit 130' INT
+	trap 'exit 143' TERM
+	trap 'exit 129' HUP
 
 	echo "Downloading made $tag ($os/$arch)..."
 	curl -fsSL -o "$tmp/$archive" "$base_url/$archive" || err "download failed: $base_url/$archive"
 	curl -fsSL -o "$tmp/checksums.txt" "$base_url/checksums.txt" || err "download failed: $base_url/checksums.txt"
 
-	expected=$(awk -v f="$archive" '$2 == f { print $1 }' "$tmp/checksums.txt")
+	expected=$(awk -v f="$archive" '{ sub(/\r$/, "") } $2 == f { print tolower($1) }' "$tmp/checksums.txt")
 	[ -n "$expected" ] || err "no checksum found for $archive"
 	actual=$(sha256 "$tmp/$archive")
 	[ "$expected" = "$actual" ] || err "checksum mismatch for $archive"
 
-	tar -xzf "$tmp/$archive" -C "$tmp" made
+	out=$(tar -xzf "$tmp/$archive" -C "$tmp" made 2>&1) || err "cannot extract made from $archive: $out"
 
-	if [ -n "${MADE_INSTALL_DIR:-}" ]; then
-		install_dir="$MADE_INSTALL_DIR"
+	# Check the binary runs before it replaces a working one. On a noexec TMPDIR the shell
+	# reports "<path>: Permission denied" (with an exit status that varies by shell); that
+	# case is left to the check after installing.
+	if ! out=$("$tmp/made" --version 2>&1); then
+		case "$out" in
+			*"$tmp/made: Permission denied"*) ;;
+			*) err "downloaded made failed to run, so nothing was installed: $out" ;;
+		esac
+	fi
+
+	if [ -n "$install_dir" ]; then
 		install_to "$install_dir" || err "cannot install to $install_dir; choose another MADE_INSTALL_DIR"
 	else
 		install_dir=/usr/local/bin
@@ -124,7 +142,9 @@ main() {
 		fi
 	fi
 
-	echo "Installed $("$install_dir/made" --version) to $install_dir/made"
+	installed=$("$install_dir/made" --version 2>&1) ||
+		err "installed $install_dir/made, but it failed to run: $installed"
+	echo "Installed $installed to $install_dir/made"
 
 	case ":$PATH:" in
 		*":$install_dir:"*) ;;
