@@ -650,6 +650,70 @@ func TestSIGHUPIgnoredKeepsTask(t *testing.T) {
 	}
 }
 
+// TestIgnoredINTQUITStayIgnored checks that made started with SIGINT and SIGQUIT
+// ignored, as a background job of a non-interactive shell is, keeps them ignored for
+// itself and the task: neither made nor the task's shell is stopped by them.
+func TestIgnoredINTQUITStayIgnored(t *testing.T) {
+	requireBash(t)
+	if runtime.GOOS == "windows" {
+		t.Skip("SIGQUIT is unix-only")
+	}
+	content := "### long\n```bash\nkill -INT $$\nkill -QUIT $$\necho started\nsleep 1\necho done\n```\n"
+	dir := writeTasks(t, "Madefile.md", content)
+
+	outPath := filepath.Join(t.TempDir(), "out.txt")
+	outFile, err := os.Create(outPath)
+	if err != nil {
+		t.Fatalf("create out file: %v", err)
+	}
+	defer func() { _ = outFile.Close() }()
+
+	// exec keeps the pid and the ignored dispositions, so cmd.Process is made itself.
+	cmd := exec.CommandContext(t.Context(), "bash", "-c", `trap "" INT QUIT; exec "$0" long`, madeBin)
+	cmd.Dir = dir
+	cmd.Stdout = outFile
+	output := func() string {
+		b, _ := os.ReadFile(outPath)
+		return string(b)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start made: %v", err)
+	}
+	waitErr := make(chan error, 1)
+	go func() { waitErr <- cmd.Wait() }()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(output(), "started") {
+		select {
+		case err := <-waitErr:
+			t.Fatalf("made exited before the task printed 'started' (err %v, output %q)", err, output())
+		default:
+		}
+		if time.Now().After(deadline) {
+			_ = cmd.Process.Kill()
+			t.Fatal("task never printed 'started'")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGQUIT} {
+		if err := cmd.Process.Signal(sig); err != nil {
+			t.Fatalf("send %v: %v", sig, err)
+		}
+	}
+	select {
+	case err := <-waitErr:
+		if err != nil {
+			t.Errorf("made under ignored SIGINT and SIGQUIT: err = %v, want exit 0", err)
+		}
+	case <-time.After(10 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatal("made did not exit within 10s")
+	}
+	if got := output(); !strings.Contains(got, "done") {
+		t.Errorf("output = %q, want the task to finish and print %q", got, "done")
+	}
+}
+
 // catMarkerMD defines a task that prints marker.txt relative to its working directory,
 // which reveals where the script ran without depending on how paths are spelled.
 const catMarkerMD = "### where\n```bash\ncat marker.txt\n```\n"

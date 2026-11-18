@@ -283,11 +283,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	sigs := []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT}
-	// Subscribing un-ignores a signal, so leave SIGHUP alone when it is already
-	// ignored (nohup); otherwise logging out would tear down the task.
-	if !signal.Ignored(syscall.SIGHUP) {
-		sigs = append(sigs, syscall.SIGHUP)
+	sigs := []os.Signal{syscall.SIGTERM}
+	// Subscribing un-ignores a signal, also for the task, so leave one alone when it is
+	// already ignored: SIGHUP under nohup (otherwise logging out would tear down the
+	// task), SIGINT and SIGQUIT in a background job of a non-interactive shell.
+	for _, sig := range []os.Signal{os.Interrupt, syscall.SIGHUP} {
+		if !signal.Ignored(sig) {
+			sigs = append(sigs, sig)
+		}
+	}
+	// The Go runtime replaces an inherited SIG_IGN for SIGQUIT before main runs, so it
+	// cannot be seen; shells ignore it together with SIGINT, so follow SIGINT.
+	if signal.Ignored(os.Interrupt) {
+		signal.Ignore(syscall.SIGQUIT)
+	} else {
+		sigs = append(sigs, syscall.SIGQUIT)
 	}
 	ctx, force, stop, received := notifySignal(sigs...)
 	defer stop()
