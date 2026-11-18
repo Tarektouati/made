@@ -36,4 +36,11 @@ with `2`.
 | `extra-code-block` | warning | A task has more than one code block; only the first runs |
 | `docs-fence` | warning | The task's code block is `markdown`, `md`, `text`, `txt`, `plaintext`, `console` or `output`, so it is probably documentation |
 
+`nesting-too-deep` is found by a quick scan before parsing, which counts each
+container marker plus half of the indentation (each nested list level needs at
+least two columns). It errs on the strict side and checks every line, including
+lines inside code blocks and HTML: a line starting with more than 256 `>`, `-` or
+`1.` markers, or a non-blank line indented 514 columns or more, is reported even
+when it isn't nested. Blank lines never count, however wide.
+
 To run the check on commit, see [Pre-commit and prek](pre-commit.md).
