@@ -508,20 +508,30 @@ func TestRunForceSkipsGrace(t *testing.T) {
 	}
 	requireCmd(t, "bash")
 	tests := []struct {
-		name       string
-		force      bool
+		name  string
+		force bool
+		// terminal cancels with a signal that may have come from the terminal, which
+		// starts with a grace period where nothing is signaled (see terminalCancel).
+		terminal   bool
 		minElapsed time.Duration
 		maxElapsed time.Duration
 	}{
 		{name: "force skips grace", force: true, maxElapsed: 2 * time.Second},
+		{name: "force skips terminal grace", force: true, terminal: true, maxElapsed: 2 * time.Second},
 		{name: "no force waits grace", minElapsed: killGrace, maxElapsed: killGrace + 5*time.Second},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
-			// The script ignores SIGTERM, so only SIGKILL ends it.
-			task := parser.Task{Name: "stubborn", Script: "trap '' TERM\ntouch marker\nsleep 5\n"}
-			ctx, cancel := context.WithCancel(context.Background())
+			var cause error
+			if tt.terminal {
+				cause = terminalCancel(t)
+			}
+			// The script and its child ignore SIGTERM, so only SIGKILL ends them; the
+			// child writes "survived" if it outlives a forced teardown.
+			task := parser.Task{Name: "stubborn", Script: "trap '' TERM\n( sleep 1.5; touch survived ) &\ntouch marker\nsleep 5\n"}
+			ctx, cancelCause := context.WithCancelCause(context.Background())
+			cancel := func() { cancelCause(cause) }
 			defer cancel()
 			var force chan struct{}
 			if tt.force {
@@ -554,6 +564,12 @@ func TestRunForceSkipsGrace(t *testing.T) {
 			}
 			if elapsed := time.Since(begin); elapsed < tt.minElapsed {
 				t.Errorf("Run returned after %v, want at least %v", elapsed, tt.minElapsed)
+			}
+			if tt.force {
+				time.Sleep(time.Until(begin.Add(2 * time.Second)))
+				if _, err := os.Stat(filepath.Join(dir, "survived")); err == nil {
+					t.Error("the task's child survived the forced teardown")
+				}
 			}
 		})
 	}

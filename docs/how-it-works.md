@@ -80,20 +80,29 @@ orphaned. When stdin is an interactive terminal, no separate group is created â€
 background group reading the terminal would be stopped by `SIGTTIN` â€” so Ctrl-Z
 and reading stdin behave as if you had run the script yourself. Ctrl-C and Ctrl-\
 do too: the terminal already sends `SIGINT` or `SIGQUIT` to every process of the
-task, so `made` only signals the interpreter (`SIGTERM`, then `SIGKILL` after the
-grace period) and leaves the rest to shut down on their own, like
-`docker compose up` stopping its containers. A `SIGTERM` or `SIGHUP`, which does
-not come from the terminal (`kill`, a supervisor, a closed session), still tears
-down the whole task: `made` freezes the interpreter and all its descendants with
-`SIGSTOP`, sends them `SIGTERM`, and sends `SIGKILL` to whatever outlives the
-same grace period. This descendant teardown works on Linux and macOS; on other
-Unix systems only the interpreter is signaled. A process that fully detaches
-(`setsid`, a double fork whose parent has already exited, or a new process group)
-is not reached. If `SIGHUP` is already ignored when `made` starts (as under
+task, so `made` sends nothing for the 3-second grace period and lets the task handle
+it, for example finish an `INT` trap; if the task exits by itself, `made` exits with
+its status. Whatever is still running after the grace period is torn down like on
+`SIGTERM` below. `made` cannot tell Ctrl-C from a `SIGINT` or `SIGQUIT` sent to it
+alone while it is in the terminal's foreground (`kill -INT`), so that one also only
+tears the task down after the grace period; sent while `made` runs in the background,
+it tears the task down at once. A `SIGTERM` or `SIGHUP`, which does not come from the
+terminal (`kill`, a supervisor, a closed session), tears down the whole task: `made`
+freezes the interpreter and all its descendants with `SIGSTOP`, sends them `SIGTERM`,
+and sends `SIGKILL` to whatever outlives the grace period. Once the interpreter has
+exited, `made` keeps following the processes it recorded and whatever they start, and
+also finds processes of the task orphaned when their parent exited: on Linux `made`
+becomes a child subreaper, so they are reparented to it; on macOS it looks in its
+process group for processes reparented to `launchd` that started after it. This
+descendant teardown works on Linux and macOS; on other Unix systems only the
+interpreter is signaled. It is best-effort: a process that leaves `made`'s process
+group (`setsid`, `setpgid`, a new session) is not reached, nor, on macOS, an orphan
+reparented to something other than `launchd`; and a recorded process that has exited
+may have its pid reused by an unrelated process in `made`'s process group. If `SIGHUP` is already ignored when `made` starts (as under
 `nohup`), it stays ignored and the task keeps running. Likewise, when `made` starts
 with `SIGINT` ignored (a background job of a non-interactive shell, such as
 `made a & made b & wait`), `SIGINT` and `SIGQUIT` stay ignored for `made` and the task.
-After such a teardown `made` exits with `128+n` for signal `n`: `130` for
+After a teardown `made` exits with `128+n` for signal `n`: `130` for
 `SIGINT` (Ctrl-C), `143` for `SIGTERM`, `129` for `SIGHUP` and `131` for
 `SIGQUIT`, whatever status the task itself ended with.
 A second Ctrl-C (or any second handled signal) during the grace period sends `SIGKILL` right away.

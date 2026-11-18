@@ -12,6 +12,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Tarektouati/made/internal/parser"
@@ -26,14 +27,66 @@ const killGrace = 3 * time.Second
 const survivorPoll = 50 * time.Millisecond
 
 // teardown records how a running task is torn down on cancellation: as a process group
-// when it has one, otherwise through pids, the interpreter's descendants captured when
-// SIGTERM is sent so the same set can be force-killed after they are orphaned. sig is
+// when it has one, otherwise through pids, the interpreter's descendants recorded during
+// teardown so the same set can be force-killed after they are orphaned. sig is
 // the signal that cancelled the task, if known.
 type teardown struct {
 	grouped bool
 	pids    []int
 	sig     os.Signal
 }
+
+// record adds the pids not recorded yet to td.
+func (td *teardown) record(pids []int) {
+	for _, pid := range pids {
+		if !slices.Contains(td.pids, pid) {
+			td.pids = append(td.pids, pid)
+		}
+	}
+}
+
+// runningInterpreters holds the pids of the interpreters Run has started and not yet
+// returned from, so they are not taken for orphans of a task (see orphans), which on
+// Linux are made's children too.
+var (
+	runningMu           sync.Mutex
+	runningInterpreters = map[int]bool{}
+)
+
+// setInterpreter records pid as a running interpreter, or forgets it.
+func setInterpreter(pid int, on bool) {
+	runningMu.Lock()
+	defer runningMu.Unlock()
+	if on {
+		runningInterpreters[pid] = true
+	} else {
+		delete(runningInterpreters, pid)
+	}
+}
+
+// isInterpreter reports whether pid is an interpreter Run is running.
+func isInterpreter(pid int) bool {
+	runningMu.Lock()
+	defer runningMu.Unlock()
+	return runningInterpreters[pid]
+}
+
+// SignalHandledError is returned by Run when the task, cancelled by a signal the
+// terminal sent to all its processes (Ctrl-C, Ctrl-\), exited by itself within the
+// grace period instead of being torn down. Err is the task's own result (nil when it
+// exited 0), which the caller can report as a shell would.
+type SignalHandledError struct {
+	Err error
+}
+
+func (e *SignalHandledError) Error() string {
+	if e.Err == nil {
+		return "task exited on its own after the signal"
+	}
+	return e.Err.Error()
+}
+
+func (e *SignalHandledError) Unwrap() error { return e.Err }
 
 // cancelSignal returns the signal that cancelled ctx, or nil. It is found through the
 // context's cause: an error in its chain with a Signal() os.Signal method.
@@ -128,10 +181,12 @@ var fallbacks = map[string][]string{"python": {"python"}}
 // Cancelling ctx (e.g. on SIGINT) tears down the whole task, not just the interpreter,
 // so spawned grandchildren are not orphaned: the task's process group, or when stdin is
 // a terminal (and the task shares made's group) the interpreter and its descendants, is
-// sent SIGTERM, and whatever outlives the grace period is sent SIGKILL. When stdin is a
-// terminal and the cancelling signal (see cancelSignal) is one the terminal itself sends
-// to the whole foreground group (SIGINT, SIGQUIT), only the interpreter is signaled, so
-// the task's processes handle Ctrl-C as if they had been run directly.
+// sent SIGTERM, and whatever outlives the grace period is sent SIGKILL. When the
+// cancelling signal (see cancelSignal) may have come from the terminal on stdin, which
+// sends SIGINT and SIGQUIT to its whole foreground group, nothing is signaled during a
+// first grace period, so the task's processes handle Ctrl-C as if they had been run
+// directly; whatever is still running after it is torn down as above. A task that exits
+// by itself then returns a *SignalHandledError wrapping its result.
 // Closing force during the grace period sends SIGKILL right away instead of waiting
 // killGrace; a nil force never fires.
 //
@@ -170,6 +225,8 @@ func Run(ctx context.Context, force <-chan struct{}, t parser.Task, dir string, 
 		return startError(err, cmd, cands, t)
 	}
 
+	setInterpreter(cmd.Process.Pid, true)
+	defer setInterpreter(cmd.Process.Pid, false)
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 
@@ -178,29 +235,69 @@ func Run(ctx context.Context, force <-chan struct{}, t parser.Task, dir string, 
 		return err
 	case <-ctx.Done():
 		td.sig = cancelSignal(ctx)
-		signalTerm(cmd, td)
-		deadline := time.After(killGrace)
+		if fromTerminal(td) {
+			return awaitTerminalSignal(cmd, td, done, force)
+		}
+		return tearDown(cmd, td, done, force)
+	}
+}
+
+// tearDown stops a cancelled task: SIGTERM, then SIGKILL for whatever outlives the
+// grace period or right away once force is closed. It returns the interpreter's result.
+func tearDown(cmd *exec.Cmd, td *teardown, done <-chan error, force <-chan struct{}) error {
+	signalTerm(cmd, td)
+	deadline := time.After(killGrace)
+	select {
+	case err := <-done:
+		// Leader exited on SIGTERM; the rest of the task keeps the remainder of the
+		// grace period before any survivor is force-killed.
+		awaitSurvivors(cmd, td, deadline, force)
+		signalKill(cmd, td)
+		return err
+	case <-force:
+		signalKill(cmd, td)
+		return <-done
+	case <-deadline:
+		signalKill(cmd, td)
+		return <-done
+	}
+}
+
+// awaitTerminalSignal handles a cancel by a signal the terminal already sent to every
+// process of the task (see fromTerminal): nothing is sent during the grace period, so
+// the task handles it as if run directly, while its descendants are recorded. A task
+// still running after the grace period is torn down; one whose interpreter exited
+// returns a *SignalHandledError, once its surviving descendants are gone or, after the
+// grace period, have been sent SIGTERM and, after another one, SIGKILL.
+func awaitTerminalSignal(cmd *exec.Cmd, td *teardown, done <-chan error, force <-chan struct{}) error {
+	deadline := time.After(killGrace)
+	for {
+		trackDescendants(cmd, td)
 		select {
 		case err := <-done:
-			// Leader exited on SIGTERM; the rest of the task keeps the remainder of the
-			// grace period before any survivor is force-killed.
 			awaitSurvivors(cmd, td, deadline, force)
-			signalKill(cmd, td)
-			return err
+			if survivors(cmd, td) {
+				signalTermSurvivors(cmd, td)
+				awaitSurvivors(cmd, td, time.After(killGrace), force)
+				signalKill(cmd, td)
+			}
+			return &SignalHandledError{Err: err}
 		case <-force:
+			trackDescendants(cmd, td)
 			signalKill(cmd, td)
 			return <-done
 		case <-deadline:
-			signalKill(cmd, td)
-			return <-done
+			return tearDown(cmd, td, done, force)
+		case <-time.After(survivorPoll):
 		}
 	}
 }
 
 // awaitSurvivors returns once no member of the cancelled task outlives its interpreter,
-// or when deadline fires or force is closed.
+// or when deadline fires or force is closed. Meanwhile it keeps recording the processes
+// the survivors start (see trackSurvivors).
 func awaitSurvivors(cmd *exec.Cmd, td *teardown, deadline <-chan time.Time, force <-chan struct{}) {
-	for survivors(cmd, td) {
+	for trackSurvivors(cmd, td); survivors(cmd, td); trackSurvivors(cmd, td) {
 		select {
 		case <-deadline:
 			return

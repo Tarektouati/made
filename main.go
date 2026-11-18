@@ -324,9 +324,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	runErr := runner.Run(ctx, force, task, dir, taskArgs)
-	// Interrupted like a shell would be: 128+n for the signal made received, whatever
-	// status the torn-down task ended with.
-	if sig, ok := received().(syscall.Signal); ok {
+	// A task that handled Ctrl-C or Ctrl-\ itself and exited reports its own status, as
+	// when run from a shell. Otherwise made was interrupted like a shell would be: 128+n
+	// for the signal it received, whatever status the torn-down task ended with.
+	var handled *runner.SignalHandledError
+	if errors.As(runErr, &handled) {
+		runErr = handled.Err
+	} else if sig, ok := received().(syscall.Signal); ok {
 		return 128 + int(sig)
 	}
 	if runErr != nil {

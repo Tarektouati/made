@@ -17,26 +17,46 @@ import (
 	"github.com/Tarektouati/made/internal/parser"
 )
 
-// stdinModes are the two teardown modes: a process group when stdin is not a terminal,
-// and the descendant tree when it is (forced via stdinIsTerminal, without a real pty).
-var stdinModes = []struct {
-	name string
-	tty  bool
-}{{"grouped", false}, {"tty", true}}
+// stdinMode is a teardown mode: a process group when stdin is not a terminal, and the
+// descendant tree when it is (forced via stdinIsTerminal, without a real pty), with made
+// in the terminal's foreground process group or not (forced via inForeground).
+type stdinMode struct {
+	name       string
+	tty        bool
+	foreground bool
+}
 
-// forEachStdinMode runs body as a subtest per stdin mode with stdinIsTerminal forced
-// accordingly. body must not call t.Parallel itself (the modes would race on the
-// override), but its own subtests may: the override lasts until they end.
-func forEachStdinMode(t *testing.T, body func(t *testing.T, tty bool)) {
+var stdinModes = []stdinMode{{"grouped", false, false}, {"tty", true, true}, {"tty background", true, false}}
+
+// forEachStdinMode runs body as a subtest per stdin mode with stdinIsTerminal and
+// inForeground forced accordingly. body must not call t.Parallel itself (the modes would
+// race on the overrides), but its own subtests may: the overrides last until they end.
+func forEachStdinMode(t *testing.T, body func(t *testing.T, mode stdinMode)) {
 	for _, mode := range stdinModes {
 		t.Run(mode.name, func(t *testing.T) {
-			orig := stdinIsTerminal
-			stdinIsTerminal = func() bool { return mode.tty }
-			t.Cleanup(func() { stdinIsTerminal = orig })
-			body(t, mode.tty)
+			setMode(t, mode)
+			body(t, mode)
 		})
 	}
 }
+
+// setMode forces mode's stdinIsTerminal and inForeground until t ends.
+func setMode(t *testing.T, mode stdinMode) {
+	origTTY, origFG := stdinIsTerminal, inForeground
+	stdinIsTerminal = func() bool { return mode.tty }
+	inForeground = func() bool { return mode.foreground }
+	t.Cleanup(func() { stdinIsTerminal, inForeground = origTTY, origFG })
+}
+
+// terminalCancel forces made into the foreground of a terminal on stdin until t ends and
+// returns a cancellation cause of SIGINT, as for Ctrl-C.
+func terminalCancel(t *testing.T) error {
+	setMode(t, stdinMode{"tty", true, true})
+	return signalCause{os.Interrupt}
+}
+
+// terminalSignal reports whether sig is one a terminal sends (Ctrl-C, Ctrl-\).
+func terminalSignal(sig os.Signal) bool { return sig == os.Interrupt || sig == syscall.SIGQUIT }
 
 // signalCause is a cancellation cause that reports the signal which cancelled the task,
 // like main's.
@@ -95,7 +115,7 @@ func TestRunCancelTearsDownDescendants(t *testing.T) {
 		{"nested grandchild", "bash -c '( sleep 1; echo alive > m ) & echo ok > ready; wait' &\nwait", time.Second},
 		{"TERM ignored", "trap '' TERM\n( sleep 4; echo alive > m ) &\necho ok > ready\nwait", 4 * time.Second},
 	}
-	forEachStdinMode(t, func(t *testing.T, _ bool) {
+	forEachStdinMode(t, func(t *testing.T, _ stdinMode) {
 		for _, tc := range scripts {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
@@ -109,11 +129,12 @@ func TestRunCancelTearsDownDescendants(t *testing.T) {
 	})
 }
 
-// TestRunCancelBySignal checks which cancelling signals tear down the descendant tree.
-// With a terminal on stdin, SIGINT and SIGQUIT come from the terminal, which already
-// delivered them to the whole foreground group, so only the interpreter is signaled and
-// a child left to handle the signal itself (here: one that never receives it) survives.
-// Every other signal, and every signal without a terminal, tears the task down.
+// TestRunCancelBySignal checks which cancelling signals tear down the descendant tree
+// at once. With made in the foreground of the terminal on stdin, SIGINT and SIGQUIT may
+// come from the terminal, which already delivered them to the whole foreground group, so
+// nothing is signaled during the grace period and a child left to handle the signal
+// itself (here: one that never receives it) survives it. Every other signal, and every
+// signal without a terminal or with made in the background, tears the task down.
 func TestRunCancelBySignal(t *testing.T) {
 	requireCmd(t, "bash")
 	const script = "( sleep 1; echo alive > m ) &\necho ok > ready\nwait"
@@ -127,7 +148,7 @@ func TestRunCancelBySignal(t *testing.T) {
 		{"SIGINT", os.Interrupt},
 		{"SIGQUIT", syscall.SIGQUIT},
 	}
-	forEachStdinMode(t, func(t *testing.T, tty bool) {
+	forEachStdinMode(t, func(t *testing.T, mode stdinMode) {
 		for _, tc := range signals {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
@@ -137,13 +158,35 @@ func TestRunCancelBySignal(t *testing.T) {
 				}
 				dir, cancelled := cancelTask(t, script, cause)
 				time.Sleep(time.Until(cancelled.Add(1500 * time.Millisecond)))
-				wantSurvivor := tty && fromTerminal(tc.sig)
+				wantSurvivor := mode.foreground && terminalSignal(tc.sig)
 				if got := len(markers(t, dir)) > 0; got != wantSurvivor {
 					t.Errorf("child survived = %v, want %v", got, wantSurvivor)
 				}
 			})
 		}
 	})
+}
+
+// TestRunTerminalSignalEscalatesAfterGrace checks that a task cancelled by a signal
+// that may have come from the terminal, and still running once the grace period is
+// over, is then torn down with its descendants.
+func TestRunTerminalSignalEscalatesAfterGrace(t *testing.T) {
+	requireCmd(t, "bash")
+	setMode(t, stdinMode{"tty", true, true})
+	const script = "( sleep 4; echo alive > m ) &\necho ok > ready\nwait"
+	for _, sig := range []os.Signal{os.Interrupt, syscall.SIGQUIT} {
+		t.Run(sig.String(), func(t *testing.T) {
+			t.Parallel()
+			dir, cancelled := cancelTask(t, script, signalCause{sig})
+			if elapsed := time.Since(cancelled); elapsed < killGrace {
+				t.Errorf("Run returned %v after cancel, want it to wait out the %v grace period first", elapsed, killGrace)
+			}
+			time.Sleep(time.Until(cancelled.Add(4500 * time.Millisecond)))
+			if m := markers(t, dir); len(m) > 0 {
+				t.Errorf("child survived the escalation after the grace period and wrote %v", m)
+			}
+		})
+	}
 }
 
 // TestRunCancelGivesSurvivorsGrace checks that a child with a SIGTERM handler keeps the
@@ -156,7 +199,7 @@ func TestRunCancelBySignal(t *testing.T) {
 func TestRunCancelGivesSurvivorsGrace(t *testing.T) {
 	requireCmd(t, "bash")
 	const script = "( trap 'sleep 1; echo done > graceful; exit 0' TERM; echo ok > ready; while :; do sleep 0.05; done ) &\nwait"
-	forEachStdinMode(t, func(t *testing.T, _ bool) {
+	forEachStdinMode(t, func(t *testing.T, _ stdinMode) {
 		dir, cancelled := cancelTask(t, script, signalCause{syscall.SIGTERM})
 		if b, err := os.ReadFile(filepath.Join(dir, "graceful")); err != nil || len(b) == 0 {
 			t.Errorf("child with a SIGTERM handler did not finish its shutdown (graceful: %v)", err)
@@ -165,6 +208,39 @@ func TestRunCancelGivesSurvivorsGrace(t *testing.T) {
 			t.Errorf("Run took %v after cancel, want it to return once the child exited, before %v", elapsed, killGrace)
 		}
 	})
+}
+
+// TestRunTerminalSignalTracksLateDescendants checks that after a signal that may have
+// come from the terminal, a process started by a surviving descendant once the
+// interpreter has exited is still torn down after the grace period.
+func TestRunTerminalSignalTracksLateDescendants(t *testing.T) {
+	requireCmd(t, "bash")
+	setMode(t, stdinMode{"tty", true, true})
+	const script = "( sleep 1; sleep 30 & echo $! > late; wait ) &\necho ok > ready\nsleep 0.5"
+	dir, _ := cancelTask(t, script, signalCause{os.Interrupt})
+	pid := readPid(t, filepath.Join(dir, "late"))
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	deadline := time.Now().Add(2 * time.Second)
+	for running(pid) {
+		if time.Now().After(deadline) {
+			t.Fatalf("late descendant (pid %d) still running after Run returned", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// readPid reads the pid in path.
+func readPid(t *testing.T, path string) int {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil {
+		t.Fatalf("parse pid in %s: %v", path, err)
+	}
+	return pid
 }
 
 // TestSurvivorsIgnoresZombies checks that a task member which has exited but not yet
