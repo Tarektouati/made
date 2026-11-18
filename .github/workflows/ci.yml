@@ -101,7 +101,7 @@ jobs:
           if-no-files-found: error
 
   # Compares the PR against its base on this one runner. Warn only: nothing here
-  # fails the job. Run it locally with scripts/bench.sh (see the README).
+  # fails the job. Run it locally with scripts/bench.sh (see CONTRIBUTING.md).
   bench:
     name: Bench (base vs head)
     if: github.event_name == 'pull_request'
