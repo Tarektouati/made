@@ -1303,6 +1303,9 @@ func TestListNamesSkipsDuplicateNote(t *testing.T) {
 	}
 }
 
+// scotlandFlag is an emoji tag sequence: black flag, tags "gbsct", cancel tag.
+const scotlandFlag = "🏴\U000e0067\U000e0062\U000e0073\U000e0063\U000e0074\U000e007f"
+
 func TestSanitizeDisplay(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -1318,12 +1321,63 @@ func TestSanitizeDisplay(t *testing.T) {
 		{name: "del", in: "a\x7fb", want: "ab"},
 		{name: "c1 csi", in: "a\u009b2Jb", want: "a2Jb"},
 		{name: "unicode", in: "保留", want: "保留"},
+		{name: "rtl override", in: "bid\u202ei", want: "bidi"},
+		{name: "bidi isolates", in: "a\u2066b\u2067c\u2068d\u2069e", want: "abcde"},
+		{name: "zero width space", in: "a\u200bb", want: "ab"},
+		{name: "bom", in: "\ufeffa", want: "a"},
+		{name: "tag character", in: "a\U000e0041b", want: "ab"},
+		{name: "line separator", in: "a\u2028b", want: "ab"},
+		{name: "paragraph separator", in: "a\u2029b", want: "ab"},
+		{name: "combining mark kept", in: "e\u0301", want: "e\u0301"},
+		{name: "variation selector kept", in: "❤\ufe0f", want: "❤\ufe0f"},
+		{name: "arabic letter mark", in: "a\u061cb", want: "ab"},
+		{name: "lrm and rlm", in: "a\u200eb\u200fc", want: "abc"},
+		{name: "embeddings and overrides", in: "a\u202ab\u202bc\u202cd\u202de", want: "abcde"},
+		{name: "word joiner", in: "a\u2060b", want: "ab"},
+		{name: "zwj emoji kept", in: "🧑\u200d💻 dev", want: "🧑\u200d💻 dev"},
+		{name: "zwj flag kept", in: "🏳\ufe0f\u200d🌈", want: "🏳\ufe0f\u200d🌈"},
+		{name: "zwnj word kept", in: "می\u200cخواهم", want: "می\u200cخواهم"},
+		{name: "soft hyphen kept", in: "co\u00adop", want: "co\u00adop"},
+		{name: "scotland flag kept", in: scotlandFlag, want: scotlandFlag},
+		{name: "unterminated tag sequence", in: "🏴\U000e0067\U000e0062x", want: "🏴x"},
+		{name: "cancel tag alone", in: "a\U000e007fb", want: "ab"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			if got := sanitizeDisplay(tt.in); got != tt.want {
 				t.Errorf("sanitizeDisplay(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEscapeDisplay(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "plain", in: "/tmp/dir/Madefile.md", want: "/tmp/dir/Madefile.md"},
+		{name: "backslash kept", in: `C:\work\Madefile.md`, want: `C:\work\Madefile.md`},
+		{name: "osc title", in: "x\x1b]0;PWNED\x07dir", want: `x\x1b]0;PWNED\adir`},
+		{name: "tab and newline", in: "a\tb\nc", want: `a\tb\nc`},
+		{name: "del", in: "a\x7fb", want: `a\x7fb`},
+		{name: "c1 csi", in: "a\u009bb", want: `a\u009bb`},
+		{name: "zero width space", in: "a\u200bb", want: `a\u200bb`},
+		{name: "rtl override", in: "bid\u202ei", want: `bid\u202ei`},
+		{name: "line separator", in: "a\u2028b", want: `a\u2028b`},
+		{name: "stray tag", in: "a\U000e0041b", want: `a\U000e0041b`},
+		{name: "zwj emoji kept", in: "🧑\u200d💻", want: "🧑\u200d💻"},
+		{name: "scotland flag kept", in: scotlandFlag, want: scotlandFlag},
+		{name: "unicode kept", in: "保留", want: "保留"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := escapeDisplay(tt.in); got != tt.want {
+				t.Errorf("escapeDisplay(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
 	}
@@ -1365,6 +1419,20 @@ func TestPrintTasksStripsControlChars(t *testing.T) {
 				t.Errorf("stderr = %q, want empty", &stderr)
 			}
 		})
+	}
+}
+
+func TestPrintTasksStripsBidiChars(t *testing.T) {
+	path := writeTemp(t, "tasks.md", "### bid\u202ei\nsp\u200boof\u2066x\n```bash\ntrue\n```\n")
+	for _, args := range [][]string{{"-f", path, "-l"}, {"-f", path, "--list-names"}} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code != 0 {
+			t.Fatalf("run(%v) = %d, want 0 (stderr: %s)", args, code, &stderr)
+		}
+		out := stdout.String()
+		if !strings.Contains(out, "bidi") || !strings.Contains(out, "spoofx") {
+			t.Errorf("run(%v) stdout = %q, want bidi and spoofx with format characters removed", args, out)
+		}
 	}
 }
 

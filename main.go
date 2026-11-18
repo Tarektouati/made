@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -238,14 +239,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	res, err := resolveFile(file)
 	for _, s := range res.skipped {
-		fmt.Fprintf(stderr, "made: skipping %s: %v\n", s.path, s.err)
+		fmt.Fprintf(stderr, "made: skipping %s: %s\n", escapeDisplay(s.path), escapeErr(s.err))
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "made: %v\n", err)
+		fmt.Fprintf(stderr, "made: %s\n", escapeErr(err))
 		return 1
 	}
 	if len(res.others) > 0 && !listNames {
-		fmt.Fprintf(stderr, "made: using %s (also found %s)\n", res.path, strings.Join(res.others, ", "))
+		fmt.Fprintf(stderr, "made: using %s (also found %s)\n", escapeDisplay(res.path), strings.Join(res.others, ", "))
 	}
 	file = res.path
 
@@ -255,13 +256,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	source, err := readMadefile(file)
 	if err != nil {
-		fmt.Fprintf(stderr, "made: cannot read %s: %v\n", file, err)
+		fmt.Fprintf(stderr, "made: cannot read %s: %s\n", escapeDisplay(file), escapeErr(err))
 		return 1
 	}
 
 	tasks, err := parser.Parse(source)
 	if err != nil {
-		fmt.Fprintf(stderr, "made: cannot parse %s: %v\n", file, err)
+		fmt.Fprintf(stderr, "made: cannot parse %s: %s\n", escapeDisplay(file), escapeErr(err))
 		return 1
 	}
 
@@ -306,14 +307,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if !noChdir {
 		abs, err := filepath.Abs(file)
 		if err != nil {
-			fmt.Fprintf(stderr, "made: %v\n", err)
+			fmt.Fprintf(stderr, "made: %s\n", escapeErr(err))
 			return 1
 		}
 		dir = filepath.Dir(abs)
 	}
 
 	if res.fromParent && len(res.others) == 0 { // the duplicate note already named it
-		fmt.Fprintf(stderr, "made: using %s\n", file)
+		fmt.Fprintf(stderr, "made: using %s\n", escapeDisplay(file))
 	}
 
 	// Everything after the task name goes to the script. Flag parsing already stopped
@@ -338,7 +339,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		if errors.As(runErr, &exitErr) {
 			return taskExitCode(exitErr)
 		}
-		fmt.Fprintf(stderr, "made: %v\n", runErr)
+		fmt.Fprintf(stderr, "made: %s\n", escapeErr(runErr))
 		code := 1
 		var interpErr *runner.InterpreterError
 		if errors.As(runErr, &interpErr) {
@@ -415,12 +416,12 @@ func watchSignals(ch <-chan os.Signal) (ctx context.Context, force <-chan struct
 func initMadefile(stdout, stderr io.Writer, force bool) int {
 	cwd, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(stderr, "made: cannot determine current directory: %v\n", err)
+		fmt.Fprintf(stderr, "made: cannot determine current directory: %s\n", escapeErr(err))
 		return 1
 	}
 	entries, err := os.ReadDir(cwd)
 	if err != nil {
-		fmt.Fprintf(stderr, "made: cannot read %s: %v\n", cwd, err)
+		fmt.Fprintf(stderr, "made: cannot read %s: %s\n", escapeDisplay(cwd), escapeErr(err))
 		return 1
 	}
 	var present []string // in madefileNames priority order
@@ -435,7 +436,7 @@ func initMadefile(stdout, stderr io.Writer, force bool) int {
 		// filesystem folds case.
 		name := madefileNames[0]
 		if err := writeTemplate(name, os.O_CREATE|os.O_EXCL); err != nil {
-			fmt.Fprintf(stderr, "made: cannot create %s: %v\n", name, err)
+			fmt.Fprintf(stderr, "made: cannot create %s: %s\n", name, escapeErr(err))
 			return 1
 		}
 		fmt.Fprintf(stdout, "made: created %s\n", name)
@@ -444,7 +445,7 @@ func initMadefile(stdout, stderr io.Writer, force bool) int {
 
 	target := present[0]
 	if !force {
-		fmt.Fprintf(stderr, "made: %s already exists in %s (use made init --force to overwrite it)\n", target, cwd)
+		fmt.Fprintf(stderr, "made: %s already exists in %s (use made init --force to overwrite it)\n", target, escapeDisplay(cwd))
 		return 1
 	}
 	if len(present) > 1 {
@@ -462,7 +463,7 @@ func initMadefile(stdout, stderr io.Writer, force bool) int {
 			fmt.Fprintf(stderr, "made: %s is a symlink (refusing to overwrite)\n", target)
 			return 1
 		}
-		fmt.Fprintf(stderr, "made: cannot write %s: %v\n", target, err)
+		fmt.Fprintf(stderr, "made: cannot write %s: %s\n", target, escapeErr(err))
 		return 1
 	}
 	fmt.Fprintf(stdout, "made: overwrote %s\n", target)
@@ -603,7 +604,7 @@ func runCheck(stdout, stderr io.Writer, path string, strict bool) int {
 		diags = []lint.Diagnostic{{Severity: lint.Error, Rule: "file-too-large",
 			Msg: fmt.Sprintf("file exceeds the maximum size of %d bytes", maxMadefileBytes)}}
 	case err != nil:
-		fmt.Fprintf(stderr, "made: cannot read %s: %v\n", path, err)
+		fmt.Fprintf(stderr, "made: cannot read %s: %s\n", escapeDisplay(path), escapeErr(err))
 		return 1
 	default:
 		diags = lint.Check(source)
@@ -622,6 +623,7 @@ func printDiagnostics(w io.Writer, path string, diags []lint.Diagnostic) (errs, 
 	if len(diags) == 0 {
 		return 0, 0
 	}
+	path = escapeDisplay(path)
 	for _, d := range diags {
 		loc := path
 		if d.Line > 0 {
@@ -698,15 +700,44 @@ func find(tasks []parser.Task, name string) (parser.Task, bool) {
 	return parser.Task{}, false
 }
 
-// sanitizeDisplay removes C0/C1 control characters and DEL from strings printed to the
-// terminal (task names and descriptions). Task lookup still uses the parsed values.
+// sanitizeDisplay removes C0/C1 control characters, DEL, line/paragraph separators
+// and invisible formatting characters (bidi controls, zero-width space, stray tags;
+// see parser.ReplaceInvisible) from task names, descriptions and lint messages
+// printed to the terminal. Task lookup still uses the parsed values.
 func sanitizeDisplay(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+	s = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) || unicode.In(r, unicode.Zl, unicode.Zp) {
 			return -1
 		}
 		return r
 	}, s)
+	return parser.ReplaceInvisible(s, func(rune) string { return "" })
+}
+
+// escapeDisplay writes the characters sanitizeDisplay removes as Go escapes, the way
+// %q does (`\x1b`, `\a`, `\u200b`), but leaves the rest of s, backslashes included,
+// unquoted. It is for paths and error text, which must stay traceable to the real file.
+func escapeDisplay(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) || unicode.In(r, unicode.Zl, unicode.Zp) {
+			b.WriteString(escapeRune(r))
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return parser.ReplaceInvisible(b.String(), escapeRune)
+}
+
+// escapeRune returns r as a Go escape sequence, without quotes.
+func escapeRune(r rune) string {
+	q := strconv.QuoteRune(r)
+	return q[1 : len(q)-1]
+}
+
+// escapeErr is escapeDisplay for an error's text.
+func escapeErr(err error) string {
+	return escapeDisplay(err.Error())
 }
 
 // displayWidth approximates the number of terminal cells s occupies: East Asian wide
@@ -736,10 +767,10 @@ func displayWidth(s string) int {
 
 func printTasks(stdout, stderr io.Writer, file string, tasks []parser.Task) {
 	if len(tasks) == 0 {
-		fmt.Fprintf(stderr, "made: no tasks found in %s\n", file)
+		fmt.Fprintf(stderr, "made: no tasks found in %s\n", escapeDisplay(file))
 		return
 	}
-	fmt.Fprintf(stdout, "Tasks in %s:\n", file)
+	fmt.Fprintf(stdout, "Tasks in %s:\n", escapeDisplay(file))
 	names := make([]string, len(tasks))
 	widths := make([]int, len(tasks))
 	maxW := 0
