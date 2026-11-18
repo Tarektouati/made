@@ -618,7 +618,9 @@ func findMadefile(start string) (dir, name string, others []string, skipped []sk
 }
 
 // readMadefile reads a task file after checking it is a regular file within
-// maxMadefileBytes.
+// maxMadefileBytes. The path is checked before it is opened, because opening a FIFO
+// blocks. The size check is repeated while reading, because some files report a
+// wrong size (0 for /proc files) or grow after the stat.
 func readMadefile(path string) ([]byte, error) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -630,7 +632,31 @@ func readMadefile(path string) ([]byte, error) {
 	if info.Size() > maxMadefileBytes {
 		return nil, fmt.Errorf("%s %w (%d bytes)", path, errTooLarge, maxMadefileBytes)
 	}
-	return os.ReadFile(path)
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	if info, err = f.Stat(); err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	return readLimited(f, path)
+}
+
+// readLimited reads r to the end, or fails with errTooLarge once it passes
+// maxMadefileBytes.
+func readLimited(r io.Reader, path string) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(r, maxMadefileBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > maxMadefileBytes {
+		return nil, fmt.Errorf("%s %w (%d bytes)", path, errTooLarge, maxMadefileBytes)
+	}
+	return b, nil
 }
 
 // errTooLarge is wrapped by readMadefile for a file over maxMadefileBytes.

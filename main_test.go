@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1643,4 +1645,22 @@ func TestParseTimeout(t *testing.T) {
 		{name: "check", args: []string{"--check", "-f", f}, wantCode: 1,
 			wantStdout: []string{f + ": error: parse-timeout: parsing took longer than 1ms"}},
 	})
+}
+
+// endlessReader returns zero bytes forever, like a /proc file that reports size 0.
+type endlessReader struct{}
+
+func (endlessReader) Read(p []byte) (int, error) {
+	clear(p)
+	return len(p), nil
+}
+
+func TestReadLimited(t *testing.T) {
+	if _, err := readLimited(endlessReader{}, "x.md"); !errors.Is(err, errTooLarge) {
+		t.Errorf("readLimited(endless) error = %v, want errTooLarge", err)
+	}
+	atCap := io.LimitReader(endlessReader{}, maxMadefileBytes)
+	if b, err := readLimited(atCap, "x.md"); err != nil || len(b) != maxMadefileBytes {
+		t.Errorf("readLimited(at cap) = %d bytes, %v; want %d bytes, nil", len(b), err, maxMadefileBytes)
+	}
 }
