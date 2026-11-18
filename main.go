@@ -25,6 +25,7 @@ import (
 	"sync"
 	"syscall"
 	"text/tabwriter"
+	"time"
 	"unicode"
 
 	"github.com/Tarektouati/made/internal/completion"
@@ -41,6 +42,37 @@ var madefileNames = []string{"Madefile.md", "madefile.md", "MADEFILE.md"}
 
 // maxMadefileBytes is the largest task file made will read (discovery or -f).
 const maxMadefileBytes = 10 << 20 // 10 MiB
+
+// parseTimeout bounds how long made waits for the Markdown parser. goldmark's cost
+// grows faster than linearly on some input (unclosed links, mixed emphasis), so a
+// small hostile Madefile could otherwise stall made -l or tab completion. Real
+// Madefiles parse in milliseconds. It is below the completion scripts' 2s timeout,
+// so made reports the problem itself. Tests shorten it.
+var parseTimeout = 1500 * time.Millisecond
+
+// parseTimeoutError reports that parsing took longer than parseTimeout.
+type parseTimeoutError struct{ limit time.Duration }
+
+func (e parseTimeoutError) Error() string {
+	return fmt.Sprintf("parsing took longer than %v", e.limit)
+}
+
+// withinParseTimeout runs parse and returns its result, or a parseTimeoutError if it
+// does not finish within parseTimeout. goldmark cannot be cancelled, so a parse that
+// times out keeps running in its goroutine until made exits.
+func withinParseTimeout[T any](parse func() T) (T, error) {
+	done := make(chan T, 1)
+	go func() { done <- parse() }()
+	timer := time.NewTimer(parseTimeout)
+	defer timer.Stop()
+	select {
+	case v := <-done:
+		return v, nil
+	case <-timer.C:
+		var zero T
+		return zero, parseTimeoutError{parseTimeout}
+	}
+}
 
 // madefileTemplate is the body `made init` writes: a short header and one example
 // task, valid as is. initTemplate prepends the version note.
@@ -260,7 +292,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	tasks, err := parser.Parse(source)
+	type parsed struct {
+		tasks []parser.Task
+		err   error
+	}
+	out, err := withinParseTimeout(func() parsed {
+		tasks, perr := parser.Parse(source)
+		return parsed{tasks, perr}
+	})
+	if err == nil {
+		err = out.err
+	}
+	tasks := out.tasks
 	if err != nil {
 		fmt.Fprintf(stderr, "made: cannot parse %s: %s\n", escapeDisplay(file), escapeErr(err))
 		return 1
@@ -607,7 +650,10 @@ func runCheck(stdout, stderr io.Writer, path string, strict bool) int {
 		fmt.Fprintf(stderr, "made: cannot read %s: %s\n", escapeDisplay(path), escapeErr(err))
 		return 1
 	default:
-		diags = lint.Check(source)
+		diags, err = withinParseTimeout(func() []lint.Diagnostic { return lint.Check(source) })
+		if err != nil {
+			diags = []lint.Diagnostic{{Severity: lint.Error, Rule: "parse-timeout", Msg: err.Error()}}
+		}
 	}
 	errs, warns := printDiagnostics(stdout, path, diags)
 	if errs > 0 || (strict && warns > 0) {

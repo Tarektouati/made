@@ -15,6 +15,10 @@ description, and that code block becomes its script. Any heading of another leve
 ends the current task's scope, and an H3 with no code block after it is skipped.
 Only top-level blocks count: code inside lists or blockquotes is never a task.
 
+To keep a hostile or broken Madefile from stalling `made` (or tab completion in a
+cloned repository), `made` refuses a file larger than 10 MiB, nesting of lists or
+blockquotes deeper than 256 levels, and a file that takes longer than 1.5 s to parse.
+
 **Execution.** The script is passed inline to its interpreter (`bash -e -o pipefail
 -c <script>`, `node -e <script>`, …). The interpreter inherits `made`'s stdin,
 stdout, stderr, and environment — nothing is written to a temporary file. The
