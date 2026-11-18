@@ -30,6 +30,7 @@ with `2`.
 | `nul-byte` | error | The script contains a NUL byte, which can't be run |
 | `nesting-too-deep` | error | Lists or blockquotes nest deeper than 256 levels |
 | `file-too-large` | error | The file is larger than 10 MiB |
+| `parse-timeout` | error | Parsing the file took longer than 1.5 s (see [How it works](how-it-works.md)) |
 | `name-altered` | warning | The heading has HTML tags or an image, which the task name leaves out (an image becomes its alt text), so the name differs from what it shows. Code spans, emphasis and links keep their text and are not flagged |
 | `unreachable-name` | warning | The name is `init` or `completion` (reserved), or starts with `-` (run it as `made -- -x`) |
 | `no-code-block` | warning | An H3 heading has no code block before the next heading, so it isn't a task |
