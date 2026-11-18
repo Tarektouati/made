@@ -148,9 +148,11 @@ func TestRunCancelBySignal(t *testing.T) {
 // instead of being force-killed as soon as the interpreter is gone. The child only forks
 // short sleeps: one forked as SIGTERM arrives can miss it (bash's inherited trap catches
 // it between fork and exec), and a long one would rightly be kept until killGrace.
+// ready must come from the trapping subshell, after its trap, so the handler is
+// installed before the cancel.
 func TestRunCancelGivesSurvivorsGrace(t *testing.T) {
 	requireCmd(t, "bash")
-	const script = "( trap 'sleep 1; echo done > graceful; exit 0' TERM; while :; do sleep 0.05; done ) &\necho ok > ready\nwait"
+	const script = "( trap 'sleep 1; echo done > graceful; exit 0' TERM; echo ok > ready; while :; do sleep 0.05; done ) &\nwait"
 	forEachStdinMode(t, func(t *testing.T, _ bool) {
 		dir, cancelled := cancelTask(t, script, signalCause{syscall.SIGTERM})
 		if b, err := os.ReadFile(filepath.Join(dir, "graceful")); err != nil || len(b) == 0 {
