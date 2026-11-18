@@ -90,7 +90,9 @@ same grace period. This descendant teardown works on Linux and macOS; on other
 Unix systems only the interpreter is signaled. A process that fully detaches
 (`setsid`, a double fork whose parent has already exited, or a new process group)
 is not reached. If `SIGHUP` is already ignored when `made` starts (as under
-`nohup`), it stays ignored and the task keeps running.
+`nohup`), it stays ignored and the task keeps running. Likewise, when `made` starts
+with `SIGINT` ignored (a background job of a non-interactive shell, such as
+`made a & made b & wait`), `SIGINT` and `SIGQUIT` stay ignored for `made` and the task.
 After such a teardown `made` exits with `128+n` for signal `n`: `130` for
 `SIGINT` (Ctrl-C), `143` for `SIGTERM`, `129` for `SIGHUP` and `131` for
 `SIGQUIT`, whatever status the task itself ended with.
