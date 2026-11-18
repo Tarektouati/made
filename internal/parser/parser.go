@@ -117,12 +117,21 @@ func ParseDetailed(source []byte) ([]RawTask, error) {
 		return nil, err
 	}
 	doc := goldmark.DefaultParser().Parse(text.NewReader(source))
+	// lineOf is called on top-level blocks in document order, so it counts newlines
+	// forward from the previous node instead of from the start: linear overall, with
+	// no allocation. A node before the previous one restarts the count.
+	lastPos, lastLine := 0, 1
 	lineOf := func(n ast.Node) int {
 		pos := n.Pos()
 		if pos < 0 {
 			return 0
 		}
-		return 1 + bytes.Count(source[:pos], []byte("\n"))
+		if pos < lastPos {
+			lastPos, lastLine = 0, 1
+		}
+		lastLine += bytes.Count(source[lastPos:pos], []byte("\n"))
+		lastPos = pos
+		return lastLine
 	}
 
 	var tasks []RawTask
