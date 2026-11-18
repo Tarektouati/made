@@ -59,13 +59,12 @@ __made_dequote() {
     printf '%s' "$out"
 }
 
-# __made_list_names runs made --list-names with a short wall-time limit so untrusted
-# repos cannot stall tab completion. Without timeout(1) or perl it runs unbounded.
+# __made_list_names runs made --list-names so untrusted repos cannot stall tab
+# completion: made gives up parsing after 1.5s, and timeout(1), where present, adds
+# a 2s wall-time limit on top.
 __made_list_names() {
     if command -v timeout >/dev/null 2>&1; then
         timeout 2 made "$@" --list-names 2>/dev/null
-    elif command -v perl >/dev/null 2>&1; then
-        perl -e 'alarm shift; exec @ARGV' 2 made "$@" --list-names 2>/dev/null
     else
         made "$@" --list-names 2>/dev/null
     fi

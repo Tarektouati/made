@@ -45,14 +45,12 @@ function __made_no_positional
     test (count (__made_positional)) -eq 0
 end
 
-# __made_list_names runs made --list-names with a 2s limit (timeout(1) or perl);
-# without either it runs unbounded.
+# __made_list_names runs made --list-names, which gives up parsing after 1.5s;
+# timeout(1), where present, adds a 2s wall-time limit on top.
 function __made_list_names
     set -l fileargs (__made_file_args)
     if type -q timeout
         timeout 2 made $fileargs --list-names 2>/dev/null
-    else if type -q perl
-        perl -e 'alarm shift; exec @ARGV' 2 made $fileargs --list-names 2>/dev/null
     else
         command made $fileargs --list-names 2>/dev/null
     end
