@@ -248,6 +248,8 @@ func TestParseHeadingTextDecoding(t *testing.T) {
 		{"leading zero is decimal", "&#0123;", "d", "{", "d"},
 		{"leading zero tab", "a&#09;b", "d", "a b", "d"},
 		{"zero is replacement char", "a&#0;b", "d", "a\uFFFDb", "d"},
+		{"out-of-range decimal is replacement char", "a&#9999999;b", "d", "a\uFFFDb", "d"},
+		{"out-of-range hex is replacement char", "a&#x110000;b", "d", "a\uFFFDb", "d"},
 		{"hex entity", "&#X7B;", "d", "{", "d"},
 		{"too many digits kept", "&#12345678;", "d", "&#12345678;", "d"},
 		{"non-digit numeric kept", "&#1a;", "d", "&#1a;", "d"},
