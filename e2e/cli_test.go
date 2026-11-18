@@ -185,6 +185,58 @@ func TestListNoArgs(t *testing.T) {
 	}
 }
 
+func TestInlineMarkupTaskNames(t *testing.T) {
+	dir := writeTasks(t, "Madefile.md", "### Build `all` now\n"+
+		"Run the *fast* build.\n\n"+
+		"```bash\necho built-all\n```\n\n"+
+		"### `onlycode`\n"+
+		"```bash\necho only-code\n```\n")
+
+	stdout, stderr, code := runMade(t, dir, "-l")
+	if code != 0 {
+		t.Fatalf("list exit = %d (stderr: %s)", code, stderr)
+	}
+	for _, want := range []string{"Build all now  Run the fast build.", "  onlycode"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("list output missing %q; got:\n%s", want, stdout)
+		}
+	}
+
+	requireBash(t)
+	for name, want := range map[string]string{"Build all now": "built-all\n", "onlycode": "only-code\n"} {
+		stdout, stderr, code := runMade(t, dir, name)
+		if code != 0 || stdout != want {
+			t.Errorf("made %q = %q, exit %d (stderr: %s), want %q", name, stdout, code, stderr, want)
+		}
+	}
+	if _, _, code := runMade(t, dir, ""); code == 0 {
+		t.Errorf("made \"\" exit = 0, want non-zero: no task has an empty name")
+	}
+}
+
+// TestRepoMadefileList checks the repo's own Madefile.md lists the bench task with
+// its inline code spans intact, as shown in the README example output.
+func TestRepoMadefileList(t *testing.T) {
+	stdout, stderr, code := runMade(t, "..", "-l")
+	if code != 0 {
+		t.Fatalf("list exit = %d (stderr: %s)", code, stderr)
+	}
+	const want = "  bench      Benchmarks the working tree against a base ref (default origin/main): " +
+		"Go benchmarks (benchstat), CLI timings (hyperfine) and binary size. " +
+		"Needs hyperfine and benchstat on PATH. Usage: made bench [base-ref].\n"
+	if !strings.Contains(stdout, want) {
+		t.Errorf("list output missing %q; got:\n%s", want, stdout)
+	}
+	readme, err := os.ReadFile("../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Git may check README.md out with CRLF line endings (Windows runners).
+	if !strings.Contains(strings.ReplaceAll(string(readme), "\r\n", "\n"), stdout) {
+		t.Errorf("README example output is stale; made -l prints:\n%s", stdout)
+	}
+}
+
 func TestListFlags(t *testing.T) {
 	dir := writeTasks(t, "Madefile.md", madefileMD)
 	base, _, code := runMade(t, dir)

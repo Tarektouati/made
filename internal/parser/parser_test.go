@@ -303,6 +303,8 @@ func TestParseInlineMarkupText(t *testing.T) {
 	}{
 		{"code span", "`build`", "d", "build", "d"},
 		{"code span with text", "run `go test` now", "d", "run go test now", "d"},
+		{"issue 21 example", "Build `all` now", "Run the *fast* build.", "Build all now", "Run the fast build."},
+		{"code span only", "`onlycode`", "d", "onlycode", "d"},
 		{"code span keeps escapes and entities", "`a\\*b &amp;`", "d", "a\\*b &amp;", "d"},
 		{"emphasis", "*build* all", "d", "build all", "d"},
 		{"underscore emphasis", "_build_", "d", "build", "d"},
