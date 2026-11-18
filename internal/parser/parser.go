@@ -59,7 +59,7 @@ func Parse(source []byte) ([]Task, error) {
 		switch node := n.(type) {
 		case *ast.Heading:
 			if node.Level == taskHeadingLevel {
-				cur = &Task{Name: normalizeSpace(headingText(node, source))}
+				cur = &Task{Name: NormalizeSpace(headingText(node, source))}
 				desc = nil
 			} else {
 				cur = nil
@@ -67,7 +67,7 @@ func Parse(source []byte) ([]Task, error) {
 			}
 		case *ast.Paragraph:
 			if cur != nil && cur.Script == "" {
-				if t := normalizeSpace(headingText(node, source)); t != "" {
+				if t := NormalizeSpace(headingText(node, source)); t != "" {
 					desc = append(desc, t)
 				}
 			}
@@ -136,8 +136,8 @@ func ParseDetailed(source []byte) ([]RawTask, error) {
 			}
 			tasks = append(tasks, RawTask{
 				Line:    lineOf(node),
-				Raw:     normalizeSpace(string(node.Lines().Value(source))),
-				Name:    normalizeSpace(headingText(node, source)),
+				Raw:     NormalizeSpace(string(node.Lines().Value(source))),
+				Name:    NormalizeSpace(headingText(node, source)),
 				Altered: hasMarkup(node),
 			})
 			cur = len(tasks) - 1
@@ -271,16 +271,21 @@ func resolveEntity(body []byte) (string, bool) {
 	return string(util.ToValidRune(rune(v))), true
 }
 
-// normalizeSpace drops control characters, then trims s and collapses each run of
-// whitespace (tabs, newlines, repeated spaces) to a single space. Control characters
-// are stripped from listed names, so keeping them would make a listed name unrunnable.
-func normalizeSpace(s string) string {
+// NormalizeSpace drops control characters and invisible formatting characters (bidi
+// controls, zero-width space, stray tags; see ReplaceInvisible), then trims s and
+// collapses each run of whitespace (tabs, newlines, repeated spaces, line and
+// paragraph separators) to a single space. Both kinds are stripped from listed names,
+// so keeping them would make a listed name unrunnable, or let it display differently
+// from what runs. Task names are stored normalized; apply it to a name typed by the
+// user before comparing.
+func NormalizeSpace(s string) string {
 	s = strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) && !unicode.IsSpace(r) {
 			return -1
 		}
 		return r
 	}, s)
+	s = ReplaceInvisible(s, func(rune) string { return "" })
 	return strings.Join(strings.Fields(s), " ")
 }
 
