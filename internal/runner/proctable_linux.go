@@ -50,6 +50,20 @@ func groupAlive(pgid int) bool {
 	return alive
 }
 
+// orphans returns made's running children in its own process group. made is a child
+// subreaper (see becomeSubreaper), so a process of the task whose parent exited is
+// reparented to it; the interpreters made started are among them too.
+func orphans() []int {
+	self, pgrp := os.Getpid(), syscall.Getpgrp()
+	var pids []int
+	_ = eachProc(func(pid int, st procStat) {
+		if st.ppid == self && st.pgrp == pgrp && st.state != 'Z' {
+			pids = append(pids, pid)
+		}
+	})
+	return pids
+}
+
 // eachProc calls fn for every process in /proc whose stat can be read and parsed.
 func eachProc(fn func(pid int, st procStat)) error {
 	entries, err := os.ReadDir("/proc")

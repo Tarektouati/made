@@ -29,6 +29,18 @@ func signalTerm(cmd *exec.Cmd, td *teardown) {
 	}
 }
 
+// signalTermSurvivors does nothing: only the interpreter, which has exited, is tracked.
+func signalTermSurvivors(cmd *exec.Cmd, td *teardown) {}
+
+// trackDescendants does nothing: descendants are not tracked on Windows.
+func trackDescendants(cmd *exec.Cmd, td *teardown) {}
+
+// trackSurvivors does nothing: descendants are not tracked on Windows.
+func trackSurvivors(cmd *exec.Cmd, td *teardown) {}
+
+// fromTerminal always reports false: there is no terminal foreground group on Windows.
+func fromTerminal(td *teardown) bool { return false }
+
 func signalKill(cmd *exec.Cmd, td *teardown) {
 	if cmd.Process != nil {
 		_ = cmd.Process.Kill()
