@@ -266,7 +266,7 @@ func resolveEntity(body []byte) (string, bool) {
 		return "", false
 	}
 	if v > unicode.MaxRune {
-		v = unicode.ReplacementChar
+		return string(unicode.ReplacementChar), true
 	}
 	return string(util.ToValidRune(rune(v))), true
 }
