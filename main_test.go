@@ -1436,6 +1436,58 @@ func TestPrintTasksStripsBidiChars(t *testing.T) {
 	}
 }
 
+// TestListKeepsJoiners checks that emoji ZWJ and tag sequences and ZWNJ words are
+// listed as written.
+func TestListKeepsJoiners(t *testing.T) {
+	names := []string{"🧑\u200d💻 dev setup", "🏳\ufe0f\u200d🌈", scotlandFlag, "می\u200cخواهم"}
+	var md strings.Builder
+	for _, n := range names {
+		md.WriteString("### " + n + "\n```bash\ntrue\n```\n")
+	}
+	path := writeTemp(t, "tasks.md", md.String())
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-f", path, "--list-names"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("run(--list-names) = %d, want 0 (stderr: %s)", code, &stderr)
+	}
+	want := strings.Join(names, "\t\n") + "\t\n"
+	if got := stdout.String(); got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+}
+
+// TestListedNameRuns checks that a name with invisible characters runs both under the
+// name made lists for it and as written in the Madefile.
+func TestListedNameRuns(t *testing.T) {
+	requireCmd(t, "sh")
+	tests := []struct {
+		source string // heading text, also typed as the task argument
+		listed string
+	}{
+		{"bid\u202ei\u200b", "bidi"},
+		{"a\u200cb", "a\u200cb"},
+		{"\u2066dev\u2069  setup\t", "dev setup"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.listed, func(t *testing.T) {
+			path := writeTemp(t, "tasks.md", "### "+tt.source+"\n```sh\ntrue\n```\n")
+			var stdout, stderr bytes.Buffer
+			if code := run([]string{"-f", path, "--list-names"}, &stdout, &stderr); code != 0 {
+				t.Fatalf("run(--list-names) = %d, want 0 (stderr: %s)", code, &stderr)
+			}
+			name, _, _ := strings.Cut(stdout.String(), "\t")
+			if name != tt.listed {
+				t.Fatalf("listed name = %q, want %q", name, tt.listed)
+			}
+			for _, arg := range []string{tt.listed, tt.source} {
+				stderr.Reset()
+				if code := run([]string{"-f", path, arg}, &stdout, &stderr); code != 0 {
+					t.Errorf("run(%q) = %d, want 0 (stderr: %s)", arg, code, &stderr)
+				}
+			}
+		})
+	}
+}
+
 func TestDisplayWidth(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

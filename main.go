@@ -691,7 +691,10 @@ func isSymlink(path string) bool {
 	return err == nil && info.Mode()&os.ModeSymlink != 0
 }
 
+// find returns the task called name, normalized like the parser normalizes headings
+// so a name typed as written in the Madefile matches.
 func find(tasks []parser.Task, name string) (parser.Task, bool) {
+	name = parser.NormalizeSpace(name)
 	for _, t := range tasks {
 		if t.Name == name {
 			return t, true
