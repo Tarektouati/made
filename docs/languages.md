@@ -39,6 +39,13 @@ and its language, and exits like a shell would: with `127` when the interpreter 
 not on `PATH`, or `126` when it is found but can't be executed (it isn't
 executable, or its `#!` line points to a missing program).
 
+Interpreters are looked up in the absolute `PATH` entries only. `.`, an empty entry
+(a leading, trailing, or doubled `:`), and a relative directory such as `bin` are
+skipped, so a `bash` or `node` in the task's directory never runs in place of the one
+further along `PATH`. On Windows the current directory is not searched either, unlike
+in `cmd.exe`. If no absolute entry has the interpreter, `made` reports it as not on
+`PATH` and exits with `127`.
+
 ## Shell tasks fail fast
 
 `bash`, `sh`, and `zsh` tasks run in strict mode: the task

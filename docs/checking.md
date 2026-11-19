@@ -64,7 +64,8 @@ reported includes the space `made` adds before a script starting with `-` or `+`
 Without `--host`, the result depends only on the file and the OS, so it is the same
 in CI, on a developer machine, and in a pre-commit hook. `--host` adds
 `interpreter-not-found`, which looks each task's interpreter up on PATH the way a
-run does (a `python` block passes if either `python3` or `python` is found):
+run does: in the absolute entries only (see [Supported languages](languages.md#interpreters)),
+and a `python` block passes if either `python3` or `python` is found:
 
 ```
 $ made --check --host
