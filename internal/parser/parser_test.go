@@ -190,6 +190,21 @@ func TestParseCRLF(t *testing.T) {
 			wantScript: "printf 'a\rb'\n",
 		},
 		{
+			name:       "lone CR endings",
+			src:        "### cr\r```bash\recho cr\r```\r",
+			wantName:   "cr",
+			wantLang:   "bash",
+			wantScript: "echo cr\n",
+		},
+		{
+			name:       "lone CR endings after a BOM",
+			src:        "\xef\xbb\xbf### say-hello\rPrints a friendly greeting.\r```bash\recho a\r\recho b\r```",
+			wantName:   "say-hello",
+			wantDesc:   "Prints a friendly greeting.",
+			wantLang:   "bash",
+			wantScript: "echo a\n\necho b\n",
+		},
+		{
 			name:       "LF only unchanged",
 			src:        "### say-hello\nPrints a friendly greeting.\n```bash\necho hello\n```\n",
 			wantName:   "say-hello",
@@ -604,6 +619,22 @@ func TestParseDetailedMatchesParse(t *testing.T) {
 		want[i].Description = ""
 		if got[i] != want[i] {
 			t.Errorf("task %d: ParseDetailed %+v, Parse %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestParseDetailedLoneCRLines(t *testing.T) {
+	src := "### a\r```bash\rx\r```\r\r### b\r```bash\ry\r```\r"
+	tasks, err := ParseDetailed([]byte(src))
+	if err != nil {
+		t.Fatalf("ParseDetailed: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("got %d tasks (%+v), want 2", len(tasks), tasks)
+	}
+	for i, want := range []struct{ line, fence int }{{1, 2}, {6, 7}} {
+		if got := tasks[i]; got.Line != want.line || len(got.Fences) != 1 || got.Fences[0].Line != want.fence {
+			t.Errorf("task %d = %+v, want heading line %d and one fence at line %d", i, got, want.line, want.fence)
 		}
 	}
 }

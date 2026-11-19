@@ -29,6 +29,16 @@ const taskHeadingLevel = 3
 // start of UTF-8 files.
 var utf8BOM = []byte("\xef\xbb\xbf")
 
+// normalizeLoneCR turns the line endings of a file that uses only CR (classic Mac
+// OS) into LF, the only line ending goldmark splits on. In a file with any LF, a lone
+// CR stays part of its line, so a script can keep a literal one.
+func normalizeLoneCR(source []byte) []byte {
+	if bytes.IndexByte(source, '\n') >= 0 || bytes.IndexByte(source, '\r') < 0 {
+		return source
+	}
+	return bytes.ReplaceAll(source, []byte("\r"), []byte("\n"))
+}
+
 // Task is a single runnable unit parsed from the Markdown source.
 type Task struct {
 	Name        string
@@ -43,9 +53,9 @@ type Task struct {
 // script and completes the task. Paragraph text between the heading and that code
 // block becomes the description. Headings of any other level end the current task's
 // scope. A heading with no following code block is skipped. A leading UTF-8 byte
-// order mark is ignored.
+// order mark is ignored, and a file with only CR line endings reads as LF.
 func Parse(source []byte) ([]Task, error) {
-	source = bytes.TrimPrefix(source, utf8BOM)
+	source = normalizeLoneCR(bytes.TrimPrefix(source, utf8BOM))
 	if err := validateNesting(source); err != nil {
 		return nil, err
 	}
@@ -109,10 +119,11 @@ type RawTask struct {
 
 // ParseDetailed walks source like Parse but keeps every H3 heading, including ones
 // without a code block, with line positions and all of their fences. A leading UTF-8
-// byte order mark is ignored and does not shift line numbers. Like Parse, it rejects
-// over-deep nesting with a *NestingError before parsing.
+// byte order mark is ignored and does not shift line numbers, and CR-only line
+// endings count as lines. Like Parse, it rejects over-deep nesting with a
+// *NestingError before parsing.
 func ParseDetailed(source []byte) ([]RawTask, error) {
-	source = bytes.TrimPrefix(source, utf8BOM)
+	source = normalizeLoneCR(bytes.TrimPrefix(source, utf8BOM))
 	if err := validateNesting(source); err != nil {
 		return nil, err
 	}
