@@ -2,25 +2,38 @@
 # Load it with: made completion fish > ~/.config/fish/completions/made.fish
 
 # __made_file_args prints "-f <file>" for a -f/--file value typed before the cursor.
-# commandline -o already removes the tokens' quoting.
+# fish 4 expands the tokens like a run would (variables, ~, globs), but never runs
+# command substitutions (commandline -x). Older fish only removes their quoting
+# (commandline -o), so a leading ~ is expanded here and variables are left as typed.
 function __made_file_args
-    set -l tokens (commandline -opc)
+    set -l tokens
+    set -l tilde 0
+    if not set tokens (commandline -xpc 2>/dev/null)
+        set tokens (commandline -opc)
+        set tilde 1
+    end
     set -e tokens[1]
+    set -l value
     while set -q tokens[1]
         switch $tokens[1]
             case -f -file --file
                 if set -q tokens[2]
-                    printf '%s\n' -f (string replace -r '^~' -- $HOME $tokens[2])
+                    set value $tokens[2]
                 end
                 set -e tokens[1]
             case '-f=*' '-file=*' '--file=*'
-                printf '%s\n' -f (string replace -r '^[^=]*=' '' -- $tokens[1] | string replace -r '^~' -- $HOME)
+                set value (string replace -r '^[^=]*=' '' -- $tokens[1])
             case '-*'
             case '*'
-                return
+                break
         end
         set -e tokens[1]
     end
+    set -q value[1]; or return
+    if test $tilde = 1
+        set value (string replace -r '^~' -- $HOME $value)
+    end
+    printf '%s\n' -f $value
 end
 
 # __made_positional prints the positional words typed before the cursor. Go's flag

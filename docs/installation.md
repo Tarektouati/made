@@ -72,6 +72,13 @@ completions for bash, zsh, and fish automatically. Otherwise, load the script th
 
 Release archives also include the scripts, in `completions/`.
 
+For the `-f` value, bash and zsh remove its quoting and expand a leading `~`, `$NAME`
+or `${NAME}` (not inside single quotes); fish 4 expands it the way fish would for a
+run, and older fish removes its quoting and expands only a leading `~`. Completion
+never runs a command substitution such as `$(...)` from the command line. A variable
+with the same name as a local of the shell's completion system may not expand: in
+zsh, for example, `$name`, `$line`, `$i` or `$REPLY`.
+
 To get task names, the scripts run `made [-f file] --list-names`, which prints one
 `name<TAB>description` line per task with no header, leaving out tasks with an empty
 name. The flag is meant for the scripts and is not shown in `made --help`. It only
