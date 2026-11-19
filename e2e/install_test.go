@@ -545,9 +545,11 @@ func TestInstallScriptRelease(t *testing.T) {
 		release releaseOpts
 		opts    installOpts
 		// existing, when set, is a made already installed in the target dir.
-		existing   string
-		wantCode   int
-		wantStderr []string
+		existing string
+		// installedAnyway marks a failing run that still leaves made in the target dir.
+		installedAnyway bool
+		wantCode        int
+		wantStderr      []string
 	}{
 		{
 			name:    "CRLF checksums",
@@ -559,6 +561,24 @@ func TestInstallScriptRelease(t *testing.T) {
 				sum, rest, _ := strings.Cut(line, " ")
 				return strings.ToUpper(sum) + " " + rest
 			}},
+		},
+		{
+			name: "checksum mismatch",
+			release: releaseOpts{checksums: func(line string) string {
+				_, rest, _ := strings.Cut(line, " ")
+				return fmt.Sprintf("%x %s", sha256.Sum256([]byte("tampered")), rest)
+			}},
+			wantCode:   1,
+			wantStderr: []string{"made-install: checksum mismatch for made_"},
+		},
+		{
+			name: "no checksum entry",
+			release: releaseOpts{checksums: func(line string) string {
+				sum, _, _ := strings.Cut(line, " ")
+				return sum + "  made_" + installVersion + "_plan9_amd64.tar.gz\n"
+			}},
+			wantCode:   1,
+			wantStderr: []string{"made-install: no checksum found for made_"},
 		},
 		{
 			name:       "corrupt archive",
@@ -588,11 +608,12 @@ func TestInstallScriptRelease(t *testing.T) {
 			opts: installOpts{noexecTmp: true, shell: "dash"},
 		},
 		{
-			name:       "noexec TMPDIR and binary fails to run",
-			release:    releaseOpts{bin: []byte("#!/bin/sh\necho boom >&2\nexit 3\n")},
-			opts:       installOpts{noexecTmp: true},
-			wantCode:   1,
-			wantStderr: []string{"made-install: installed ", "failed to run", "boom"},
+			name:            "noexec TMPDIR and binary fails to run",
+			release:         releaseOpts{bin: []byte("#!/bin/sh\necho boom >&2\nexit 3\n")},
+			opts:            installOpts{noexecTmp: true},
+			installedAnyway: true,
+			wantCode:        1,
+			wantStderr:      []string{"made-install: installed ", "failed to run", "boom"},
 		},
 	}
 	for _, tc := range cases {
@@ -626,8 +647,13 @@ func TestInstallScriptRelease(t *testing.T) {
 					t.Errorf("stdout = %q, want it to report the installed version", res.stdout)
 				}
 				requireInstalled(t, filepath.Join(dir, "made"))
-			} else if strings.Contains(res.stdout, "Installed ") {
-				t.Errorf("stdout = %q, want no success message", res.stdout)
+			} else {
+				if strings.Contains(res.stdout, "Installed ") {
+					t.Errorf("stdout = %q, want no success message", res.stdout)
+				}
+				if tc.existing == "" && !tc.installedAnyway {
+					requireNotInstalled(t, filepath.Join(dir, "made"))
+				}
 			}
 		})
 	}
