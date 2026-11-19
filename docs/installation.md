@@ -73,6 +73,7 @@ completions for bash, zsh, and fish automatically. Otherwise, load the script th
 Release archives also include the scripts, in `completions/`.
 
 To get task names, the scripts run `made [-f file] --list-names`, which prints one
-`name<TAB>description` line per task with no header. The flag is meant for the
-scripts and is not shown in `made --help`. It only reads a regular file, so
-completing after `-f` on a pipe or `/dev/stdin` fails at once instead of waiting.
+`name<TAB>description` line per task with no header, leaving out tasks with an empty
+name. The flag is meant for the scripts and is not shown in `made --help`. It only
+reads a regular file, so completing after `-f` on a pipe or `/dev/stdin` fails at
+once instead of waiting.

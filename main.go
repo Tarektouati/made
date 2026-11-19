@@ -1002,10 +1002,15 @@ func printTasks(stdout, stderr io.Writer, file string, tasks []parser.Task) {
 }
 
 // printNames writes one task per line as "name<TAB>description" for the completion
-// scripts, with no header. The description is flattened to one line.
+// scripts, with no header. The description is flattened to one line. Tasks whose
+// name is empty once sanitized are left out: they cannot be completed, and bash's
+// read would take the description of a "\tdesc" line as the name.
 func printNames(stdout io.Writer, tasks []parser.Task) {
 	for _, t := range tasks {
 		name := sanitizeDisplay(t.Name)
+		if name == "" {
+			continue
+		}
 		desc := sanitizeDisplay(strings.ReplaceAll(t.Description, "\n", " "))
 		fmt.Fprintf(stdout, "%s\t%s\n", name, desc)
 	}

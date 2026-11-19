@@ -19,10 +19,15 @@ const otherMD = "### ns:task\n" +
 	"echo\n" +
 	"```\n"
 
-// edgeMD is a task file with names the scripts must pass through unchanged: the task
-// back\slash, whose description has a backslash and a colon.
+// edgeMD is a task file with names the scripts must handle: the task back\slash, whose
+// description has a backslash and a colon, and a task with an empty name.
 const edgeMD = "### back\\\\slash\n" +
 	"has \\\\ a: b\n" +
+	"```bash\n" +
+	"echo\n" +
+	"```\n" +
+	"### \n" +
+	"empty\n" +
 	"```bash\n" +
 	"echo\n" +
 	"```\n"
@@ -118,6 +123,7 @@ printf '%s\n' "${COMPREPLY[@]}"`
 		{line: []string{"made", "-f", "'my tasks.md'", ""}, want: []string{"ns:task"}, not: []string{"build"}},
 		{line: []string{"made", "-f", `my\ tasks.md`, ""}, want: []string{"ns:task"}, not: []string{"build"}},
 		{line: []string{"made", "-f", `"my tasks.md"`, ""}, want: []string{"ns:task"}, not: []string{"build"}},
+		{line: []string{"made", "-f", "edge.md", ""}, want: []string{`back\slash`}, not: []string{"empty"}},
 	} {
 		compLine := tc.compLine
 		if compLine == "" {
@@ -148,7 +154,7 @@ _made_tasks`
 		{line: []string{"made", "-f", "'my tasks.md'", ""}, want: []string{`ns\:task:Has a colon\: here.`}, not: []string{"build:Compiles all packages."}},
 		{line: []string{"made", `--file=my\ tasks.md`, ""}, want: []string{`ns\:task:Has a colon\: here.`}},
 		// _describe removes backslashes, so they are doubled.
-		{line: []string{"made", "-f", "edge.md", ""}, want: []string{`back\\slash:has \\ a\: b`}},
+		{line: []string{"made", "-f", "edge.md", ""}, want: []string{`back\\slash:has \\ a\: b`}, not: []string{":empty"}},
 	} {
 		got := lines(runShell(t, dir, "zsh", append([]string{"-f", "-c", script, "zsh"}, tc.line...)...))
 		checkCompletions(t, got, tc)
@@ -164,6 +170,7 @@ func TestCompletionFish(t *testing.T) {
 		{line: []string{"made -f other.md "}, want: []string{"ns:task\tHas a colon: here."}, not: []string{"build\tCompiles all packages."}},
 		{line: []string{"made --file=other.md "}, want: []string{"ns:task\tHas a colon: here."}},
 		{line: []string{"made -f 'my tasks.md' "}, want: []string{"ns:task\tHas a colon: here."}, not: []string{"build\tCompiles all packages."}},
+		{line: []string{"made -f edge.md "}, want: []string{"back\\slash\thas \\ a: b"}, not: []string{"\tempty"}},
 		{line: []string{"made --"}, want: []string{"--file\tMarkdown file to read tasks from", "--list\tList available tasks", "--check\tCheck the task file for problems"}, not: []string{"--list-names"}},
 		{line: []string{"made completion "}, want: []string{"bash", "zsh", "fish"}, not: []string{"build\tCompiles all packages."}},
 		{line: []string{"made build "}, want: []string{"Madefile.md", "other.md"}, not: []string{"build\tCompiles all packages."}},
