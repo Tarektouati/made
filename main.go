@@ -624,9 +624,11 @@ func resolveFile(file string) (resolved, error) {
 // name found and any other matching names in that directory. The walk stops after
 // the first directory containing a .git entry (a directory, or a file for worktrees
 // and submodules), otherwise at the filesystem root. Names that are present but
-// unusable (broken or looping symlinks, non-regular files, permission errors), and
-// directories that exist but cannot be listed, are returned in skipped, nearest
-// first, and the walk goes on.
+// unusable (broken or looping symlinks, non-regular files, names that cannot be
+// looked up because a directory cannot be searched), and directories that exist
+// but cannot be listed, are returned in skipped, nearest first, and the walk goes
+// on. A regular file that cannot be read is still returned, so the caller fails on
+// it rather than running a parent's Madefile.
 func findMadefile(start string) (dir, name string, others []string, skipped []skippedMadefile, ok bool) {
 	for dir = start; ; {
 		entries, err := os.ReadDir(dir)
