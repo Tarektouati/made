@@ -66,7 +66,7 @@ made --version       # print the version
 
 ```
 made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]
-made [-f file] --check [--strict]
+made [-f file] --check [--strict] [--host]
 made init [--force]
 made completion <bash|zsh|fish>
 ```
@@ -77,6 +77,7 @@ made completion <bash|zsh|fish>
 | `--no-chdir` | | Run the task in the current directory instead of the task file's directory |
 | `--check` | | Check the task file for problems instead of running a task; see [Checking a Madefile](docs/checking.md) |
 | `--strict` | | With `--check`, fail on warnings too |
+| `--host` | | With `--check`, also check that each task's interpreter is on PATH; see [Checking against this machine](docs/checking.md#checking-against-this-machine) |
 | `-l`, `--list` | | List available tasks and exit |
 | `-V`, `--version` | | Print the version and exit |
 | `-h`, `--help` | | Print usage to stdout and exit |

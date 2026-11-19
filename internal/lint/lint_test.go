@@ -62,7 +62,7 @@ func TestCheck(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := findings(Check([]byte(tt.src)))
+			got := findings(Check([]byte(tt.src), Options{}))
 			if !slices.Equal(got, tt.want) {
 				t.Errorf("Check() = %+v\nwant %+v", got, tt.want)
 			}
@@ -70,8 +70,36 @@ func TestCheck(t *testing.T) {
 	}
 }
 
+func TestCheckHost(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	src := "### rb\n```ruby\nputs 1\n```\n### rb2\n```ruby\nputs 2\n```\n### py\n```python\nprint(1)\n```\n" +
+		"### y\n```yaml\nk\n```\n### e\n```ruby\n```\n### d\n```text\nhi\n```\n"
+	wantHost := []finding{
+		{2, Error, "interpreter-not-found"},
+		{6, Error, "interpreter-not-found"},
+		{10, Error, "interpreter-not-found"},
+		{14, Error, "unsupported-language"},
+		{18, Error, "empty-script"},
+		{21, Warning, "docs-fence"},
+	}
+	if got := findings(Check([]byte(src), Options{Host: true})); !slices.Equal(got, wantHost) {
+		t.Errorf("Check(Host) = %+v\nwant %+v", got, wantHost)
+	}
+	wantNoHost := []finding{{14, Error, "unsupported-language"}, {18, Error, "empty-script"}, {21, Warning, "docs-fence"}}
+	if got := findings(Check([]byte(src), Options{})); !slices.Equal(got, wantNoHost) {
+		t.Errorf("Check() = %+v\nwant %+v", got, wantNoHost)
+	}
+
+	diags := Check([]byte(src), Options{Host: true})
+	for i, w := range []string{`"ruby" was not found on PATH (required by task "rb", language "ruby")`, `task "rb2"`, `neither "python3" nor "python" was found on PATH`} {
+		if !strings.Contains(diags[i].Msg, w) {
+			t.Errorf("diag %d message %q, want it to contain %q", i, diags[i].Msg, w)
+		}
+	}
+}
+
 func TestCheckMessages(t *testing.T) {
-	diags := Check([]byte("### a\n```bash\nx\n```\n### a\n```yaml\nk\n```\n### <i>c</i> d\n```bash\nx\n```\n"))
+	diags := Check([]byte("### a\n```bash\nx\n```\n### a\n```yaml\nk\n```\n### <i>c</i> d\n```bash\nx\n```\n"), Options{})
 	want := []string{
 		`"a" already defined at line 1`,
 		`task "a" uses "yaml"; supported: bash, `,
@@ -91,7 +119,7 @@ func TestCheckMessages(t *testing.T) {
 // measured, including the pad a script starting with "-" gets, in the OS's unit.
 func TestCheckScriptTooLargeMessage(t *testing.T) {
 	script := "-" + strings.Repeat("x", runner.ArgLimit-3) + "\n" // padded: exactly ArgLimit
-	diags := Check([]byte("### a\n```bash\n" + script + "```\n"))
+	diags := Check([]byte("### a\n```bash\n"+script+"```\n"), Options{})
 	if got := findings(diags); !slices.Equal(got, []finding{{2, Error, "script-too-large"}}) {
 		t.Fatalf("Check() = %+v, want one script-too-large", got)
 	}

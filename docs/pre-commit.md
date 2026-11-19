@@ -57,6 +57,16 @@ repository's root Madefile whenever it is staged (`Madefile.md`, `madefile.md` o
         args: [--strict]
 ```
 
+Add `--host` to also fail when a task's interpreter is not on PATH (see
+[Checking against this machine](checking.md#checking-against-this-machine)). The
+hook then fails for any developer who lacks one of the interpreters, so use it only
+when everyone has them; otherwise run `made --check --host` in CI instead:
+
+```yaml
+      - id: made-check
+        args: [--host]
+```
+
 The hook checks one file and runs from the repository root, so a nested Madefile
 or a different file name needs its own entry, with `-f` naming the file and
 `files` matching it:

@@ -47,6 +47,7 @@ _made() {
     '--no-chdir[run the task in the current directory]' \
     '(-l --list -V --version 1 *)--check[check the task file for problems]' \
     '--strict[with --check, fail on warnings too]' \
+    '--host[with --check, also check that interpreters are on PATH]' \
     '(-l --list)'{-l,--list}'[list available tasks]' \
     '(- *)'{-V,--version}'[print version and exit]' \
     '(- *)'{-h,--help}'[show help]' \
