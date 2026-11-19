@@ -42,6 +42,12 @@ var acceptedSeeds = []string{
 	"> > > > > > - - -\n",
 	"-\t-\t-\t-\t-\t-\t-\n",
 	"- - - x\n      - - - -\n",
+	"            - x\n",
+	"- - x\n\n    - - - x\n",
+	"> - - x\n>     - - - x\n",
+	"- - - a\nb\n      - - - x\n",
+	"-\n\n  -\n\n    -\n\n      - - x\n",
+	"\t\t\t- x\n",
 }
 
 func TestAcceptedSeedsPassScan(t *testing.T) {
