@@ -662,14 +662,20 @@ func TestParseBlankLinesDoNotNest(t *testing.T) {
 	}
 }
 
-// TestParseRejectsDeeplyIndentedText pins a deliberate trade-off: non-blank text
-// indented 514+ columns counts as deep nesting, because the scan cannot tell list
-// item continuation from other indentation.
-func TestParseRejectsDeeplyIndentedText(t *testing.T) {
-	src := strings.Repeat(" ", 514) + "x\n"
-	var nest *NestingError
-	if _, err := Parse([]byte(src)); !errors.As(err, &nest) {
-		t.Fatalf("Parse error = %v, want *NestingError", err)
+// TestParseIndentedCodeDoesNotNest checks deep indentation adds no depth when no
+// earlier line nests deep: it can only continue list items that are already open.
+func TestParseIndentedCodeDoesNotNest(t *testing.T) {
+	for _, tc := range []struct{ name, line string }{
+		{"spaces before a marker", strings.Repeat(" ", 2000) + "- x"},
+		{"tabs before a marker", strings.Repeat("\t", 300) + "- x"},
+		{"spaces before text", strings.Repeat(" ", 514) + "x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "### t\n" + tc.line + "\n```bash\necho ok\n```\n"
+			if _, err := Parse([]byte(src)); err != nil {
+				t.Errorf("Parse: %v, want nil", err)
+			}
+		})
 	}
 }
 
@@ -679,7 +685,7 @@ func TestParseTrailingWhitespaceDoesNotNest(t *testing.T) {
 	if _, err := Parse([]byte("> " + strings.Repeat(" ", 600) + "\n")); err != nil {
 		t.Errorf("Parse(marker then 600 spaces): %v, want nil", err)
 	}
-	src := strings.Repeat(" ", 300) + strings.Repeat("> ", 110) + "-\n"
+	src := strings.Repeat("- ", 150) + "x\n" + strings.Repeat(" ", 300) + strings.Repeat("> ", 110) + "-\n"
 	var nest *NestingError
 	if _, err := Parse([]byte(src)); !errors.As(err, &nest) {
 		t.Errorf("Parse(indent then markers ending in an empty item) = %v, want *NestingError", err)
@@ -751,6 +757,8 @@ func TestParseRejectsIndentedNesting(t *testing.T) {
 		{"blockquotes inside a list item", "- - x\n\n    " + deep},
 		{"blockquotes after a tab", "- - x\n\n\t" + deep},
 		{"list items continued by indent", stair},
+		{"list items continued by deep indent", strings.Repeat("- ", 200) + "x\n" +
+			strings.Repeat(" ", 2000) + strings.Repeat("- ", 60) + "x\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var nest *NestingError

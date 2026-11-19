@@ -25,14 +25,21 @@ func validateNesting(source []byte) error {
 // fenced code blocks and HTML blocks, which goldmark does not parse as Markdown.
 // Telling those apart needs goldmark's full block structure, and any line the scan
 // skipped while goldmark parsed it would let deep nesting through. The cost is that
-// a code line with more than limit markers, or indented far enough, is rejected.
+// a code line with more than limit markers, or with markers and indented far enough
+// after a line nested deep, is rejected. Indent alone never is: it counts no more
+// than the deepest earlier line, which is within limit.
 func validateNestingLimit(source []byte, limit int) error {
+	// deepest bounds the containers open before each line: a container is opened by
+	// some earlier line, whose bound counts it and every container around it.
+	deepest := 0
 	for n := 1; len(source) > 0; n++ {
 		var line []byte
 		line, source = nextLine(source)
-		if lineNestingDepth(line) > limit {
+		d := lineNestingDepth(line, deepest)
+		if d > limit {
 			return &NestingError{Line: n}
 		}
+		deepest = max(deepest, d)
 	}
 	return nil
 }
@@ -55,14 +62,15 @@ func trimCR(b []byte) []byte {
 // lineNestingDepth returns an upper bound on the container depth goldmark can reach
 // on line: one per container marker in the line's prefix (blockquote, bullet, and
 // ordered list markers, mixed sequences like "> - > -" too), plus half the whitespace
-// columns before a marker or text. A line opens new containers only with markers,
-// and they count after any indent: inside a list item, "    > > >" is a run of
-// blockquotes. A line continues a list item only when it is indented to the item's
-// content, and each nested item adds at least two columns ("- "). A blockquote
-// continues only with its own ">" marker. A thematic break ("- - -", "* * *") counts
-// as text: at every block start goldmark tries it before a list item, and it opens
-// no container.
-func lineNestingDepth(line []byte) int {
+// columns before a marker or text, but no more than open, the containers that may be
+// open before the line. A line opens new containers only with markers, and they count
+// after any indent: inside a list item, "    > > >" is a run of blockquotes. A line
+// continues a list item only when it is indented to the item's content, and each
+// nested item adds at least two columns ("- "); indent beyond the open items is
+// content, such as an indented code block. A blockquote continues only with its own
+// ">" marker. A thematic break ("- - -", "* * *") counts as text: at every block
+// start goldmark tries it before a list item, and it opens no container.
+func lineNestingDepth(line []byte, open int) int {
 	// pending is whitespace not yet followed by a marker or text. Trailing
 	// whitespace cannot continue a list item, so a blank line adds no depth.
 	markers, ws, pending, col := 0, 0, 0, 0
@@ -71,7 +79,7 @@ func lineNestingDepth(line []byte) int {
 	for i < len(line) {
 		switch c := line[i]; {
 		case c == tbMark && i >= tbFrom && i <= tbTo:
-			return markers + (ws+pending)/2
+			return markers + min((ws+pending)/2, open)
 		case c == ' ':
 			pending++
 			col++
@@ -101,10 +109,10 @@ func lineNestingDepth(line []byte) int {
 				i, col = skipMarkerSpace(line, j+1, col+j+1-i)
 				continue
 			}
-			return markers + (ws+pending)/2
+			return markers + min((ws+pending)/2, open)
 		}
 	}
-	return markers + ws/2
+	return markers + min(ws/2, open)
 }
 
 // thematicBreakRange finds the positions i from which line[i:] is a thematic break
