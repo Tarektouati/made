@@ -108,6 +108,33 @@ func TestRun(t *testing.T) {
 	})
 }
 
+// TestReadErrorPath checks that a task file that cannot be read is named once, quoted
+// when blank or padded with spaces so the path stays visible.
+func TestReadErrorPath(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "nope.md")
+	for _, tc := range []struct{ path, shown string }{
+		{" ", `" "`},
+		{"a ", `"a "`},
+		{" a", `" a"`},
+		{missing, missing},
+	} {
+		_, statErr := os.Stat(tc.path)
+		if statErr == nil {
+			t.Fatalf("%q exists", tc.path)
+		}
+		want := "made: cannot read " + tc.shown + ": " + pathErrReason(statErr).Error() + "\n"
+		for _, args := range [][]string{{"-f", tc.path}, {"--check", "-f", tc.path}} {
+			var stdout, stderr bytes.Buffer
+			if code := run(args, &stdout, &stderr); code != 1 {
+				t.Errorf("run(%q) = %d, want 1", args, code)
+			}
+			if got := stderr.String(); got != want {
+				t.Errorf("run(%q) stderr = %q, want %q", args, got, want)
+			}
+		}
+	}
+}
+
 // TestFlagErrors checks that a bad flag gets a single line on stderr naming the flag as
 // it was typed, exit code 2, and no usage text.
 func TestFlagErrors(t *testing.T) {
