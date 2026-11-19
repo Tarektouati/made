@@ -45,6 +45,7 @@ type Task struct {
 	Description string
 	Lang        string // fence language (first word of the info string, e.g. "bash")
 	Script      string // code block body
+	Line        int    // 1-based line of the heading
 }
 
 // Parse extracts tasks from Markdown source, preserving document order.
@@ -62,6 +63,7 @@ func Parse(source []byte) ([]Task, error) {
 	}
 	reader := text.NewReader(source)
 	doc := goldmark.DefaultParser().Parse(reader)
+	lineOf := lineCounter(source)
 
 	var tasks []Task
 	var cur *Task     // task currently being assembled
@@ -71,7 +73,7 @@ func Parse(source []byte) ([]Task, error) {
 		switch node := n.(type) {
 		case *ast.Heading:
 			if node.Level == taskHeadingLevel {
-				cur = &Task{Name: NormalizeSpace(headingText(node, source))}
+				cur = &Task{Name: NormalizeSpace(headingText(node, source)), Line: lineOf(node)}
 			} else {
 				cur = nil
 			}
@@ -129,22 +131,7 @@ func ParseDetailed(source []byte) ([]RawTask, error) {
 		return nil, err
 	}
 	doc := goldmark.DefaultParser().Parse(text.NewReader(source))
-	// lineOf is called on top-level blocks in document order, so it counts newlines
-	// forward from the previous node instead of from the start: linear overall, with
-	// no allocation. A node before the previous one restarts the count.
-	lastPos, lastLine := 0, 1
-	lineOf := func(n ast.Node) int {
-		pos := n.Pos()
-		if pos < 0 {
-			return 0
-		}
-		if pos < lastPos {
-			lastPos, lastLine = 0, 1
-		}
-		lastLine += bytes.Count(source[lastPos:pos], []byte("\n"))
-		lastPos = pos
-		return lastLine
-	}
+	lineOf := lineCounter(source)
 
 	var tasks []RawTask
 	cur := -1 // index in tasks of the heading in scope, or -1
@@ -173,6 +160,27 @@ func ParseDetailed(source []byte) ([]RawTask, error) {
 		}
 	}
 	return tasks, nil
+}
+
+// lineCounter returns a function giving the 1-based line of a node of source, or 0
+// for a node without a position. It is meant to be called on top-level blocks in
+// document order, so it counts newlines forward from the previous node instead of
+// from the start: linear overall, with no allocation. A node before the previous one
+// restarts the count.
+func lineCounter(source []byte) func(ast.Node) int {
+	lastPos, lastLine := 0, 1
+	return func(n ast.Node) int {
+		pos := n.Pos()
+		if pos < 0 {
+			return 0
+		}
+		if pos < lastPos {
+			lastPos, lastLine = 0, 1
+		}
+		lastLine += bytes.Count(source[lastPos:pos], []byte("\n"))
+		lastPos = pos
+		return lastLine
+	}
 }
 
 // hasMarkup reports whether n contains inline markup whose visible rendering

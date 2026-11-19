@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -137,7 +138,7 @@ func TestParseEmptyFirstBlockIsScript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	want := []Task{{Name: "empty", Description: "About it.", Lang: "bash", Script: ""}}
+	want := []Task{{Name: "empty", Description: "About it.", Lang: "bash", Script: "", Line: 1}}
 	if !reflect.DeepEqual(tasks, want) {
 		t.Errorf("tasks = %+v, want %+v", tasks, want)
 	}
@@ -415,25 +416,25 @@ func TestParseUTF8BOM(t *testing.T) {
 		{
 			name: "bom before heading",
 			src:  bom + "### bom\n```\necho bom\n```\n",
-			want: []Task{{Name: "bom", Script: "echo bom\n"}},
+			want: []Task{{Name: "bom", Script: "echo bom\n", Line: 1}},
 		},
 		{
 			name: "bom then blank line",
 			src:  bom + "\n### bom\n```bash\necho bom\n```\n",
-			want: []Task{{Name: "bom", Lang: "bash", Script: "echo bom\n"}},
+			want: []Task{{Name: "bom", Lang: "bash", Script: "echo bom\n", Line: 2}},
 		},
 		{
 			name: "bom with description and multiple tasks",
 			src:  bom + "### one\nfirst task\n```bash\necho 1\n```\n\n### two\n```sh\necho 2\n```\n",
 			want: []Task{
-				{Name: "one", Description: "first task", Lang: "bash", Script: "echo 1\n"},
-				{Name: "two", Lang: "sh", Script: "echo 2\n"},
+				{Name: "one", Description: "first task", Lang: "bash", Script: "echo 1\n", Line: 1},
+				{Name: "two", Lang: "sh", Script: "echo 2\n", Line: 7},
 			},
 		},
 		{
 			name: "no bom unchanged",
 			src:  "### bom\n```\necho bom\n```\n",
-			want: []Task{{Name: "bom", Script: "echo bom\n"}},
+			want: []Task{{Name: "bom", Script: "echo bom\n", Line: 1}},
 		},
 		{
 			name: "bom only",
@@ -443,7 +444,7 @@ func TestParseUTF8BOM(t *testing.T) {
 		{
 			name: "mid-document feff not stripped",
 			src:  "### a\n```\necho " + bom + "\n```\n",
-			want: []Task{{Name: "a", Script: "echo " + bom + "\n"}},
+			want: []Task{{Name: "a", Script: "echo " + bom + "\n", Line: 1}},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -622,7 +623,7 @@ func TestParseDetailedMatchesParse(t *testing.T) {
 	for _, r := range raw {
 		if len(r.Fences) > 0 {
 			f := r.Fences[0]
-			got = append(got, Task{Name: r.Name, Lang: f.Lang, Script: f.Script})
+			got = append(got, Task{Name: r.Name, Lang: f.Lang, Script: f.Script, Line: r.Line})
 		}
 	}
 	if len(got) != len(want) {
@@ -649,6 +650,33 @@ func TestParseDetailedLoneCRLines(t *testing.T) {
 		if got := tasks[i]; got.Line != want.line || len(got.Fences) != 1 || got.Fences[0].Line != want.fence {
 			t.Errorf("task %d = %+v, want heading line %d and one fence at line %d", i, got, want.line, want.fence)
 		}
+	}
+}
+
+func TestParseLines(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		src  string
+		want []int
+	}{
+		{name: "lf", src: "# T\n\n### a\nabout a\n\n```bash\nx\n```\n\n### none\n### b\n```bash\ny\n```\n", want: []int{3, 11}},
+		{name: "crlf", src: "### a\r\n```bash\r\nx\r\n```\r\n\r\n### b\r\n```bash\r\ny\r\n```\r\n", want: []int{1, 6}},
+		{name: "lone cr", src: "### a\r```bash\rx\r```\r\r### b\r```bash\ry\r```\r", want: []int{1, 6}},
+		{name: "bom", src: "\xef\xbb\xbf\n### a\n```bash\nx\n```\n", want: []int{2}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tasks, err := Parse([]byte(tc.src))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			var got []int
+			for _, task := range tasks {
+				got = append(got, task.Line)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("lines = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
