@@ -621,28 +621,44 @@ func TestInstallScriptTruncated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	half := script[:len(script)/2]
-	if bytes.Contains(half, []byte(`main "$@"`)) {
-		t.Fatal("truncated script still calls main")
+	afterMain := script[:bytes.LastIndex(script, []byte("\n}\n"))+3]
+	if rest := bytes.TrimSpace(script[len(afterMain):]); string(rest) != `main "$@"` {
+		t.Fatalf("cut after the last closing brace drops %q, want only the main call", rest)
 	}
-	partial := filepath.Join(t.TempDir(), "install.sh")
-	writeFile(t, partial, string(half))
-	cases := []struct {
+	cuts := []struct {
 		name string
-		opts installOpts
+		data []byte
+		// complete marks a cut that parses, so the shell must exit 0.
+		complete bool
 	}{
-		{name: "file", opts: installOpts{script: partial}},
-		{name: "stdin", opts: installOpts{stdin: half}},
+		{name: "half", data: script[:len(script)/2]},
+		{name: "after main", data: afterMain, complete: true},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			dir := filepath.Join(t.TempDir(), "bin")
-			res := runInstall(t, release, tc.opts, "MADE_INSTALL_DIR="+dir)
-			if res.curlCalls != 0 {
-				t.Errorf("curl called %d times, want 0", res.curlCalls)
-			}
-			requireNotInstalled(t, filepath.Join(dir, "made"))
-		})
+	for _, cut := range cuts {
+		if bytes.Contains(cut.data, []byte(`main "$@"`)) {
+			t.Fatalf("%s: truncated script still calls main", cut.name)
+		}
+		partial := filepath.Join(t.TempDir(), "install.sh")
+		writeFile(t, partial, string(cut.data))
+		for _, tc := range []struct {
+			name string
+			opts installOpts
+		}{
+			{name: "file", opts: installOpts{script: partial}},
+			{name: "stdin", opts: installOpts{stdin: cut.data}},
+		} {
+			t.Run(cut.name+"/"+tc.name, func(t *testing.T) {
+				dir := filepath.Join(t.TempDir(), "bin")
+				res := runInstall(t, release, tc.opts, "MADE_INSTALL_DIR="+dir)
+				if cut.complete && res.code != 0 {
+					t.Errorf("exit = %d, want 0\nstdout: %s\nstderr: %s", res.code, res.stdout, res.stderr)
+				}
+				if res.curlCalls != 0 {
+					t.Errorf("curl called %d times, want 0", res.curlCalls)
+				}
+				requireNotInstalled(t, filepath.Join(dir, "made"))
+			})
+		}
 	}
 }
 
