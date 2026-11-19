@@ -86,7 +86,7 @@ func Check(src []byte, opts Options) []Diagnostic {
 			add(t.Line, Warning, "name-altered", "heading %q is read as task %q; HTML tags and images are not part of names", t.Raw, t.Name)
 		}
 		if slices.Contains(reservedNames, t.Name) {
-			add(t.Line, Warning, "unreachable-name", "task %q cannot be run: made %s is reserved", t.Name, t.Name)
+			add(t.Line, Error, "unreachable-name", "task %q cannot be run: made %s is reserved", t.Name, t.Name)
 		} else if strings.HasPrefix(t.Name, "-") {
 			add(t.Line, Warning, "unreachable-name", "task %q starts with \"-\": run it as made -- %s (plain made %s and completion won't work)", t.Name, t.Name, t.Name)
 		}

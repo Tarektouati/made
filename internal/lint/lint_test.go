@@ -46,7 +46,7 @@ func TestCheck(t *testing.T) {
 		{name: "nesting", src: "### a\n" + strings.Repeat("> ", 257) + "\n", want: []finding{{2, Error, "nesting-too-deep"}}},
 		{name: "name altered", src: "### <b>build</b> all\n```bash\nx\n```\n", want: []finding{{1, Warning, "name-altered"}}},
 		{name: "escapes are not markup", src: "### a\\_b &amp; c\n```bash\nx\n```\n"},
-		{name: "reserved name", src: "### init\n```bash\nx\n```\n### completion\n```bash\nx\n```\n", want: []finding{{1, Warning, "unreachable-name"}, {5, Warning, "unreachable-name"}}},
+		{name: "reserved name", src: "### init\n```bash\nx\n```\n### completion\n```bash\nx\n```\n", want: []finding{{1, Error, "unreachable-name"}, {5, Error, "unreachable-name"}}},
 		{name: "dash name", src: "### -x\n```bash\nx\n```\n", want: []finding{{1, Warning, "unreachable-name"}}},
 		{name: "no code block", src: "### a\nprose\n## next\n```bash\nx\n```\n", want: []finding{{1, Warning, "no-code-block"}}},
 		{name: "fence-less code span heading", src: "### `--verbose`\nSome prose.\n", want: []finding{{1, Warning, "no-code-block"}}},
