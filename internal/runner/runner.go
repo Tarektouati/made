@@ -427,6 +427,16 @@ func pickInterpreter(cands []string) string {
 	return cands[0]
 }
 
+// lookInterpreter returns the first of cands that exec.LookPath finds, and its path.
+func lookInterpreter(cands []string) (name, path string, ok bool) {
+	for _, c := range cands {
+		if p, err := exec.LookPath(c); err == nil {
+			return c, p, true
+		}
+	}
+	return "", "", false
+}
+
 // Resolve reports whether the task's interpreter can be found on PATH the way Run
 // looks for it, without running anything. It returns nil when it is found, the error
 // Run would return when the interpreter is missing or not executable (an

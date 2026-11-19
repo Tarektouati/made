@@ -216,6 +216,17 @@ type fakeBin struct {
 func fakePath(t *testing.T, bins ...fakeBin) string {
 	t.Helper()
 	dir := t.TempDir()
+	writeBins(t, dir, bins...)
+	t.Setenv("PATH", dir)
+	return dir
+}
+
+// writeBins writes bins into dir, creating it if needed.
+func writeBins(t *testing.T, dir string, bins ...fakeBin) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
 	for _, b := range bins {
 		p := filepath.Join(dir, b.name)
 		if err := os.WriteFile(p, []byte(b.body), b.mode); err != nil {
@@ -225,8 +236,11 @@ func fakePath(t *testing.T, bins ...fakeBin) string {
 			t.Fatalf("chmod %s: %v", p, err)
 		}
 	}
-	t.Setenv("PATH", dir)
-	return dir
+}
+
+// pathList joins dirs into a PATH value.
+func pathList(dirs ...string) string {
+	return strings.Join(dirs, string(os.PathListSeparator))
 }
 
 func TestRunInterpreterStartErrors(t *testing.T) {
@@ -317,9 +331,11 @@ func TestResolve(t *testing.T) {
 		name     string
 		lang     string
 		bins     []fakeBin
+		dotBins  []fakeBin // when set, written to the working directory and "." put first on PATH
 		unixOnly bool
 		wantIs   error // nil: Resolve returns nil
 	}{
+		{name: "dot first", lang: "ruby", bins: []fakeBin{{"ruby", 0o755, "#!/bin/sh\nexit 0\n"}}, dotBins: []fakeBin{{"ruby", 0o755, "#!/bin/sh\nexit 7\n"}}, unixOnly: true},
 		{name: "ruby not found", lang: "ruby", wantIs: exec.ErrNotFound},
 		{name: "python not found", lang: "python", wantIs: exec.ErrNotFound},
 		{name: "plain fence not found", wantIs: exec.ErrNotFound},
@@ -332,7 +348,13 @@ func TestResolve(t *testing.T) {
 			if tt.unixOnly && runtime.GOOS == "windows" {
 				t.Skip("needs Unix permission bits and shebangs")
 			}
-			fakePath(t, tt.bins...)
+			dir := fakePath(t, tt.bins...)
+			if tt.dotBins != nil {
+				cwd := t.TempDir()
+				writeBins(t, cwd, tt.dotBins...)
+				t.Chdir(cwd)
+				t.Setenv("PATH", pathList(".", dir))
+			}
 			task := parser.Task{Name: "rb", Lang: tt.lang, Script: "x"}
 			err := Resolve(task)
 			if tt.wantIs == nil {
@@ -358,6 +380,226 @@ func TestResolve(t *testing.T) {
 func TestResolveUnsupported(t *testing.T) {
 	if err := Resolve(parser.Task{Name: "x", Lang: "cobol", Script: "x"}); err == nil || !strings.Contains(err.Error(), "unsupported language") {
 		t.Errorf("Resolve: error = %v, want unsupported language", err)
+	}
+}
+
+// TestRelativePathEntriesSkipped checks that Run and Resolve look interpreters up in
+// absolute PATH entries only: the fakes reached through ".", an empty entry, or "bin"
+// exit 7 and are never run, and when no absolute entry has the interpreter both
+// report it as not found.
+func TestRelativePathEntriesSkipped(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake interpreters are shell scripts")
+	}
+	const relBody, okBody = "#!/bin/sh\nexit 7\n", "#!/bin/sh\nexit 0\n"
+	rel := func(name string) fakeBin { return fakeBin{name, 0o755, relBody} }
+	bashNotFound := []string{`"bash" was not found on PATH`, `task "t"`, `"bash" (default for a plain fence)`}
+	tests := []struct {
+		name     string
+		lang     string
+		path     []string  // "abs" and "empty" stand for those directories
+		cwd      []fakeBin // in the working directory
+		cwdBin   []fakeBin // in its bin subdirectory
+		abs      []fakeBin
+		wantCode int // 0: both return nil; 127: both return the same *InterpreterError
+		want     []string
+	}{
+		{name: "dot first", path: []string{".", "abs"}, cwd: []fakeBin{rel("bash")}, abs: []fakeBin{{"bash", 0o755, okBody}}},
+		{name: "leading empty", path: []string{"", "abs"}, cwd: []fakeBin{rel("bash")}, abs: []fakeBin{{"bash", 0o755, okBody}}},
+		{name: "double separator", path: []string{"empty", "", "abs"}, cwd: []fakeBin{rel("bash")}, abs: []fakeBin{{"bash", 0o755, okBody}}},
+		{name: "relative dir", path: []string{"bin", "abs"}, cwdBin: []fakeBin{rel("bash")}, abs: []fakeBin{{"bash", 0o755, okBody}}},
+		{name: "trailing empty, none absolute", path: []string{"empty", ""}, cwd: []fakeBin{rel("bash")}, wantCode: 127, want: bashNotFound},
+		{name: "dot only, executable", path: []string{".", "empty"}, cwd: []fakeBin{rel("bash")}, wantCode: 127, want: bashNotFound},
+		{name: "dot only, not executable", path: []string{".", "empty"}, cwd: []fakeBin{{"bash", 0o644, relBody}}, wantCode: 127, want: bashNotFound},
+		{name: "relative dir only", path: []string{"bin", "empty"}, cwdBin: []fakeBin{rel("bash")}, wantCode: 127, want: bashNotFound},
+		{
+			name: "python3 found past dot", lang: "python", path: []string{".", "abs"},
+			cwd: []fakeBin{rel("python3")}, abs: []fakeBin{{"python3", 0o755, okBody}},
+		},
+		{
+			name: "python fallback past dot", lang: "python", path: []string{".", "abs"},
+			cwd: []fakeBin{rel("python3")}, abs: []fakeBin{{"python", 0o755, "#!/bin/sh\nexit 9\n"}}, wantCode: 9,
+		},
+		{
+			name: "python candidates only relative", lang: "python", path: []string{".", "empty"},
+			cwd: []fakeBin{rel("python3"), rel("python")}, wantCode: 127,
+			want: []string{`neither "python3" nor "python" was found on PATH`, `task "t"`, `language "python"`},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cwd, abs, empty := t.TempDir(), t.TempDir(), t.TempDir()
+			writeBins(t, cwd, tt.cwd...)
+			writeBins(t, filepath.Join(cwd, "bin"), tt.cwdBin...)
+			writeBins(t, abs, tt.abs...)
+			dirs := make([]string, len(tt.path))
+			for i, d := range tt.path {
+				switch d {
+				case "abs":
+					d = abs
+				case "empty":
+					d = empty
+				}
+				dirs[i] = d
+			}
+			t.Chdir(cwd)
+			t.Setenv("PATH", pathList(dirs...))
+
+			task := parser.Task{Name: "t", Lang: tt.lang, Script: "x"}
+			runErr := Run(context.Background(), nil, task, "", nil)
+			resErr := Resolve(task)
+			for _, err := range []error{runErr, resErr} {
+				if err != nil && strings.Contains(err.Error(), "relative to current directory") {
+					t.Fatalf("error = %q, want no exec.ErrDot", err)
+				}
+			}
+			switch tt.wantCode {
+			case 0:
+				if runErr != nil || resErr != nil {
+					t.Fatalf("Run: %v, Resolve: %v; want both nil", runErr, resErr)
+				}
+			case 127:
+				var ie *InterpreterError
+				if !errors.As(runErr, &ie) {
+					t.Fatalf("Run: error = %v (%T), want *InterpreterError", runErr, runErr)
+				}
+				if got := ie.ExitCode(); got != 127 {
+					t.Errorf("ExitCode = %d, want 127 (error: %v)", got, runErr)
+				}
+				for _, w := range tt.want {
+					if !strings.Contains(runErr.Error(), w) {
+						t.Errorf("Run: error = %q, want it to contain %q", runErr, w)
+					}
+				}
+				if resErr == nil || resErr.Error() != runErr.Error() {
+					t.Errorf("Resolve: error = %v, want Run's %q", resErr, runErr)
+				}
+			default:
+				wantExitCode(t, runErr, tt.wantCode)
+				if resErr != nil {
+					t.Errorf("Resolve: %v, want nil", resErr)
+				}
+			}
+		})
+	}
+}
+
+// TestRunBashVarIsAbsolute checks that bash gets the absolute path it was found at as
+// argv[0]: given a bare name, bash fills $BASH by searching PATH itself and would
+// point it at the ./bash that made skipped.
+func TestRunBashVarIsAbsolute(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake bash is a shell script")
+	}
+	requireCmd(t, "bash")
+	realBash, err := exec.LookPath("bash")
+	if err != nil || !filepath.IsAbs(realBash) {
+		t.Skipf("bash is not found through an absolute PATH entry (%q, %v)", realBash, err)
+	}
+	cwd := t.TempDir()
+	writeBins(t, cwd, fakeBin{"bash", 0o755, "#!/bin/sh\nexit 7\n"})
+	t.Chdir(cwd)
+	t.Setenv("PATH", pathList(".", filepath.Dir(realBash)))
+	out := filepath.Join(t.TempDir(), "bash-var")
+
+	task := parser.Task{Name: "t", Lang: "bash", Script: `printf %s "$BASH" > "$1"`}
+	if runErr := Run(context.Background(), nil, task, "", []string{out}); runErr != nil {
+		t.Fatalf("Run: %v", runErr)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != realBash {
+		t.Errorf("$BASH = %q, want %q", got, realBash)
+	}
+}
+
+// TestLookInterpreter checks the PATH lookup itself, on every OS: only absolute
+// entries are searched, and on Windows neither is the current directory.
+func TestLookInterpreter(t *testing.T) {
+	ext := ""
+	if runtime.GOOS == "windows" {
+		ext = ".exe"
+		t.Setenv("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+	}
+	bin := func(name string) fakeBin { return fakeBin{name + ext, 0o755, "#!/bin/sh\nexit 0\n"} }
+	tests := []struct {
+		name        string
+		cands       []string
+		path        []string // "abs", "abs2" and "empty" stand for those directories
+		abs, abs2   []fakeBin
+		windowsOnly bool
+		pathext     string
+		wantName    string // "": not found
+		wantDir     string // "abs" or "abs2"
+		wantFile    string
+	}{
+		{name: "dot first", cands: []string{"bash"}, path: []string{".", "abs"}, abs: []fakeBin{bin("bash")}, wantName: "bash", wantDir: "abs"},
+		{name: "leading empty", cands: []string{"bash"}, path: []string{"", "abs"}, abs: []fakeBin{bin("bash")}, wantName: "bash", wantDir: "abs"},
+		{name: "double separator", cands: []string{"bash"}, path: []string{"empty", "", "abs"}, abs: []fakeBin{bin("bash")}, wantName: "bash", wantDir: "abs"},
+		{name: "relative dir", cands: []string{"bash"}, path: []string{"bin", "abs"}, abs: []fakeBin{bin("bash")}, wantName: "bash", wantDir: "abs"},
+		{name: "dot only", cands: []string{"bash"}, path: []string{".", "empty"}},
+		{name: "trailing empty", cands: []string{"bash"}, path: []string{"empty", ""}},
+		{name: "relative dir only", cands: []string{"bash"}, path: []string{"bin"}},
+		{name: "current directory not searched", cands: []string{"bash"}, path: []string{"empty"}},
+		{
+			name: "candidate order wins over PATH order", cands: []string{"python3", "python"}, path: []string{".", "abs", "abs2"},
+			abs: []fakeBin{bin("python")}, abs2: []fakeBin{bin("python3")}, wantName: "python3", wantDir: "abs2",
+		},
+		{
+			name: "PATHEXT", cands: []string{"bash"}, path: []string{".", "abs"}, windowsOnly: true, pathext: ".BAT",
+			abs: []fakeBin{{"bash.bat", 0o755, ""}}, wantName: "bash", wantDir: "abs", wantFile: "bash.bat",
+		},
+		{
+			name: "quoted entry", cands: []string{"bash"}, path: []string{".", `"abs"`}, windowsOnly: true,
+			abs: []fakeBin{bin("bash")}, wantName: "bash", wantDir: "abs",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.windowsOnly && runtime.GOOS != "windows" {
+				t.Skip("Windows PATH semantics")
+			}
+			if tt.pathext != "" {
+				t.Setenv("PATHEXT", tt.pathext)
+			}
+			cwd, empty := t.TempDir(), t.TempDir()
+			dirs := map[string]string{"abs": t.TempDir(), "abs2": t.TempDir(), "empty": empty}
+			// Every candidate is also in the working directory and its bin subdirectory.
+			for _, c := range tt.cands {
+				writeBins(t, cwd, bin(c))
+				writeBins(t, filepath.Join(cwd, "bin"), bin(c))
+			}
+			writeBins(t, dirs["abs"], tt.abs...)
+			writeBins(t, dirs["abs2"], tt.abs2...)
+			entries := make([]string, len(tt.path))
+			for i, d := range tt.path {
+				if d == `"abs"` {
+					d = `"` + dirs["abs"] + `"`
+				} else if p, ok := dirs[d]; ok {
+					d = p
+				}
+				entries[i] = d
+			}
+			t.Chdir(cwd)
+			t.Setenv("PATH", pathList(entries...))
+
+			name, path, ok := lookInterpreter(tt.cands)
+			if tt.wantName == "" {
+				if ok {
+					t.Fatalf("lookInterpreter(%q) = %q, %q; want not found", tt.cands, name, path)
+				}
+				return
+			}
+			file := tt.wantFile
+			if file == "" {
+				file = tt.wantName + ext
+			}
+			if want := filepath.Join(dirs[tt.wantDir], file); !ok || name != tt.wantName || path != want {
+				t.Fatalf("lookInterpreter(%q) = %q, %q, %v; want %q, %q, true", tt.cands, name, path, ok, tt.wantName, want)
+			}
+		})
 	}
 }
 
