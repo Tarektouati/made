@@ -45,6 +45,31 @@ function __made_no_positional
     test (count (__made_positional)) -eq 0
 end
 
+# __made_check_mode succeeds when --check, --strict or --host is on the line before
+# the first positional word: --check takes no task, and the other two need --check.
+function __made_check_mode
+    set -l tokens (commandline -opc)
+    set -e tokens[1]
+    while set -q tokens[1]
+        switch $tokens[1]
+            case -f -file --file
+                set -e tokens[1]
+            case -check --check -strict --strict -host --host '-check=*' '--check=*' '-strict=*' '--strict=*' '-host=*' '--host=*'
+                return 0
+            case '-*'
+            case '*'
+                return 1
+        end
+        set -e tokens[1]
+    end
+    return 1
+end
+
+# __made_task_start succeeds where a task name, init or completion may come.
+function __made_task_start
+    __made_no_positional; and not __made_check_mode
+end
+
 # __made_list_names runs made --list-names, which gives up parsing after 1.5s;
 # timeout(1), where present, adds a 2s wall-time limit on top.
 function __made_list_names
@@ -83,12 +108,12 @@ complete -c made -n __made_no_positional -l no-chdir -d 'Run the task in the cur
 complete -c made -n __made_no_positional -l check -d 'Check the task file for problems'
 complete -c made -n __made_no_positional -l strict -d 'With --check, fail on warnings too'
 complete -c made -n __made_no_positional -l host -d 'With --check, also check that interpreters are on PATH'
-complete -c made -n __made_no_positional -s l -l list -d 'List available tasks'
-complete -c made -n __made_no_positional -s V -l version -d 'Print version and exit'
+complete -c made -n __made_task_start -s l -l list -d 'List available tasks'
+complete -c made -n __made_task_start -s V -l version -d 'Print version and exit'
 complete -c made -n __made_no_positional -s h -l help -d 'Show help'
-complete -c made -n __made_no_positional -a '(__made_tasks)'
-complete -c made -n __made_no_positional -a init -d 'Create a starter Madefile.md'
-complete -c made -n __made_no_positional -a completion -d 'Print a shell completion script'
+complete -c made -n __made_task_start -a '(__made_tasks)'
+complete -c made -n __made_task_start -a init -d 'Create a starter Madefile.md'
+complete -c made -n __made_task_start -a completion -d 'Print a shell completion script'
 complete -c made -n __made_completion_shell -a 'bash zsh fish'
 complete -c made -n __made_after_init -l force -d 'Overwrite an existing Madefile'
 complete -c made -n __made_in_task -F

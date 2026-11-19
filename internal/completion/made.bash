@@ -73,16 +73,21 @@ __made_list_names() {
 _made() {
     local -a words=() fileargs=()
     local cword cur prev
-    local i w first="" firstidx=0
+    local i w first="" firstidx=0 checkmode=0
     COMPREPLY=()
     __made_words
 
-    # Scan the words before the cursor for a -f/--file value and the first positional
-    # word. Go's flag package stops at the first non-flag, like this loop. bash splits
-    # "--file=x" into "--file" "=" "x" by default (COMP_WORDBREAKS), so handle both.
+    # Scan the words before the cursor for a -f/--file value, the --check flags and the
+    # first positional word. Go's flag package stops at the first non-flag, like this
+    # loop. bash splits "--file=x" into "--file" "=" "x" by default (COMP_WORDBREAKS),
+    # so handle both.
     for ((i = 1; i < cword; i++)); do
         w=${words[i]}
         case $w in
+            -check | --check | -strict | --strict | -host | --host | \
+                -check=* | --check=* | -strict=* | --strict=* | -host=* | --host=*)
+                checkmode=1
+                ;;
             -f | -file | --file)
                 if [[ ${words[i+1]} == "=" ]]; then
                     ((i++))
@@ -138,6 +143,16 @@ _made() {
             esac
             ;;
     esac
+
+    # --check takes no task, and --strict and --host need --check: offer only the
+    # flags --check accepts, and no file names.
+    if ((checkmode)); then
+        compopt +o default 2>/dev/null
+        if [[ $cur == -* ]]; then
+            COMPREPLY=($(compgen -W "-f --file --no-chdir --check --strict --host -h --help" -- "$cur"))
+        fi
+        return 0
+    fi
 
     if [[ $cur == -* ]]; then
         COMPREPLY=($(compgen -W "-f --file --no-chdir --check --strict --host -l --list -V --version -h --help" -- "$cur"))

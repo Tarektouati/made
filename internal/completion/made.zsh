@@ -50,8 +50,8 @@ _made() {
     '(-f -file --file)'{-f+,-file=,--file=}'[Markdown file to read tasks from]:file:_files' \
     '--no-chdir[run the task in the current directory]' \
     '(-l --list -V --version 1 *)--check[check the task file for problems]' \
-    '--strict[with --check, fail on warnings too]' \
-    '--host[with --check, also check that interpreters are on PATH]' \
+    '(-l --list -V --version 1 *)--strict[with --check, fail on warnings too]' \
+    '(-l --list -V --version 1 *)--host[with --check, also check that interpreters are on PATH]' \
     '(-l --list)'{-l,--list}'[list available tasks]' \
     '(- *)'{-V,--version}'[print version and exit]' \
     '(- *)'{-h,--help}'[show help]' \
