@@ -105,8 +105,9 @@ The code fence's language selects the interpreter. Matching is case-insensitive.
 | `ruby` | `ruby -e` |
 | `perl` | `perl -e` |
 
-Shell tasks run in strict mode and stop at the first failing command. More: python
-fallback, fence info strings, and strict mode in [docs/languages.md](docs/languages.md).
+`bash`, `sh`, and `zsh` tasks run in strict mode and stop at the first failing
+command; `fish` tasks don't. More: python fallback, fence info strings, strict mode,
+and fish failures in [docs/languages.md](docs/languages.md).
 
 ## Example output
 
