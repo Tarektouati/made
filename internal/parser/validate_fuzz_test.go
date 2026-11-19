@@ -33,11 +33,34 @@ func astDepth(source []byte) int {
 	return maxDepth
 }
 
+// acceptedSeeds are fuzz seeds the scan accepts at fuzzLimit, so the fuzz test
+// compares them with goldmark. They cover lines the scan counts below their marker
+// count.
+var acceptedSeeds = []string{
+	"- - - - - - - -\n",
+	"- - - - - - * * *\n",
+	"> > > > > > - - -\n",
+	"-\t-\t-\t-\t-\t-\t-\n",
+	"- - - x\n      - - - -\n",
+}
+
+func TestAcceptedSeedsPassScan(t *testing.T) {
+	for _, seed := range acceptedSeeds {
+		if err := validateNestingLimit([]byte(seed), fuzzLimit); err != nil {
+			t.Errorf("validateNestingLimit(%q) = %v, want nil", seed, err)
+		}
+	}
+}
+
 // FuzzValidateNesting checks the nesting scan never accepts a document that goldmark
 // nests deeper than the limit. A difference means lineNestingDepth undercounts some
 // line. The seeds include inputs that got past earlier versions of the scan.
 func FuzzValidateNesting(f *testing.F) {
+	for _, seed := range acceptedSeeds {
+		f.Add([]byte(seed))
+	}
 	for _, seed := range []string{
+		"- - - - - - - * * *\n",
 		"> > > > > > > x\n",
 		"- - - - - - - x\n",
 		"1. 2. 3) - > + x\n",

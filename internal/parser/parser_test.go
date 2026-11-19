@@ -446,7 +446,7 @@ func TestParseRejectsDeepBlockquoteNesting(t *testing.T) {
 }
 
 func TestParseRejectsDeepBulletRun(t *testing.T) {
-	_, err := Parse(repeatToken("- ", maxNestingDepth+1))
+	_, err := Parse([]byte(strings.Repeat("- ", maxNestingDepth+1) + "x\n"))
 	if err == nil {
 		t.Fatal("Parse: nil error, want nesting too deep")
 	}
@@ -699,6 +699,41 @@ func TestParseCountsMarkersInsideFences(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var nest *NestingError
 			if _, err := Parse([]byte(tc.src)); !errors.As(err, &nest) {
+				t.Fatalf("Parse error = %v, want *NestingError", err)
+			}
+		})
+	}
+}
+
+// TestParseThematicBreakDoesNotNest checks a run of "-" or "*" markers that forms a
+// thematic break adds no depth: goldmark tries a thematic break before a list item.
+func TestParseThematicBreakDoesNotNest(t *testing.T) {
+	for _, tc := range []struct{ name, line string }{
+		{"dashes", strings.Repeat("- ", 257)},
+		{"stars", strings.Repeat("* ", 257)},
+		{"tab-separated dashes", strings.Repeat("-\t", 257)},
+		{"after blockquotes", strings.Repeat("> ", 10) + strings.Repeat("- ", 300)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "### t\n" + tc.line + "\n```bash\necho ok\n```\n"
+			if _, err := Parse([]byte(src)); err != nil {
+				t.Errorf("Parse: %v, want nil", err)
+			}
+		})
+	}
+}
+
+// TestParseRejectsDeepNestingBeforeThematicBreak checks markers before a thematic
+// break, or runs that are not one, still count.
+func TestParseRejectsDeepNestingBeforeThematicBreak(t *testing.T) {
+	for _, tc := range []struct{ name, line string }{
+		{"blockquotes then a break", strings.Repeat("> ", maxNestingDepth+1) + "- - -"},
+		{"mixed markers", strings.Repeat("- * ", 200) + "x"},
+		{"stars then text", strings.Repeat("* ", maxNestingDepth+1) + "x"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var nest *NestingError
+			if _, err := Parse([]byte(tc.line + "\n")); !errors.As(err, &nest) {
 				t.Fatalf("Parse error = %v, want *NestingError", err)
 			}
 		})

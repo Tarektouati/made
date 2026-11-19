@@ -59,14 +59,19 @@ func trimCR(b []byte) []byte {
 // and they count after any indent: inside a list item, "    > > >" is a run of
 // blockquotes. A line continues a list item only when it is indented to the item's
 // content, and each nested item adds at least two columns ("- "). A blockquote
-// continues only with its own ">" marker.
+// continues only with its own ">" marker. A thematic break ("- - -", "* * *") counts
+// as text: at every block start goldmark tries it before a list item, and it opens
+// no container.
 func lineNestingDepth(line []byte) int {
 	// pending is whitespace not yet followed by a marker or text. Trailing
 	// whitespace cannot continue a list item, so a blank line adds no depth.
 	markers, ws, pending, col := 0, 0, 0, 0
+	tbMark, tbFrom, tbTo := thematicBreakRange(line)
 	i := 0
 	for i < len(line) {
 		switch c := line[i]; {
+		case c == tbMark && i >= tbFrom && i <= tbTo:
+			return markers + (ws+pending)/2
 		case c == ' ':
 			pending++
 			col++
@@ -100,6 +105,35 @@ func lineNestingDepth(line []byte) int {
 		}
 	}
 	return markers + ws/2
+}
+
+// thematicBreakRange finds the positions i from which line[i:] is a thematic break
+// when line[i] is mark: three or more of the same "-" or "*", with only spaces or
+// tabs between and after them. They are tbFrom..tbTo; tbTo is -1 when there are none.
+// Computing the range once keeps the scan linear on long lines of markers.
+func thematicBreakRange(line []byte) (mark byte, tbFrom, tbTo int) {
+	tbTo = -1
+	n := 0
+	for i := len(line) - 1; i >= 0; i-- {
+		c := line[i]
+		if isSpaceOrTab(c) {
+			continue
+		}
+		if mark == 0 {
+			if c != '-' && c != '*' {
+				return 0, 0, -1
+			}
+			mark = c
+		}
+		if c != mark {
+			break
+		}
+		if n++; n == 3 {
+			tbTo = i
+		}
+		tbFrom = i
+	}
+	return mark, tbFrom, tbTo
 }
 
 // skipMarkerSpace steps over the one space or tab that belongs to the container

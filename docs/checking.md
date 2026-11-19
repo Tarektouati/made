@@ -45,7 +45,8 @@ container marker plus half of the indentation (each nested list level needs at
 least two columns). It errs on the strict side and checks every line, including
 lines inside code blocks and HTML: a line starting with more than 256 `>`, `-` or
 `1.` markers, or a non-blank line indented 514 columns or more, is reported even
-when it isn't nested. Blank lines never count, however wide.
+when it isn't nested. Blank lines never count, however wide, and neither does a
+thematic break (a line of `- - -` or `* * *`), however long.
 
 `script-too-large` uses the limit of the OS `made --check` runs on. Linux caps a
 single argument at 128 KiB (counted in bytes), and macOS is checked against the
