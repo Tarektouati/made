@@ -740,6 +740,60 @@ func TestRunWarnsOnUnusableMadefile(t *testing.T) {
 	}
 }
 
+// TestRunFailsOnUnreadableMadefile checks that a Madefile found but not readable
+// stops discovery with an error instead of falling back to a parent's Madefile.
+func TestRunFailsOnUnreadableMadefile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no mode 000 file")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root can read a mode 000 file")
+	}
+	tests := []struct {
+		name string
+		bad  func(t *testing.T, sub string) // makes sub/Madefile.md unreadable
+	}{
+		{"mode 000 file", func(t *testing.T, sub string) {
+			mkUnreadable(t, filepath.Join(sub, "Madefile.md"))
+		}},
+		{"symlink to mode 000 file", func(t *testing.T, sub string) {
+			mkUnreadable(t, filepath.Join(sub, "real.md"))
+			mkSymlink(t, "real.md", filepath.Join(sub, "Madefile.md"))
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			mkTree(t, dir, ".git/", "sub/")
+			content := "# Tasks\n\n### hello\n```bash\necho outer\n```\n"
+			if err := os.WriteFile(filepath.Join(dir, "Madefile.md"), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			sub := filepath.Join(dir, "sub")
+			tt.bad(t, sub)
+			t.Chdir(sub)
+			var stdout, stderr bytes.Buffer
+			code := run([]string{"hello"}, &stdout, &stderr)
+			if code != 1 {
+				t.Errorf("run(hello) = %d, want 1 (stderr: %s)", code, stderr.String())
+			}
+			checkContains(t, "stderr", stderr.String(), []string{"made: cannot read Madefile.md: permission denied"}, true)
+			checkContains(t, "stderr", stderr.String(), []string{"made: skipping ", "made: using "}, false)
+		})
+	}
+}
+
+// mkUnreadable creates a Madefile at path with mode 000.
+func mkUnreadable(t *testing.T, path string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte("### t\n```bash\necho inner\n```\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunRejectsNonRegularExplicitFile(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("FIFOs are not supported on Windows")
