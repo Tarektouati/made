@@ -50,6 +50,8 @@ therefore resolve the same way wherever you invoke `made`:
 where the file was found (or the directory of the `-f` path as written): if the
 Madefile is a symlink, the task runs next to the link, not in the directory of
 its target. Pass `--no-chdir` to run the task in the current directory instead.
+A task file read from a pipe or a device (`-f /dev/stdin`) has no directory of its
+own, so its tasks always run in the current directory.
 
 **Finding the task file.** Without `-f`, `made` looks for a file named
 `Madefile.md`, `madefile.md`, or `MADEFILE.md` — matched exactly, so macOS and
@@ -86,7 +88,13 @@ you pass `-f README.md`.
 An explicit `-f` path is relative to the current directory, read exactly as given,
 and never looked up in parent directories. An empty value (for example
 `-f "$UNSET_VAR"`) is an error (exit `2`); `made` never falls back to discovery
-when `-f` is given.
+when `-f` is given. Unlike discovery, which only uses regular files, `-f` reads
+anything readable but a directory: a pipe (`made -f <(gen-tasks) -l`, `cat
+tasks.md | made -f /dev/stdin -l`) or a device. Opening a named pipe with no writer
+waits for one, like `cat`, and the 10 MiB limit still applies. A task read from a
+pipe or a device runs in the current directory, as with `--no-chdir`. `--list-names`
+(used by tab completion) still only reads a regular file, so completion fails at
+once instead of waiting on a pipe or reading the terminal.
 
 **Signals.** On `SIGINT`, `SIGTERM`, `SIGHUP` (for example, a closed SSH session or
 terminal) or `SIGQUIT`, `made` tears down the whole task, not just the interpreter: the task runs in its own process group, which is sent `SIGTERM`,

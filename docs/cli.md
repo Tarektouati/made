@@ -14,7 +14,7 @@ made completion <bash|zsh|fish>
 
 | Flag | Default | Description |
 |---|---|---|
-| `-f`, `--file` | nearest `Madefile.md` | Markdown file to read tasks from. Without `-f`, `made` uses the `Madefile.md` in the current directory or the closest parent directory, up to the repository root (or the filesystem root outside a repository; see [How it works](how-it-works.md)) |
+| `-f`, `--file` | nearest `Madefile.md` | Markdown file to read tasks from: any readable file but a directory, including a pipe (`-f <(…)`, `-f /dev/stdin`), whose tasks run in the current directory. Without `-f`, `made` uses the `Madefile.md` in the current directory or the closest parent directory, up to the repository root (or the filesystem root outside a repository; see [How it works](how-it-works.md)) |
 | `--no-chdir` | | Run the task in the current directory instead of the task file's directory |
 | `--check` | | Check the task file for problems instead of running a task; see [Checking a Madefile](checking.md) |
 | `--strict` | | With `--check`, fail on warnings too |
