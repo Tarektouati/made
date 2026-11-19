@@ -3,6 +3,7 @@ package parser
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -127,6 +128,18 @@ func TestParseFirstCodeBlockWins(t *testing.T) {
 	}
 	if tasks[0].Script != "echo first\n" {
 		t.Errorf("Script = %q, want first block", tasks[0].Script)
+	}
+}
+
+func TestParseEmptyFirstBlockIsScript(t *testing.T) {
+	src := []byte("### empty\nAbout it.\n```bash\n```\nNot a description.\n```bash\necho real\n```\n")
+	tasks, err := Parse(src)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	want := []Task{{Name: "empty", Description: "About it.", Lang: "bash", Script: ""}}
+	if !reflect.DeepEqual(tasks, want) {
+		t.Errorf("tasks = %+v, want %+v", tasks, want)
 	}
 }
 
