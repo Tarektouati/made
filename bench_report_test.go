@@ -23,12 +23,12 @@ func TestBenchReportGoSignificance(t *testing.T) {
 		row  string
 		want string
 	}{
-		{"significant but below floor", "Parse-4,1000000,±1%,1005000,±1%,+0.50%,p=0.000 n=10", "| no |"},
-		{"regression above floor", "Parse-4,1000000,±1%,1025000,±1%,+2.50%,p=0.000 n=10", "regression"},
-		{"improvement above floor", "Parse-4,1000000,±1%,970000,±1%,-3.00%,p=0.000 n=10", "improvement"},
-		{"exactly at floor", "Parse-4,1000000,±1%,1020000,±1%,+2.00%,p=0.000 n=10", "regression"},
-		{"large but not significant", "Parse-4,1000000,±1%,1050000,±1%,~,p=0.200 n=10", "| no |"},
-		{"missing on head", "Parse-4,1000000,±1%,,,,", "missing on head"},
+		{"significant but below floor", "Parse-4,1000000,±1%,1005000,±1%,+0.50%,p=0.000 n=10", "no"},
+		{"regression above floor", "Parse-4,1000000,±1%,1025000,±1%,+2.50%,p=0.000 n=10", "⚠️ **regression**"},
+		{"improvement above floor", "Parse-4,1000000,±1%,970000,±1%,-3.00%,p=0.000 n=10", "✅ improvement"},
+		{"exactly at floor", "Parse-4,1000000,±1%,1020000,±1%,+2.00%,p=0.000 n=10", "⚠️ **regression**"},
+		{"large but not significant", "Parse-4,1000000,±1%,1050000,±1%,~,p=0.200 n=10", "no"},
+		{"missing on head", "Parse-4,1000000,±1%,,,,", "⚠️ **missing on head**"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -65,8 +65,9 @@ func TestBenchReportGoSignificance(t *testing.T) {
 					row = line
 				}
 			}
-			if !strings.Contains(row, tc.want) {
-				t.Errorf("go bench row = %q, want it to contain %q\nfull output:\n%s", row, tc.want, out)
+			cells := strings.Split(strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(row), "| "), " |"), " | ")
+			if got := cells[len(cells)-1]; len(cells) != 5 || got != tc.want {
+				t.Errorf("go bench row = %q, want 5 cells with verdict %q\nfull output:\n%s", row, tc.want, out)
 			}
 			if !strings.Contains(string(out), "2% or more") {
 				t.Errorf("footnote does not mention the 2%% floor:\n%s", out)
