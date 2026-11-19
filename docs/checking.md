@@ -27,6 +27,7 @@ these exit with `2`.
 | `unsupported-language` | error | The code block's language isn't one of the [supported languages](languages.md) |
 | `empty-name` | error | The heading's name is empty, e.g. `### <br>` (HTML tags are not part of the name) |
 | `empty-script` | error | The task's code block is empty or blank |
+| `unreachable-name` | error | The name is `init` or `completion`, which `made` reserves, so the task can never run |
 | `nul-byte` | error | The script contains a NUL byte, which can't be run |
 | `script-too-large` | error | The script is too large to pass to its interpreter as a command-line argument: 128 KiB on Linux and macOS, 32,767 UTF-16 characters on Windows (see below) |
 | `nesting-too-deep` | error | Lists or blockquotes nest deeper than 256 levels |
@@ -34,7 +35,7 @@ these exit with `2`.
 | `interpreter-not-found` | error | Only with `--host`: the task's interpreter (for example `ruby` for a `ruby` block) is not on PATH, or is there but not executable |
 | `parse-timeout` | error | Parsing the file took longer than 1.5 s (see [How it works](how-it-works.md)) |
 | `name-altered` | warning | The heading has HTML tags or an image, which the task name leaves out (an image becomes its alt text), so the name differs from what it shows. Code spans, emphasis and links keep their text and are not flagged |
-| `unreachable-name` | warning | The name is `init` or `completion` (reserved), or starts with `-` (run it as `made -- -x`) |
+| `unreachable-name` | warning | The name starts with `-`, so it runs only as `made -- -x` |
 | `no-code-block` | warning | An H3 heading has no code block before the next heading, so it isn't a task |
 | `extra-code-block` | warning | A task has more than one code block; only the first runs |
 | `docs-fence` | warning | The task's code block is `markdown`, `md`, `text`, `txt`, `plaintext`, `console` or `output`, so it is probably documentation |
