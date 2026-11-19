@@ -79,6 +79,12 @@ never runs a command substitution such as `$(...)` from the command line. A vari
 with the same name as a local of the shell's completion system may not expand: in
 zsh, for example, `$name`, `$line`, `$i` or `$REPLY`.
 
+All three shells insert a task name quoted, so a name with spaces, quotes or `$(...)`
+is one literal word on the command line and never runs anything. bash escapes it
+(`with\ space`), or quotes it to match a quote you opened (`'with space'`). The part
+you typed may be quoted or escaped too: `with\ s`, `'with s`, `"with s` and `ns\:t`
+all complete.
+
 To get task names, the scripts run `made [-f file] --list-names`, which prints one
 `name<TAB>description` line per task with no header, leaving out tasks with an empty
 name. The flag is meant for the scripts and is not shown in `made --help`. It only
