@@ -30,6 +30,9 @@ character is `-` or `+` gets a single leading space prepended (except for `pytho
 that would be an indentation error), so the interpreter doesn't read it as an
 option; line numbers are unaffected. A script containing a NUL byte can't be passed as an
 argument, so `made` refuses it with an error giving its line within the script.
+A task whose code block is empty or holds only whitespace is refused with an error
+too, before anything runs; a later code block under the same heading is still
+ignored.
 
 Because the script is a single command-line argument, the OS caps its size: 128 KiB
 per argument on Linux, about 1 MiB of total arguments on macOS, and about 32K
