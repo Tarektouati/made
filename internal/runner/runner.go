@@ -196,7 +196,7 @@ func Run(ctx context.Context, force <-chan struct{}, t parser.Task, dir string, 
 	lang := NormalizeLang(t.Lang)
 	in, ok := interpreters[lang]
 	if !ok {
-		return fmt.Errorf("unsupported language %q; supported: %s", t.Lang, supportedLanguages())
+		return unsupportedError(t)
 	}
 	if i := strings.IndexByte(t.Script, 0); i >= 0 {
 		return fmt.Errorf("task %q: script contains a NUL byte (line %d of the script)", t.Name, strings.Count(t.Script[:i], "\n")+1)
@@ -219,8 +219,8 @@ func Run(ctx context.Context, force <-chan struct{}, t parser.Task, dir string, 
 
 	if err := cmd.Start(); err != nil {
 		if argListTooLong(err) {
-			return fmt.Errorf("task %q: script is %d bytes, too large to pass to %q as a command-line argument (the OS limit is about %d bytes); move the bulk of it into a file the task runs: %w",
-				t.Name, len(t.Script), filepath.Base(cmd.Path), argLimit, err)
+			return fmt.Errorf("task %q: script is %d %s, too large to pass to %q as a command-line argument (the OS limit is about %d %s); move the bulk of it into a file the task runs: %w",
+				t.Name, ScriptLen(t.Lang, t.Script), ArgUnit, filepath.Base(cmd.Path), ArgLimit, ArgUnit, err)
 		}
 		return startError(err, cmd, cands, t)
 	}
@@ -316,6 +316,11 @@ func inlineScript(in interpreter, script string) string {
 		return " " + script
 	}
 	return script
+}
+
+// unsupportedError is the error for a task whose fence language Run does not accept.
+func unsupportedError(t parser.Task) error {
+	return fmt.Errorf("unsupported language %q; supported: %s", t.Lang, supportedLanguages())
 }
 
 // supportedLanguages returns the named languages, sorted, for error messages; the
@@ -417,26 +422,67 @@ func pickInterpreter(cands []string) string {
 	return cands[0]
 }
 
+// Resolve reports whether the task's interpreter can be found on PATH the way Run
+// looks for it, without running anything. It returns nil when it is found, the error
+// Run would return when the interpreter is missing or not executable (an
+// *InterpreterError), or an unsupported-language error. An interpreter that is found
+// can still fail to start, e.g. through a broken #! line.
+func Resolve(t parser.Task) error {
+	lang := NormalizeLang(t.Lang)
+	in, ok := interpreters[lang]
+	if !ok {
+		return unsupportedError(t)
+	}
+	cands := append([]string{in.cmd}, fallbacks[lang]...)
+	_, err := exec.LookPath(pickInterpreter(cands))
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, exec.ErrNotFound):
+		return notFoundError(cands, t)
+	default:
+		return err
+	}
+}
+
+// ScriptLen returns the size of a script in the fence language lang once passed to its
+// interpreter, in ArgUnit as the OS counts it against ArgLimit: it includes the pad
+// added to a script starting with "-" or "+". An unsupported language gets no pad.
+func ScriptLen(lang, script string) int {
+	if in, ok := interpreters[NormalizeLang(lang)]; ok {
+		script = inlineScript(in, script)
+	}
+	return argLen(script)
+}
+
+// ScriptTooLarge reports whether ScriptLen is at least ArgLimit, so Run cannot start
+// the script on Linux or Windows. It is false for an unsupported language.
+func ScriptTooLarge(lang, script string) bool {
+	return Supported(lang) && ScriptLen(lang, script) >= ArgLimit
+}
+
 // startError turns a cmd.Start failure into an *InterpreterError when the interpreter
 // was missing, not executable, or could not be executed; other errors pass through.
 func startError(err error, cmd *exec.Cmd, cands []string, t parser.Task) error {
-	ie := &InterpreterError{Cmd: cands[0], Fallbacks: cands[1:], Task: t.Name, Lang: t.Lang, Err: err}
 	if errors.Is(err, exec.ErrNotFound) {
-		ie.Err = exec.ErrNotFound
-		for _, c := range cands {
-			if p := findNonExecutable(c); p != "" {
-				ie.Cmd, ie.Fallbacks, ie.Path, ie.Err, ie.NotExecutable = c, nil, p, fs.ErrPermission, true
-				break
-			}
-		}
-		return ie
+		return notFoundError(cands, t)
 	}
 	var pathErr *fs.PathError
 	if errors.As(err, &pathErr) && pathErr.Op == "fork/exec" {
-		ie.Cmd, ie.Fallbacks, ie.Path, ie.Err = filepath.Base(cmd.Args[0]), nil, cmd.Path, pathErr.Err
-		return ie
+		return &InterpreterError{Cmd: filepath.Base(cmd.Args[0]), Path: cmd.Path, Task: t.Name, Lang: t.Lang, Err: pathErr.Err}
 	}
 	return err
+}
+
+// notFoundError returns the *InterpreterError for none of cands being on PATH: a
+// not-executable one when a file named after a candidate is on PATH anyway.
+func notFoundError(cands []string, t parser.Task) *InterpreterError {
+	for _, c := range cands {
+		if p := findNonExecutable(c); p != "" {
+			return &InterpreterError{Cmd: c, Path: p, Task: t.Name, Lang: t.Lang, Err: fs.ErrPermission, NotExecutable: true}
+		}
+	}
+	return &InterpreterError{Cmd: cands[0], Fallbacks: cands[1:], Task: t.Name, Lang: t.Lang, Err: exec.ErrNotFound}
 }
 
 // findNonExecutable returns the first regular file named name in a PATH directory, or

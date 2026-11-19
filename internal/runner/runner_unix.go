@@ -247,10 +247,16 @@ func descendants(root int, ppid map[int]int) []int {
 	return out
 }
 
-// argLimit is the approximate size, in bytes, above which a script can no longer be
+// ArgLimit is the approximate size, in bytes, above which a script can no longer be
 // passed as an argument: Linux caps a single argument at 128 KiB (MAX_ARG_STRLEN), and
 // macOS's total limit (ARG_MAX) is larger.
-const argLimit = 128 << 10
+const ArgLimit = 128 << 10
+
+// ArgUnit names the unit of ArgLimit and argLen, for messages.
+const ArgUnit = "bytes"
+
+// argLen returns the size of s as the OS counts it against ArgLimit.
+func argLen(s string) int { return len(s) }
 
 // argListTooLong reports whether err is the kernel rejecting exec arguments as too large.
 func argListTooLong(err error) bool { return errors.Is(err, syscall.E2BIG) }
