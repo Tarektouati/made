@@ -44,7 +44,8 @@ it is safe to edit or delete. Local `dev` builds leave it out.
 
 **`made init --force`** overwrites the existing file with the starter template
 instead, keeping its name (so a `madefile.md` stays `madefile.md`), and prints
-`made: overwrote <name>`. If several Madefile names exist, only the one `made`
+`made: overwrote <name>`. The file is rewritten in place, so if it is a hard link,
+every other name for it shows the template too. If several Madefile names exist, only the one `made`
 reads (`Madefile.md`, then `madefile.md`, then `MADEFILE.md`) is overwritten; the
 others are named on stderr and left unchanged. Directories with these names are
 not Madefiles and are never overwritten. A Madefile name that is a **symlink** is
