@@ -48,8 +48,15 @@ var docsLangs = []string{"markdown", "md", "text", "txt", "plaintext", "console"
 // reservedNames are task names made handles itself, so the task never runs.
 var reservedNames = []string{"init", "completion"}
 
+// Options selects the optional checks of Check.
+type Options struct {
+	// Host adds the checks that depend on this machine rather than on the file and the
+	// OS: interpreter-not-found, from looking each task's interpreter up on PATH.
+	Host bool
+}
+
 // Check reports the problems in a task file's source, sorted by line.
-func Check(src []byte) []Diagnostic {
+func Check(src []byte, opts Options) []Diagnostic {
 	tasks, err := parser.ParseDetailed(src)
 	if err != nil {
 		var nest *parser.NestingError
@@ -63,7 +70,8 @@ func Check(src []byte) []Diagnostic {
 	add := func(line int, sev Severity, rule, format string, args ...any) {
 		diags = append(diags, Diagnostic{line, sev, rule, fmt.Sprintf(format, args...)})
 	}
-	defined := map[string]int{} // task name -> line of its first definition
+	defined := map[string]int{}    // task name -> line of its first definition
+	resolved := map[string]error{} // normalized language -> runner.Resolve's result
 
 	for _, t := range tasks {
 		// A heading without a code block is not a task, so its name never matters.
@@ -93,13 +101,20 @@ func Check(src []byte) []Diagnostic {
 
 		f := t.Fences[0]
 		lang := runner.NormalizeLang(f.Lang)
+		supported := runner.Supported(f.Lang)
 		switch {
 		case slices.Contains(docsLangs, lang):
 			add(f.Line, Warning, "docs-fence", "task %q uses a %q code block, which looks like documentation; it cannot be run", t.Name, f.Lang)
-		case !runner.Supported(f.Lang):
+		case !supported:
 			add(f.Line, Error, "unsupported-language", "task %q uses %q; supported: %s", t.Name, f.Lang, strings.Join(runner.Languages(), ", "))
 		}
-		if strings.TrimSpace(f.Script) == "" {
+		empty := strings.TrimSpace(f.Script) == ""
+		if opts.Host && supported && !empty {
+			if err := resolve(resolved, t.Name, f.Lang); err != nil {
+				add(f.Line, Error, "interpreter-not-found", "%s", err)
+			}
+		}
+		if empty {
 			add(f.Line, Error, "empty-script", "task %q has an empty code block", t.Name)
 		} else if i := strings.IndexByte(f.Script, 0); i >= 0 {
 			add(f.Line+1+strings.Count(f.Script[:i], "\n"), Error, "nul-byte", "task %q script contains a NUL byte", t.Name)
@@ -115,4 +130,22 @@ func Check(src []byte) []Diagnostic {
 
 	slices.SortStableFunc(diags, func(a, b Diagnostic) int { return cmp.Compare(a.Line, b.Line) })
 	return diags
+}
+
+// resolve returns runner.Resolve's error for task name with fence language lang, or
+// nil. The interpreter is looked up once per language; cache holds the results.
+func resolve(cache map[string]error, name, lang string) error {
+	key := runner.NormalizeLang(lang)
+	err, ok := cache[key]
+	if !ok {
+		err = runner.Resolve(parser.Task{Name: name, Lang: lang})
+		cache[key] = err
+	}
+	var ie *runner.InterpreterError
+	if errors.As(err, &ie) {
+		named := *ie
+		named.Task, named.Lang = name, lang
+		return &named
+	}
+	return err
 }

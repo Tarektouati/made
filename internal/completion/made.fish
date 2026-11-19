@@ -82,6 +82,7 @@ complete -c made -n __made_no_positional -s f -l file -r -F -d 'Markdown file to
 complete -c made -n __made_no_positional -l no-chdir -d 'Run the task in the current directory'
 complete -c made -n __made_no_positional -l check -d 'Check the task file for problems'
 complete -c made -n __made_no_positional -l strict -d 'With --check, fail on warnings too'
+complete -c made -n __made_no_positional -l host -d 'With --check, also check that interpreters are on PATH'
 complete -c made -n __made_no_positional -s l -l list -d 'List available tasks'
 complete -c made -n __made_no_positional -s V -l version -d 'Print version and exit'
 complete -c made -n __made_no_positional -s h -l help -d 'Show help'

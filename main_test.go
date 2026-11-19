@@ -116,13 +116,14 @@ func TestUsage(t *testing.T) {
 	f := writeRunTasks(t)
 	wantHelp := []string{
 		"Usage: made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]",
-		"made [-f file] --check [--strict]",
+		"made [-f file] --check [--strict] [--host]",
 		"made init [--force]",
 		"made completion <bash|zsh|fish>",
 		"-f, --file <file>",
 		"    --no-chdir",
 		"    --check",
 		"    --strict",
+		"    --host",
 		"-l, --list",
 		"-V, --version",
 		"-h, --help",
@@ -150,7 +151,7 @@ func TestUsage(t *testing.T) {
 		t.Fatalf("usage has no Options: section\n%s", &stdout)
 	}
 	prev := -1
-	for _, name := range []string{"--file", "--no-chdir", "--check", "--strict", "--list", "--version", "--help"} {
+	for _, name := range []string{"--file", "--no-chdir", "--check", "--strict", "--host", "--list", "--version", "--help"} {
 		i := strings.Index(opts, name)
 		if i <= prev {
 			t.Errorf("%s at %d in the options list, want it after the previous flag (at %d)\n%s", name, i, prev, opts)
@@ -715,6 +716,17 @@ func TestCheck(t *testing.T) {
 		{name: "list", args: []string{"--check", "-l", "-f", clean}, wantCode: 2, wantStderr: []string{"made: --check does not take -l"}},
 		{name: "version", args: []string{"-V", "--check"}, wantCode: 2, wantStderr: []string{"made: --check does not take -V"}},
 		{name: "list-names", args: []string{"--check", "--list-names", "-f", clean}, wantCode: 2, wantStderr: []string{"made: --check does not take --list-names"}},
+		{name: "host alone", args: []string{"--host", "-f", clean}, wantCode: 2, wantStderr: []string{"made: --host requires --check"}},
+		{name: "host clean", args: []string{"--check", "--host", "--strict", "-f", clean}},
+	})
+}
+
+func TestCheckHost(t *testing.T) {
+	f := writeTemp(t, "rb.md", "### rb\n```ruby\nputs \"hi\"\n```\n")
+	t.Setenv("PATH", t.TempDir())
+	checkRunCases(t, []runCase{
+		{name: "without host", args: []string{"--check", "--strict", "-f", f}},
+		{name: "host", args: []string{"--check", "--host", "-f", f}, wantCode: 1, wantStdout: []string{f + `:2: error: interpreter-not-found: "ruby" was not found on PATH`, "1 problem (1 error, 0 warnings)"}},
 	})
 }
 
@@ -936,7 +948,7 @@ func TestInitTemplateIsValid(t *testing.T) {
 				tasks[0].Description != "Prints a friendly greeting." || tasks[0].Script == "" {
 				t.Errorf("template tasks = %+v, want one task %q with its description and a script", tasks, "hello")
 			}
-			if diags := lint.Check([]byte(got)); diags != nil {
+			if diags := lint.Check([]byte(got), lint.Options{}); diags != nil {
 				t.Errorf("lint.Check(template) = %+v, want no findings", diags)
 			}
 		})

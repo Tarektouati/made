@@ -140,7 +140,7 @@ _made() {
     esac
 
     if [[ $cur == -* ]]; then
-        COMPREPLY=($(compgen -W "-f --file --no-chdir --check --strict -l --list -V --version -h --help" -- "$cur"))
+        COMPREPLY=($(compgen -W "-f --file --no-chdir --check --strict --host -l --list -V --version -h --help" -- "$cur"))
         return 0
     fi
 

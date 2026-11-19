@@ -99,7 +99,7 @@ printf '%s\n' "${COMPREPLY[@]}"`
 		{line: []string{"made", "b"}, want: []string{"build"}, not: []string{"say-hello"}},
 		{line: []string{"made", "-f", "other.md", ""}, want: []string{"ns:task"}, not: []string{"build"}},
 		{line: []string{"made", "--file", "=", "other.md", ""}, want: []string{"ns:task"}, not: []string{"build"}},
-		{line: []string{"made", "--"}, want: []string{"--file", "--list", "--version", "--no-chdir", "--check", "--strict"}, not: []string{"--list-names"}},
+		{line: []string{"made", "--"}, want: []string{"--file", "--list", "--version", "--no-chdir", "--check", "--strict", "--host"}, not: []string{"--list-names"}},
 		{line: []string{"made", "completion", ""}, want: []string{"bash", "zsh", "fish"}, not: []string{"build"}},
 		{line: []string{"made", "build", ""}, not: []string{"build", "--file"}},
 		{line: []string{"made", "init", ""}, want: []string{"--force"}, not: []string{"build"}},

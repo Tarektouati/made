@@ -16,8 +16,8 @@ Madefile.md:20: warning: extra-code-block: ignored: task "test" runs only its fi
 A clean file prints nothing. `made --check` exits with `1` if there is any error,
 or with `--strict` any warning, and `0` otherwise. A file that can't be read is
 reported on stderr like any other run (exit `1`). `--check` takes no task name and
-can't be combined with `-l` or `-V`, and `--strict` needs `--check`; these exit
-with `2`.
+can't be combined with `-l` or `-V`, and `--strict` and `--host` need `--check`;
+these exit with `2`.
 
 ## Rules
 
@@ -31,6 +31,7 @@ with `2`.
 | `script-too-large` | error | The script is too large to pass to its interpreter as a command-line argument: 128 KiB on Linux and macOS, 32,767 UTF-16 characters on Windows (see below) |
 | `nesting-too-deep` | error | Lists or blockquotes nest deeper than 256 levels |
 | `file-too-large` | error | The file is larger than 10 MiB |
+| `interpreter-not-found` | error | Only with `--host`: the task's interpreter (for example `ruby` for a `ruby` block) is not on PATH, or is there but not executable |
 | `parse-timeout` | error | Parsing the file took longer than 1.5 s (see [How it works](how-it-works.md)) |
 | `name-altered` | warning | The heading has HTML tags or an image, which the task name leaves out (an image becomes its alt text), so the name differs from what it shows. Code spans, emphasis and links keep their text and are not flagged |
 | `unreachable-name` | warning | The name is `init` or `completion` (reserved), or starts with `-` (run it as `made -- -x`) |
@@ -52,5 +53,23 @@ itself accepts a larger script. Windows caps the whole command line at 32,767
 UTF-16 characters, so a script with many non-ASCII characters fits in more bytes,
 and a script just under the limit can still be too long once quoted. The size
 reported includes the space `made` adds before a script starting with `-` or `+`.
+
+## Checking against this machine
+
+Without `--host`, the result depends only on the file and the OS, so it is the same
+in CI, on a developer machine, and in a pre-commit hook. `--host` adds
+`interpreter-not-found`, which looks each task's interpreter up on PATH the way a
+run does (a `python` block passes if either `python3` or `python` is found):
+
+```
+$ made --check --host
+Madefile.md:14: error: interpreter-not-found: "ruby" was not found on PATH (required by task "rb", language "ruby"); install it or change the code fence language
+1 problem (1 error, 0 warnings)
+```
+
+The result holds only for the PATH `made --check --host` runs with. Run it where
+the tasks run, for example as a CI step in the job's image. `--host` and
+`--strict` can be combined. An interpreter that is found can still fail to start,
+for example through a broken `#!` line; `--host` does not run anything.
 
 To run the check on commit, see [Pre-commit and prek](pre-commit.md).

@@ -140,6 +140,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var listNames bool
 	var check bool
 	var strict bool
+	var host bool
 	fs := flag.NewFlagSet("made", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&file, "file", "", "Markdown file to read tasks from (default: nearest Madefile.md, searched up to the repository root, or the filesystem root outside a repository)")
@@ -147,6 +148,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.BoolVar(&noChdir, "no-chdir", false, "run the task in the current directory instead of the task file's directory")
 	fs.BoolVar(&check, "check", false, "check the task file for problems instead of running a task")
 	fs.BoolVar(&strict, "strict", false, "with --check, fail on warnings too")
+	fs.BoolVar(&host, "host", false, "with --check, also check that each task's interpreter is on PATH")
 	fs.BoolVar(&list, "list", false, "list available tasks")
 	fs.BoolVar(&list, "l", false, "shorthand for --list")
 	fs.BoolVar(&showVersion, "version", false, "print version and exit")
@@ -155,7 +157,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.BoolVar(&listNames, "list-names", false, "print task names and descriptions, tab-separated, one per line")
 	printUsage := func(w io.Writer) {
 		fmt.Fprintf(w, "Usage: made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]\n")
-		fmt.Fprintf(w, "       made [-f file] --check [--strict]\n")
+		fmt.Fprintf(w, "       made [-f file] --check [--strict] [--host]\n")
 		fmt.Fprintf(w, "       made init [--force]\n")
 		fmt.Fprintf(w, "       made completion <%s>\n\n", strings.Join(completion.Shells, "|"))
 		fmt.Fprintf(w, "Run a task defined as an H3 heading + code block in a Markdown file.\n")
@@ -182,12 +184,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "made: --strict requires --check")
 		return 2
 	}
+	if host && !check {
+		fmt.Fprintln(stderr, "made: --host requires --check")
+		return 2
+	}
 	if check {
 		if fs.NArg() > 0 {
 			fmt.Fprintln(stderr, "made: --check takes no task name")
 			return 2
 		}
-		if f := firstSetFlag(fs, "f", "file", "no-chdir", "check", "strict"); f != "" {
+		if f := firstSetFlag(fs, "f", "file", "no-chdir", "check", "strict", "host"); f != "" {
 			fmt.Fprintf(stderr, "made: --check does not take %s\n", f)
 			return 2
 		}
@@ -283,7 +289,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	file = res.path
 
 	if check {
-		return runCheck(stdout, stderr, file, strict)
+		return runCheck(stdout, stderr, file, strict, lint.Options{Host: host})
 	}
 
 	source, err := readMadefile(file)
@@ -665,7 +671,8 @@ var errTooLarge = errors.New("exceeds maximum size")
 // runCheck lints the task file at path for made --check, prints the findings to
 // stdout, and returns the exit code: 1 if there is an error (or, with strict, a
 // warning), otherwise 0. A file that cannot be read is reported on stderr, exit 1.
-func runCheck(stdout, stderr io.Writer, path string, strict bool) int {
+// opts selects the optional checks.
+func runCheck(stdout, stderr io.Writer, path string, strict bool, opts lint.Options) int {
 	var diags []lint.Diagnostic
 	source, err := readMadefile(path)
 	switch {
@@ -676,7 +683,7 @@ func runCheck(stdout, stderr io.Writer, path string, strict bool) int {
 		fmt.Fprintf(stderr, "made: cannot read %s: %s\n", escapeDisplay(path), escapeErr(err))
 		return 1
 	default:
-		diags, err = withinParseTimeout(func() []lint.Diagnostic { return lint.Check(source) })
+		diags, err = withinParseTimeout(func() []lint.Diagnostic { return lint.Check(source, opts) })
 		if err != nil {
 			diags = []lint.Diagnostic{{Severity: lint.Error, Rule: "parse-timeout", Msg: err.Error()}}
 		}
@@ -913,6 +920,7 @@ var mainOptions = []usageOption{
 	{long: "no-chdir"},
 	{long: "check"},
 	{long: "strict"},
+	{long: "host"},
 	{short: "l", long: "list"},
 	{short: "V", long: "version"},
 	{short: "h", long: "help"},
