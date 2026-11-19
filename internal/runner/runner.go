@@ -191,13 +191,17 @@ var fallbacks = map[string][]string{"python": {"python"}}
 // Closing force during the grace period sends SIGKILL right away instead of waiting
 // killGrace; a nil force never fires.
 //
-// A script containing a NUL byte cannot be passed as an argument and returns an error
-// before anything runs. On Linux the interpreter is also killed if made itself dies.
+// An empty or blank script (see EmptyScript) returns an error before anything runs,
+// as does one containing a NUL byte, which cannot be passed as an argument. On Linux
+// the interpreter is also killed if made itself dies.
 func Run(ctx context.Context, force <-chan struct{}, t parser.Task, dir string, args []string) error {
 	lang := NormalizeLang(t.Lang)
 	in, ok := interpreters[lang]
 	if !ok {
 		return unsupportedError(t)
+	}
+	if EmptyScript(t.Script) {
+		return fmt.Errorf("task %q has an empty code block; nothing to run", t.Name)
 	}
 	if i := strings.IndexByte(t.Script, 0); i >= 0 {
 		return fmt.Errorf("task %q: script contains a NUL byte (line %d of the script)", t.Name, strings.Count(t.Script[:i], "\n")+1)
@@ -460,6 +464,11 @@ func ScriptLen(lang, script string) int {
 // the script on Linux or Windows. It is false for an unsupported language.
 func ScriptTooLarge(lang, script string) bool {
 	return Supported(lang) && ScriptLen(lang, script) >= ArgLimit
+}
+
+// EmptyScript reports whether script has nothing but whitespace, so Run refuses it.
+func EmptyScript(script string) bool {
+	return strings.TrimSpace(script) == ""
 }
 
 // startError turns a cmd.Start failure into an *InterpreterError when the interpreter

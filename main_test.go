@@ -881,6 +881,20 @@ func TestCheckHost(t *testing.T) {
 	})
 }
 
+// TestRunEmptyScript checks that a task whose first code block is empty or blank fails
+// without running anything, including a later block under the same heading.
+func TestRunEmptyScript(t *testing.T) {
+	f := writeTemp(t, "tasks.md", "### empty\n```bash\n```\n\n```bash\ntouch ran\n```\n\n### blank\n```bash\n\n```\n")
+	checkRunCases(t, []runCase{
+		{name: "list", args: []string{"-l", "-f", f}, wantStdout: []string{"empty", "blank"}},
+		{name: "empty", args: []string{"-f", f, "empty"}, wantCode: 1, wantStderr: []string{`made: task "empty" has an empty code block`}},
+		{name: "blank", args: []string{"-f", f, "blank"}, wantCode: 1, wantStderr: []string{`made: task "blank" has an empty code block`}},
+	})
+	if _, err := os.Stat(filepath.Join(filepath.Dir(f), "ran")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("stat ran = %v, want the second code block not to run", err)
+	}
+}
+
 func TestCheckExactOutput(t *testing.T) {
 	f := writeTemp(t, "tasks.md", "### a\n```bash\nx\n```\n### a\n```bash\n```\n### b\nprose\n")
 	var stdout, stderr bytes.Buffer

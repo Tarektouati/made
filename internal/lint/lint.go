@@ -108,7 +108,7 @@ func Check(src []byte, opts Options) []Diagnostic {
 		case !supported:
 			add(f.Line, Error, "unsupported-language", "task %q uses %q; supported: %s", t.Name, f.Lang, strings.Join(runner.Languages(), ", "))
 		}
-		empty := strings.TrimSpace(f.Script) == ""
+		empty := runner.EmptyScript(f.Script)
 		if opts.Host && supported && !empty {
 			if err := resolve(resolved, t.Name, f.Lang); err != nil {
 				add(f.Line, Error, "interpreter-not-found", "%s", err)
