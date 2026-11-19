@@ -162,7 +162,8 @@ var fallbacks = map[string][]string{"python": {"python"}}
 // language (defaulting to bash for a plain fence), inheriting the current process's
 // stdin/stdout/stderr and environment. The script runs in dir; an empty dir inherits
 // the current process's working directory. An unsupported language
-// returns an error before anything runs. An interpreter that cannot be started returns
+// returns an error before anything runs. The interpreter is looked up in the absolute
+// PATH entries only (see lookInterpreter). An interpreter that cannot be started returns
 // an *InterpreterError naming it, the task, and its language; it wraps exec.ErrNotFound
 // when the interpreter is not on PATH and fs.ErrPermission when a file of that name is
 // on PATH but not executable. The python fence falls back to python when python3 is
@@ -211,7 +212,14 @@ func Run(ctx context.Context, force <-chan struct{}, t parser.Task, dir string, 
 	argv = append(argv, in.argSep...)
 	argv = append(argv, args...)
 	cands := append([]string{in.cmd}, fallbacks[lang]...)
-	cmd := exec.CommandContext(ctx, pickInterpreter(cands), argv...)
+	name, path, ok := lookInterpreter(cands)
+	if !ok {
+		return notFoundError(cands, t)
+	}
+	// An absolute path is not looked up again, so exec.ErrDot cannot occur. It is also
+	// argv[0]: given a bare name, bash ($BASH) and python (sys.executable) search PATH
+	// themselves and can find the relative-entry binary made skipped.
+	cmd := exec.CommandContext(ctx, path, argv...)
 	cmd.Dir = dir
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -227,7 +235,7 @@ func Run(ctx context.Context, force <-chan struct{}, t parser.Task, dir string, 
 			return fmt.Errorf("task %q: script is %d %s, too large to pass to %q as a command-line argument (the OS limit is about %d %s); move the bulk of it into a file the task runs: %w",
 				t.Name, ScriptLen(t.Lang, t.Script), ArgUnit, filepath.Base(cmd.Path), ArgLimit, ArgUnit, err)
 		}
-		return startError(err, cmd, cands, t)
+		return startError(err, cmd, name, cands, t)
 	}
 
 	setInterpreter(cmd.Process.Pid, true)
@@ -371,7 +379,7 @@ func langLabel(lang string) string {
 // InterpreterError reports that a task's interpreter could not be started.
 type InterpreterError struct {
 	Cmd       string   // interpreter name, e.g. "python3"
-	Fallbacks []string // interpreters also tried when Cmd was not on PATH
+	Fallbacks []string // interpreters also tried when Cmd was not on PATH (in PATH's absolute entries)
 	Path      string   // resolved or found path; empty when nothing was found
 	Task      string
 	Lang      string // raw fence language
@@ -415,33 +423,28 @@ func (e *InterpreterError) ExitCode() int {
 	return 126
 }
 
-// pickInterpreter returns the first of cands that is on PATH, or cands[0] if none is.
-func pickInterpreter(cands []string) string {
-	if len(cands) > 1 {
-		for _, c := range cands {
-			if _, err := exec.LookPath(c); err == nil {
-				return c
-			}
-		}
-	}
-	return cands[0]
-}
-
-// lookInterpreter returns the first of cands that exec.LookPath finds, and its path.
+// lookInterpreter returns the first of cands found in an absolute PATH directory, and
+// its path. Relative entries (".", "", "bin") are skipped, so a binary found through
+// one never runs; on Windows the current directory is not searched either.
 func lookInterpreter(cands []string) (name, path string, ok bool) {
 	for _, c := range cands {
-		if p, err := exec.LookPath(c); err == nil {
-			return c, p, true
+		for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+			if !filepath.IsAbs(dir) {
+				continue
+			}
+			if p, err := exec.LookPath(filepath.Join(dir, c)); err == nil {
+				return c, p, true
+			}
 		}
 	}
 	return "", "", false
 }
 
 // Resolve reports whether the task's interpreter can be found on PATH the way Run
-// looks for it, without running anything. It returns nil when it is found, the error
-// Run would return when the interpreter is missing or not executable (an
-// *InterpreterError), or an unsupported-language error. An interpreter that is found
-// can still fail to start, e.g. through a broken #! line.
+// looks for it (in the absolute entries only), without running anything. It returns
+// nil when it is found, the error Run would return when the interpreter is missing or
+// not executable (an *InterpreterError), or an unsupported-language error. An
+// interpreter that is found can still fail to start, e.g. through a broken #! line.
 func Resolve(t parser.Task) error {
 	lang := NormalizeLang(t.Lang)
 	in, ok := interpreters[lang]
@@ -449,15 +452,10 @@ func Resolve(t parser.Task) error {
 		return unsupportedError(t)
 	}
 	cands := append([]string{in.cmd}, fallbacks[lang]...)
-	_, err := exec.LookPath(pickInterpreter(cands))
-	switch {
-	case err == nil:
-		return nil
-	case errors.Is(err, exec.ErrNotFound):
+	if _, _, ok := lookInterpreter(cands); !ok {
 		return notFoundError(cands, t)
-	default:
-		return err
 	}
+	return nil
 }
 
 // ScriptLen returns the size of a script in the fence language lang once passed to its
@@ -483,13 +481,14 @@ func EmptyScript(script string) bool {
 
 // startError turns a cmd.Start failure into an *InterpreterError when the interpreter
 // was missing, not executable, or could not be executed; other errors pass through.
-func startError(err error, cmd *exec.Cmd, cands []string, t parser.Task) error {
+// name is the candidate cmd runs, which the error names.
+func startError(err error, cmd *exec.Cmd, name string, cands []string, t parser.Task) error {
 	if errors.Is(err, exec.ErrNotFound) {
 		return notFoundError(cands, t)
 	}
 	var pathErr *fs.PathError
 	if errors.As(err, &pathErr) && pathErr.Op == "fork/exec" {
-		return &InterpreterError{Cmd: filepath.Base(cmd.Args[0]), Path: cmd.Path, Task: t.Name, Lang: t.Lang, Err: pathErr.Err}
+		return &InterpreterError{Cmd: name, Path: cmd.Path, Task: t.Name, Lang: t.Lang, Err: pathErr.Err}
 	}
 	return err
 }
@@ -505,12 +504,13 @@ func notFoundError(cands []string, t parser.Task) *InterpreterError {
 	return &InterpreterError{Cmd: cands[0], Fallbacks: cands[1:], Task: t.Name, Lang: t.Lang, Err: exec.ErrNotFound}
 }
 
-// findNonExecutable returns the first regular file named name in a PATH directory, or
-// "" if there is none. exec.LookPath skips such files when they are not executable.
+// findNonExecutable returns the first regular file named name in an absolute PATH
+// directory, or "" if there is none. exec.LookPath skips such files when they are not
+// executable.
 func findNonExecutable(name string) string {
 	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
-		if dir == "" {
-			dir = "."
+		if !filepath.IsAbs(dir) {
+			continue
 		}
 		p := filepath.Join(dir, name)
 		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
