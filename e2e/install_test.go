@@ -341,6 +341,11 @@ func scriptTmp(t *testing.T, res installResult) string {
 	return ""
 }
 
+func pathExists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
+}
+
 func lookPath(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
@@ -667,6 +672,9 @@ func TestInstallScriptSignal(t *testing.T) {
 			}
 			if len(entries) != 0 {
 				t.Errorf("TMPDIR holds %d entries after the signal, want 0 (first: %s)", len(entries), entries[0].Name())
+			}
+			if tmp := scriptTmp(t, res); pathExists(tmp) {
+				t.Errorf("temp dir %s still exists after the signal", tmp)
 			}
 			requireNotInstalled(t, filepath.Join(dir, "made"))
 		})
