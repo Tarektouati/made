@@ -672,7 +672,10 @@ func TestRunForceSkipsGrace(t *testing.T) {
 				close(force)
 			}
 			select {
-			case <-errc:
+			case err := <-errc:
+				if err == nil {
+					t.Error("Run after cancel = nil, want an error")
+				}
 			case <-time.After(tt.maxElapsed):
 				t.Fatalf("Run did not return within %v of cancel", tt.maxElapsed)
 			}

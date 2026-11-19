@@ -32,7 +32,9 @@ func TestSIGKILLStopsInterpreter(t *testing.T) {
 	if err := cmd.Process.Kill(); err != nil {
 		t.Fatalf("SIGKILL made: %v", err)
 	}
-	<-waitErr
+	if werr := <-waitErr; werr == nil {
+		t.Error("made exited 0 after SIGKILL")
+	}
 
 	deadline := time.Now().Add(5 * time.Second)
 	for alive(pid) {

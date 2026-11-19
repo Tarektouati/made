@@ -627,7 +627,10 @@ func TestSignalsKillGrandchild(t *testing.T) {
 				t.Fatalf("send %s: %v", tt.name, err)
 			}
 			select {
-			case <-waitErr:
+			case werr := <-waitErr:
+				if werr == nil {
+					t.Errorf("made exited 0 after %s, want a failure status", tt.name)
+				}
 			case <-time.After(10 * time.Second):
 				_ = cmd.Process.Kill()
 				t.Fatalf("made did not exit within 10s of %s", tt.name)
