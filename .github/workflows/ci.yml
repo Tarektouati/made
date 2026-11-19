@@ -69,6 +69,46 @@ jobs:
         if: ${{ !cancelled() && runner.os != 'Windows' }}
         timeout-minutes: 8
         run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' go test -v ${{ matrix.race }} -count=1 -timeout 5m ./e2e
+      # The runner image makes /usr/local/bin world-writable (chmod -R 777 in
+      # actions/runner-images install-nodejs.sh), so the install.sh default-dir tests
+      # skip in the step above. Clear its group and other write bits for this step
+      # only (owner untouched, mode restored on exit), so nobody, which is never its
+      # owner, cannot write it. Run the tests as nobody from a copy it owns (modules
+      # downloaded beforehand, no network), and fail if they skip or do not run.
+      - name: Test install.sh default dir as nobody
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        timeout-minutes: 8
+        run: |
+          set -o pipefail
+          sandbox=$(mktemp -d)
+          log="$RUNNER_TEMP/install-default-dir.log"
+          gobin="$(go env GOROOT)/bin"
+          cp -R . "$sandbox/src"
+          mkdir "$sandbox/home" "$sandbox/tmp"
+          (cd "$sandbox/src" && GOMODCACHE="$sandbox/mod" GOFLAGS=-modcacherw go mod download)
+          sudo chown -R nobody: "$sandbox"
+          stat -c '/usr/local/bin: owner %U:%G mode %a' /usr/local/bin
+          mode=$(stat -c '%a' /usr/local/bin)
+          trap 'sudo chmod "$mode" /usr/local/bin' EXIT
+          sudo chmod go-w /usr/local/bin
+          if sudo -u nobody test -w /usr/local/bin; then
+            echo "::error::/usr/local/bin is still writable for nobody"
+            exit 1
+          fi
+          (cd / && sudo -u nobody -- sh -c '
+            cd "$1/src" &&
+            HOME="$1/home" TMPDIR="$1/tmp" GOCACHE="$1/cache" GOPATH="$1/gopath" \
+              GOMODCACHE="$1/mod" GOPROXY=off GOTOOLCHAIN=local GOFLAGS=-mod=readonly \
+              PATH="$2:/usr/bin:/bin" \
+              exec go test -count=1 ./e2e -run "TestInstallScript(Sudo|DefaultDir)" -v
+          ' sh "$sandbox" "$gobin") 2>&1 | tee "$log"
+          if grep -q -- '--- SKIP' "$log"; then
+            echo "::error::install.sh default-dir tests skipped as nobody"
+            exit 1
+          fi
+          for test in TestInstallScriptSudo TestInstallScriptDefaultDir; do
+            grep -q -- "--- PASS: $test " "$log" || { echo "::error::$test did not pass as nobody"; exit 1; }
+          done
       - name: Test . (root)
         if: ${{ !cancelled() && runner.os != 'Windows' }}
         timeout-minutes: 8
