@@ -2,8 +2,11 @@ package lint
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/Tarektouati/made/internal/runner"
 )
 
 // finding is the part of a Diagnostic a test pins down; messages are checked loosely.
@@ -52,6 +55,9 @@ func TestCheck(t *testing.T) {
 		{name: "extra code block", src: "### a\n```bash\nx\n```\n\n```bash\ny\n```\n", want: []finding{{6, Warning, "extra-code-block"}}},
 		{name: "docs fence replaces unsupported", src: "### a\n```markdown\n# hi\n```\n### b\n```Text\nhi\n```\n", want: []finding{{2, Warning, "docs-fence"}, {6, Warning, "docs-fence"}}},
 		{name: "sorted by line", src: "### a\n```bash\n```\n```yaml\n```\n### a\n```bash\nx\n```\n", want: []finding{{2, Error, "empty-script"}, {4, Warning, "extra-code-block"}, {6, Error, "duplicate-task"}}},
+		{name: "script too large", src: "### a\n```bash\n" + strings.Repeat("x", runner.ArgLimit+1) + "\n```\n", want: []finding{{2, Error, "script-too-large"}}},
+		{name: "script under limit", src: "### a\n```bash\n" + strings.Repeat("x", runner.ArgLimit/2) + "\n```\n"},
+		{name: "large unsupported script", src: "### a\n```yaml\n" + strings.Repeat("x", runner.ArgLimit+1) + "\n```\n", want: []finding{{2, Error, "unsupported-language"}}},
 		{name: "crlf and bom", src: "\xef\xbb\xbf### a\r\n```yaml\r\nk\r\n```\r\n", want: []finding{{2, Error, "unsupported-language"}}},
 	}
 	for _, tt := range tests {
@@ -77,6 +83,22 @@ func TestCheckMessages(t *testing.T) {
 	for i, w := range want {
 		if !strings.Contains(diags[i].Msg, w) {
 			t.Errorf("diag %d message %q, want it to contain %q", i, diags[i].Msg, w)
+		}
+	}
+}
+
+// TestCheckScriptTooLargeMessage checks that the message gives the length the check
+// measured, including the pad a script starting with "-" gets, in the OS's unit.
+func TestCheckScriptTooLargeMessage(t *testing.T) {
+	script := "-" + strings.Repeat("x", runner.ArgLimit-3) + "\n" // padded: exactly ArgLimit
+	diags := Check([]byte("### a\n```bash\n" + script + "```\n"))
+	if got := findings(diags); !slices.Equal(got, []finding{{2, Error, "script-too-large"}}) {
+		t.Fatalf("Check() = %+v, want one script-too-large", got)
+	}
+	size := strconv.Itoa(runner.ArgLimit) + " " + runner.ArgUnit
+	for _, w := range []string{"script is " + size + ";", "argument of about " + size + " or more"} {
+		if !strings.Contains(diags[0].Msg, w) {
+			t.Errorf("message %q, want it to contain %q", diags[0].Msg, w)
 		}
 	}
 }
