@@ -30,9 +30,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # -race needs cgo + a C compiler; skip it on Windows where the
-        # hosted runner has no compiler reliably on PATH. The code has no
-        # concurrency, so this only trades a slower detector run for safety.
+        # -race needs cgo + a C compiler, which the hosted Windows runner does
+        # not reliably have on PATH, so Windows runs without it. The concurrent
+        # code (signal handling, the parse timeout, task teardown) still runs
+        # under the detector on Linux and macOS.
         # require lists the interpreters whose tests must run: a missing one fails the
         # job instead of skipping them (MADE_TEST_REQUIRE, see internal/testenv).
         include:
@@ -58,23 +59,24 @@ jobs:
       # is lost, but the jobs API still records step names and status, so we
       # can see which package killed it. Each step runs in its own session
       # (setsid), so a signal sent to a session or process group can't reach
-      # Runner.Worker.
+      # Runner.Worker. !cancelled() runs every package step even after one
+      # fails, so a failure in one package does not hide the others' results.
       - name: Test ./internal/runner
-        if: runner.os != 'Windows'
+        if: ${{ !cancelled() && runner.os != 'Windows' }}
         timeout-minutes: 8
         run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' go test -v ${{ matrix.race }} -count=1 -timeout 5m ./internal/runner
       - name: Test ./e2e
-        if: runner.os != 'Windows'
+        if: ${{ !cancelled() && runner.os != 'Windows' }}
         timeout-minutes: 8
         run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' go test -v ${{ matrix.race }} -count=1 -timeout 5m ./e2e
       - name: Test . (root)
-        if: runner.os != 'Windows'
+        if: ${{ !cancelled() && runner.os != 'Windows' }}
         timeout-minutes: 8
         run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' go test -v ${{ matrix.race }} -count=1 -timeout 5m .
-      - name: Test ./internal/parser ./internal/completion
-        if: runner.os != 'Windows'
+      - name: Test ./internal/parser ./internal/completion ./internal/lint ./internal/testenv
+        if: ${{ !cancelled() && runner.os != 'Windows' }}
         timeout-minutes: 8
-        run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' go test -v ${{ matrix.race }} -count=1 -timeout 5m ./internal/parser ./internal/completion
+        run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' go test -v ${{ matrix.race }} -count=1 -timeout 5m ./internal/parser ./internal/completion ./internal/lint ./internal/testenv
 
   build:
     name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
