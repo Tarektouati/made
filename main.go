@@ -485,6 +485,13 @@ func initMadefile(stdout, stderr io.Writer, force bool) int {
 		// filesystem folds case.
 		name := madefileNames[0]
 		if err := writeTemplate(name, os.O_CREATE|os.O_EXCL); err != nil {
+			if kind, ok := notRegular(name); ok {
+				if kind != "" {
+					kind = " (" + kind + ")"
+				}
+				fmt.Fprintf(stderr, "made: cannot create %s: it exists and is not a regular file%s; remove it first\n", name, kind)
+				return 1
+			}
 			fmt.Fprintf(stderr, "made: cannot create %s: %s\n", name, escapeErr(err))
 			return 1
 		}
@@ -517,6 +524,37 @@ func initMadefile(stdout, stderr io.Writer, force bool) int {
 	}
 	fmt.Fprintf(stdout, "made: overwrote %s\n", target)
 	return 0
+}
+
+// notRegular reports whether path exists (without following a symlink) and does not
+// lead to a regular file, with what it is when that is a directory or a symlink to
+// nothing or to a directory, for display.
+func notRegular(path string) (kind string, ok bool) {
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode().IsRegular() {
+		return "", false
+	}
+	if info.IsDir() {
+		return "a directory", true
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return "", true
+	}
+	target, err := os.Stat(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		if dest, lerr := os.Readlink(path); lerr == nil {
+			return "a broken symlink to " + escapeDisplay(dest), true
+		}
+		return "", true
+	case err != nil:
+		return "", true
+	case target.Mode().IsRegular():
+		return "", false
+	case target.IsDir():
+		return "a symlink to a directory", true
+	}
+	return "", true
 }
 
 // writeTemplate opens name for writing with the extra open flags and writes

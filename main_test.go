@@ -1256,13 +1256,27 @@ func TestInitDirectoryOnly(t *testing.T) {
 	dir := t.TempDir()
 	mkTree(t, dir, "Madefile.md/")
 	t.Chdir(dir)
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"init", "--force"}, &stdout, &stderr); code != 1 {
-		t.Errorf("run(init --force) = %d, want 1", code)
-	}
-	checkContains(t, "stderr", stderr.String(), []string{"cannot create Madefile.md"}, true)
+	checkInitNonRegular(t, "made: cannot create Madefile.md: it exists and is not a regular file (a directory); remove it first\n")
 	if info, err := os.Stat("Madefile.md"); err != nil || !info.IsDir() {
 		t.Errorf("Madefile.md is no longer a directory (err: %v)", err)
+	}
+}
+
+// checkInitNonRegular runs made init, plain and with --force, in the current directory
+// whose Madefile.md is not a regular file, and checks both refuse with want on stderr.
+func checkInitNonRegular(t *testing.T, want string) {
+	t.Helper()
+	for _, args := range [][]string{{"init"}, {"init", "--force"}} {
+		var stdout, stderr bytes.Buffer
+		if code := run(args, &stdout, &stderr); code != 1 {
+			t.Errorf("run(%q) = %d, want 1", args, code)
+		}
+		if got := stderr.String(); got != want {
+			t.Errorf("run(%q) stderr = %q, want %q", args, got, want)
+		}
+		if stdout.Len() > 0 {
+			t.Errorf("run(%q) stdout = %q, want it empty", args, &stdout)
+		}
 	}
 }
 
@@ -1283,7 +1297,9 @@ func TestInitForceFIFO(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("made init --force hung on a FIFO Madefile.md")
 	}
-	checkContains(t, "stderr", stderr.String(), []string{"cannot create Madefile.md"}, true)
+	if got, want := stderr.String(), "made: cannot create Madefile.md: it exists and is not a regular file; remove it first\n"; got != want {
+		t.Errorf("stderr = %q, want %q", got, want)
+	}
 }
 
 func TestCompletion(t *testing.T) {
