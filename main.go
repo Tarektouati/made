@@ -819,11 +819,32 @@ func escapeErr(err error) string {
 // displayWidth approximates the number of terminal cells s occupies: East Asian wide
 // and fullwidth runes take two, combining marks, format characters (such as ZWJ) and
 // variation selectors take none, except that the emoji selector U+FE0F widens a
-// preceding one-cell rune to two. Multi-rune emoji sequences are not clustered.
+// preceding one-cell rune to two. An emoji sequence takes two cells, as in terminals
+// that cluster graphemes: a skin-tone modifier after an emoji, and an emoji joined to
+// the previous one by ZWJ, add nothing beyond widening a one-cell base to two. ZWJ
+// between other runes (Indic conjuncts) does not join them.
 func displayWidth(s string) int {
 	n, last := 0, 0
+	pict, joined := false, false
 	for _, r := range s {
+		if joined {
+			joined = false
+			if isPictographic(r) {
+				if last == 1 {
+					n++
+				}
+				last = 2
+				continue
+			}
+		}
 		switch k := width.LookupRune(r).Kind(); {
+		case r == 0x200d:
+			joined = pict
+		case r >= 0x1f3fb && r <= 0x1f3ff && pict:
+			if last == 1 {
+				n++
+				last = 2
+			}
 		case r == 0xfe0f:
 			if last == 1 {
 				n++
@@ -833,12 +854,22 @@ func displayWidth(s string) int {
 		case k == width.EastAsianWide, k == width.EastAsianFullwidth:
 			n += 2
 			last = 2
+			pict = isPictographic(r)
 		default:
 			n++
 			last = 1
+			pict = isPictographic(r)
 		}
 	}
 	return n
+}
+
+// isPictographic reports whether r is in a block that holds the emoji used in ZWJ
+// sequences and as skin-tone bases: Miscellaneous Technical, Miscellaneous Symbols,
+// Dingbats, Miscellaneous Symbols and Arrows, and U+1F000-1FAFF.
+func isPictographic(r rune) bool {
+	return (r >= 0x2300 && r <= 0x23ff) || (r >= 0x2600 && r <= 0x27bf) ||
+		(r >= 0x2b00 && r <= 0x2bff) || (r >= 0x1f000 && r <= 0x1faff)
 }
 
 func printTasks(stdout, stderr io.Writer, file string, tasks []parser.Task) {

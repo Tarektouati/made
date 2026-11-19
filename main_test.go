@@ -1512,6 +1512,26 @@ func TestDisplayWidth(t *testing.T) {
 		{name: "text selector", in: "❤\ufe0e", want: 1},
 		{name: "lone emoji selector", in: "\ufe0f", want: 0},
 		{name: "zwj", in: "\u200d", want: 0},
+		{name: "zwj family", in: "👨\u200d👩\u200d👧", want: 2},
+		{name: "zwj family before text", in: "👨\u200d👩\u200d👧family", want: 8},
+		{name: "skin tone", in: "👍🏽", want: 2},
+		{name: "skin tone on narrow base", in: "✌🏽", want: 2},
+		{name: "skin tone on narrow index finger", in: "☝🏽", want: 2},
+		{name: "skin tone on narrow raised hand", in: "🖐🏽", want: 2},
+		{name: "skin tone on narrow detective", in: "🕵🏽", want: 2},
+		{name: "skin tone in zwj sequence", in: "👩🏻\u200d💻", want: 2},
+		{name: "zwj gender sign with selector", in: "🏃\u200d♂\ufe0f", want: 2},
+		{name: "zwj with selectors on both sides", in: "👁\ufe0f\u200d🗨\ufe0f", want: 2},
+		{name: "zwj rainbow flag", in: "🏳\ufe0f\u200d🌈", want: 2},
+		{name: "zwj black cat", in: "🐈\u200d⬛", want: 2},
+		{name: "zwj on narrow base", in: "❤\u200d🔥", want: 2},
+		{name: "lone skin tone", in: "🏽", want: 2},
+		{name: "skin tone after letter", in: "a🏽", want: 3},
+		{name: "zwj between letters", in: "a\u200db", want: 2},
+		{name: "zwj in devanagari conjunct", in: "क्\u200dष", want: 2},
+		{name: "regional indicator flag", in: "🇫🇷", want: 2},
+		{name: "tag sequence flag", in: scotlandFlag, want: 2},
+		{name: "trailing zwj", in: "👨\u200d", want: 2},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1602,6 +1622,15 @@ func TestPrintTasksExactOutput(t *testing.T) {
 			tasks: []parser.Task{{Name: "⚙\ufe0f setup", Description: "Gear."}, {Name: "build", Description: "Build it."}},
 			want: "  ⚙\ufe0f setup  Gear.\n" +
 				"  build     Build it.\n",
+		},
+		{
+			name:  "emoji sequences",
+			tasks: []parser.Task{{Name: "👨\u200d👩\u200d👧family", Description: "Fam."}, {Name: "👩🏻\u200d💻tech", Description: "Tech."}, {Name: "👍🏽ok", Description: "OK."}, {Name: "✌🏽peace", Description: "Peace."}, {Name: "build", Description: "Build."}},
+			want: "  👨\u200d👩\u200d👧family  Fam.\n" +
+				"  👩🏻\u200d💻tech    Tech.\n" +
+				"  👍🏽ok      OK.\n" +
+				"  ✌🏽peace   Peace.\n" +
+				"  build     Build.\n",
 		},
 	}
 	for _, tt := range tests {
