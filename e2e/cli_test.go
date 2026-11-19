@@ -552,6 +552,23 @@ func TestMissingInterpreterFails(t *testing.T) {
 	}
 }
 
+// TestFishSyntaxErrorExit127 checks that a fish syntax error exits 127, like a missing
+// interpreter, but is told apart by fish's own message.
+func TestFishSyntaxErrorExit127(t *testing.T) {
+	requireCmd(t, "fish")
+	dir := writeTasks(t, "Madefile.md", "### bad\n```fish\necho (\n```\n")
+	_, stderr, code := runMade(t, dir, "bad")
+	if code != 127 {
+		t.Fatalf("exit = %d, want 127 (stderr: %s)", code, stderr)
+	}
+	if !strings.Contains(stderr, "fish:") {
+		t.Errorf("stderr = %q, want it to contain %q", stderr, "fish:")
+	}
+	if strings.Contains(stderr, "was not found on PATH") {
+		t.Errorf("stderr = %q, want no missing-interpreter message", stderr)
+	}
+}
+
 func TestVersionFlag(t *testing.T) {
 	dir := t.TempDir() // empty: no Madefile — --version must not require a task file
 	for _, flag := range []string{"--version", "-V"} {

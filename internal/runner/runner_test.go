@@ -117,6 +117,35 @@ func TestRunShellStopsOnFailure(t *testing.T) {
 	}
 }
 
+func TestRunFishNoFailFast(t *testing.T) {
+	// fish has no errexit: a task runs past failures unless the script guards them.
+	requireCmd(t, "fish")
+	for _, tc := range []struct {
+		name, script string
+		want         int // 0: Run returns nil
+	}{
+		{"failure masked", "false\nexit 0\n", 0},
+		{"pipeline failure masked", "false | cat\n", 0},
+		// The guards keep the failing command's status (3), not a constant 1.
+		{"or exit", "function f; return 3; end; f; or exit\nexit 5\n", 3},
+		{"or exit on next line", "function f; return 3; end; f\nor exit\nexit 5\n", 3},
+		{"or return", "function f; return 3; end; f; or return\nexit 5\n", 3},
+		{"pipestatus guard", "false | cat; test $pipestatus[1] = 0; or exit 1\nexit 5\n", 1},
+		{"syntax error runs nothing", "exit 5\nif true\n", 127},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := Run(context.Background(), nil, parser.Task{Name: "x", Lang: "fish", Script: tc.script}, "", nil)
+			if tc.want == 0 {
+				if err != nil {
+					t.Fatalf("Run: %v, want nil", err)
+				}
+				return
+			}
+			wantExitCode(t, err, tc.want)
+		})
+	}
+}
+
 func TestRunShellPipefail(t *testing.T) {
 	for _, lang := range []string{"bash", "zsh"} {
 		t.Run(lang, func(t *testing.T) {
