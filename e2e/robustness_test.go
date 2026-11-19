@@ -44,21 +44,38 @@ func startMade(t *testing.T, dir string, args ...string) (cmd *exec.Cmd, waitErr
 	}
 }
 
+// waitForFile polls until path exists and is non-empty, failing after 10s.
+func waitForFile(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if b, err := os.ReadFile(path); err == nil && len(b) > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s never appeared", path)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestSecondSIGINTSkipsGrace(t *testing.T) {
 	requireBash(t)
 	if runtime.GOOS == "windows" {
 		t.Skip("os.Interrupt cannot be delivered to a child on windows")
 	}
-	// The task ignores SIGTERM, so without the second SIGINT made would wait the full
-	// 3-second grace period before SIGKILL.
-	dir := writeTasks(t, "Madefile.md", "### stubborn\n```bash\ntrap '' TERM\necho started\nsleep 30\n```\n")
+	// The task survives SIGTERM (|| : keeps errexit from ending it when the sleep is
+	// killed), so without the second SIGINT made would wait the full 3-second grace
+	// period before SIGKILL. Its trap writes "got" once made has acted on the first
+	// SIGINT, so the two signals cannot merge into one pending SIGINT.
+	dir := writeTasks(t, "Madefile.md", "### stubborn\n```bash\ntrap 'echo term > got' TERM\necho started\nwhile :; do sleep 0.05 || :; done\n```\n")
 	cmd, waitErr := startMade(t, dir, "stubborn")
 
-	begin := time.Now()
 	if err := cmd.Process.Signal(os.Interrupt); err != nil {
 		t.Fatalf("send first SIGINT: %v", err)
 	}
-	time.Sleep(200 * time.Millisecond)
+	waitForFile(t, filepath.Join(dir, "got"))
+	begin := time.Now()
 	if err := cmd.Process.Signal(os.Interrupt); err != nil {
 		t.Fatalf("send second SIGINT: %v", err)
 	}
@@ -68,7 +85,7 @@ func TestSecondSIGINTSkipsGrace(t *testing.T) {
 			t.Error("made exited 0 after two SIGINTs, want a failure status")
 		}
 		if elapsed := time.Since(begin); elapsed > 2*time.Second {
-			t.Errorf("made took %v to exit after two SIGINTs; want it to skip the 3s grace period", elapsed)
+			t.Errorf("made took %v to exit after the second SIGINT; want it to skip the 3s grace period", elapsed)
 		}
 	case <-time.After(10 * time.Second):
 		_ = cmd.Process.Kill()
