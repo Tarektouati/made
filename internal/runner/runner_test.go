@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/Tarektouati/made/internal/parser"
+	"github.com/Tarektouati/made/internal/testenv"
 )
 
 func TestRunSuccess(t *testing.T) {
@@ -85,12 +86,10 @@ func TestCancelSignal(t *testing.T) {
 	}
 }
 
-// requireCmd skips the test when name is not on PATH.
+// requireCmd skips the test when name is not on PATH (see testenv.RequireCmd).
 func requireCmd(t *testing.T, name string) {
 	t.Helper()
-	if _, err := exec.LookPath(name); err != nil {
-		t.Skipf("%s not found on PATH; skipping", name)
-	}
+	testenv.RequireCmd(t, name)
 }
 
 // wantExitCode asserts err is an *exec.ExitError with the given code.

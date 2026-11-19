@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Tarektouati/made/internal/testenv"
 )
 
 // madeBin is the path to the compiled binary under test, set by TestMain.
@@ -105,13 +107,10 @@ func writeTasks(t *testing.T, name, content string) string {
 	return dir
 }
 
-// requireCmd skips the test when name is not on PATH, so interpreter-specific tests
-// stay green on machines lacking that interpreter while still running on CI.
+// requireCmd skips the test when name is not on PATH (see testenv.RequireCmd).
 func requireCmd(t *testing.T, name string) {
 	t.Helper()
-	if _, err := exec.LookPath(name); err != nil {
-		t.Skipf("%s not found on PATH; skipping", name)
-	}
+	testenv.RequireCmd(t, name)
 }
 
 // requireBash skips the test when bash is not on PATH (Git Bash provides it on
