@@ -561,6 +561,63 @@ func TestMissingInterpreterFails(t *testing.T) {
 	}
 }
 
+// TestRelativePathInterpreter checks that a bash in the task's directory, reached
+// through a "." PATH entry, is never run: the absolute entry's bash runs instead, and
+// with none the run and --check --host both report bash as not found.
+func TestRelativePathInterpreter(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake bash is a shell script")
+	}
+	requireBash(t)
+	realBash, err := exec.LookPath("bash")
+	if err != nil || !filepath.IsAbs(realBash) {
+		t.Skipf("bash is not found through an absolute PATH entry (%q, %v)", realBash, err)
+	}
+	dir := writeTasks(t, "Madefile.md", "### t\n```bash\necho real\n```\n")
+	fake := filepath.Join(dir, "bash")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\necho FAKE\nexit 3\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(fake, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sep := string(os.PathListSeparator)
+
+	found := []string{"PATH=." + sep + filepath.Dir(realBash)}
+	if stdout, stderr, code := runMadeEnv(t, dir, found, "t"); code != 0 || stdout != "real\n" {
+		t.Errorf("run: exit = %d, stdout = %q, stderr = %q; want 0 and %q", code, stdout, stderr, "real\n")
+	}
+	if stdout, stderr, code := runMadeEnv(t, dir, found, "--check", "--host"); code != 0 {
+		t.Errorf("--check --host: exit = %d, stdout = %q, stderr = %q; want 0", code, stdout, stderr)
+	}
+
+	missing := []string{"PATH=." + sep + t.TempDir()}
+	_, stderr, code := runMadeEnv(t, dir, missing, "t")
+	if code != 127 {
+		t.Errorf("run: exit = %d, want 127 (stderr: %s)", code, stderr)
+	}
+	want := []string{`"bash" was not found on PATH`, `task "t"`, `language "bash"`}
+	for _, w := range want {
+		if !strings.Contains(stderr, w) {
+			t.Errorf("run: stderr = %q, want it to contain %q", stderr, w)
+		}
+	}
+	stdout, checkErr, code := runMadeEnv(t, dir, missing, "--check", "--host")
+	if code != 1 || !strings.Contains(stdout, "interpreter-not-found: ") {
+		t.Errorf("--check --host: exit = %d, stdout = %q, stderr = %q; want 1 and interpreter-not-found", code, stdout, checkErr)
+	}
+	for _, w := range want {
+		if !strings.Contains(stdout, w) {
+			t.Errorf("--check --host: stdout = %q, want it to contain %q", stdout, w)
+		}
+	}
+	for _, out := range []string{stderr, stdout} {
+		if strings.Contains(out, "relative to current directory") || strings.Contains(out, "FAKE") {
+			t.Errorf("output = %q, want neither exec.ErrDot nor the fake bash", out)
+		}
+	}
+}
+
 // TestFishSyntaxErrorExit127 checks that a fish syntax error exits 127, like a missing
 // interpreter, but is told apart by fish's own message.
 func TestFishSyntaxErrorExit127(t *testing.T) {
