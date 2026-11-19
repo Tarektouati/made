@@ -294,7 +294,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	source, err := readMadefile(file)
 	if err != nil {
-		fmt.Fprintf(stderr, "made: cannot read %s: %s\n", escapeDisplay(file), escapeErr(err))
+		fmt.Fprintf(stderr, "made: cannot read %s: %s\n", displayPath(file), escapeErr(pathOnlyOnce(file, err)))
 		return 1
 	}
 
@@ -718,7 +718,7 @@ func runCheck(stdout, stderr io.Writer, path string, strict bool, opts lint.Opti
 		diags = []lint.Diagnostic{{Severity: lint.Error, Rule: "file-too-large",
 			Msg: fmt.Sprintf("file exceeds the maximum size of %d bytes", maxMadefileBytes)}}
 	case err != nil:
-		fmt.Fprintf(stderr, "made: cannot read %s: %s\n", escapeDisplay(path), escapeErr(err))
+		fmt.Fprintf(stderr, "made: cannot read %s: %s\n", displayPath(path), escapeErr(pathOnlyOnce(path, err)))
 		return 1
 	default:
 		diags, err = withinParseTimeout(func() []lint.Diagnostic { return lint.Check(source, opts) })
@@ -848,6 +848,26 @@ func escapeDisplay(s string) string {
 		}
 	}
 	return parser.ReplaceInvisible(b.String(), escapeRune)
+}
+
+// displayPath is escapeDisplay for a path, in double quotes when it is empty or
+// starts or ends with a space, which would otherwise not show in the message.
+func displayPath(p string) string {
+	s := escapeDisplay(p)
+	if p == "" || strings.TrimSpace(p) != p {
+		return `"` + s + `"`
+	}
+	return s
+}
+
+// pathOnlyOnce returns the reason inside err when it is a *fs.PathError for path, so
+// a message that already names path does not repeat it, otherwise err.
+func pathOnlyOnce(path string, err error) error {
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) && pathErr.Path == path {
+		return pathErr.Err
+	}
+	return err
 }
 
 // escapeRune returns r as a Go escape sequence, without quotes.
