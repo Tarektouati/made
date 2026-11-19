@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Tarektouati/made/internal/testenv"
 )
 
 // killGrace is made's grace period between asking a cancelled task to stop and
@@ -104,7 +106,7 @@ func TestCtrlCOnTTYTearsDownTrapChild(t *testing.T) {
 	if status := waitStatus(t, dir); status != "3" {
 		t.Errorf("made exit status = %q, want the trap's 3", status)
 	}
-	orphan := readPids(t, filepath.Join(dir, "orphan"))
+	orphan := testenv.ReadPids(t, filepath.Join(dir, "orphan"))
 	t.Cleanup(func() { _ = syscall.Kill(orphan[0], syscall.SIGKILL) })
 	checkGone(t, append(pids, orphan...))
 }
@@ -120,8 +122,8 @@ func startTTYTask(t *testing.T, script string, acts ...func(master *os.File)) (d
 	master := startOnTTY(t, dir, "gc")
 
 	waitForFile(t, filepath.Join(dir, "ready"))
-	madePid = readPids(t, filepath.Join(dir, "made.pid"))[0]
-	pids = readPids(t, filepath.Join(dir, "pids"))
+	madePid = testenv.ReadPids(t, filepath.Join(dir, "made.pid"))[0]
+	pids = testenv.ReadPids(t, filepath.Join(dir, "pids"))
 	t.Cleanup(func() {
 		for _, pid := range pids {
 			_ = syscall.Kill(pid, syscall.SIGKILL)
@@ -175,65 +177,4 @@ func waitStatus(t *testing.T, dir string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return strings.TrimSpace(string(b))
-}
-
-// checkGone fails the test for each of pids still running. Orphans are reparented to
-// init, so a zombie waiting for it to reap them counts as gone.
-func checkGone(t *testing.T, pids []int) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for _, pid := range pids {
-		for running(t, pid) {
-			if time.Now().After(deadline) {
-				t.Errorf("descendant pid %d still running after made exited", pid)
-				break
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-	}
-}
-
-// running reports whether pid exists and is not a zombie.
-func running(t *testing.T, pid int) bool {
-	if syscall.Kill(pid, 0) != nil {
-		return false
-	}
-	out, err := exec.CommandContext(t.Context(), "ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
-	return err == nil && !strings.HasPrefix(strings.TrimSpace(string(out)), "Z")
-}
-
-// waitForFile polls until path exists and is non-empty, failing after 10s.
-func waitForFile(t *testing.T, path string) {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if b, err := os.ReadFile(path); err == nil && len(b) > 0 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("%s never appeared", path)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
-// readPids reads the whitespace-separated pids in path.
-func readPids(t *testing.T, path string) []int {
-	t.Helper()
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	var pids []int
-	for _, f := range strings.Fields(string(b)) {
-		pid, err := strconv.Atoi(f)
-		if err != nil {
-			t.Fatalf("parse pid %q in %s: %v", f, path, err)
-		}
-		pids = append(pids, pid)
-	}
-	if len(pids) == 0 {
-		t.Fatalf("%s has no pids", path)
-	}
-	return pids
 }
