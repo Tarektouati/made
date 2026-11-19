@@ -63,7 +63,10 @@ func TestSecondSIGINTSkipsGrace(t *testing.T) {
 		t.Fatalf("send second SIGINT: %v", err)
 	}
 	select {
-	case <-waitErr:
+	case err := <-waitErr:
+		if err == nil {
+			t.Error("made exited 0 after two SIGINTs, want a failure status")
+		}
 		if elapsed := time.Since(begin); elapsed > 2*time.Second {
 			t.Errorf("made took %v to exit after two SIGINTs; want it to skip the 3s grace period", elapsed)
 		}
