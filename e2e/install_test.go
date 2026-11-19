@@ -22,12 +22,11 @@ import (
 // installVersion is the release served by the fake curl.
 const installVersion = "1.2.3"
 
-// curlStub stands in for curl: it logs each call, optionally sends @SIGNAL@ to the
-// calling shell, answers the latest-release redirect with installVersion, and serves
-// release files from @RELEASE@.
+// curlStub stands in for curl: it logs each call and each -o path, optionally sends
+// @SIGNAL@ to the calling shell, answers the latest-release redirect with
+// installVersion, and serves release files from @RELEASE@.
 const curlStub = `#!/bin/sh
 echo "$*" >>'@LOG@'
-[ -z '@SIGNAL@' ] || { kill -@SIGNAL@ "$PPID"; exit 22; }
 out= url=
 while [ $# -gt 0 ]; do
 	case $1 in
@@ -38,6 +37,8 @@ while [ $# -gt 0 ]; do
 	esac
 	shift
 done
+[ -z "$out" ] || printf 'out=%s\n' "$out" >>'@OUTLOG@'
+[ -z '@SIGNAL@' ] || { kill -@SIGNAL@ "$PPID"; exit 22; }
 case $url in
 */releases/latest) printf '%s' "${url%/latest}/tag/v@VERSION@"; exit 0 ;;
 */releases/download/v@VERSION@/*) ;;
@@ -55,7 +56,13 @@ type installOpts struct {
 	// omit lists commands (from installTools or gzip) left off PATH.
 	omit        []string
 	failingSudo bool
-	unsetHome   bool
+	// workingSudo puts a sudo on PATH that logs its arguments and exits 0 without
+	// running them.
+	workingSudo bool
+	// sha256Tool picks the SHA-256 tool on PATH: "" for sha256sum when available,
+	// "shasum" for shasum only, "none" for neither.
+	sha256Tool string
+	unsetHome  bool
 	// shadowMade puts a stub made on PATH, as an older install would be.
 	shadowMade bool
 	// stdin, when set, is fed to sh instead of running install.sh as a file.
@@ -99,6 +106,10 @@ type installResult struct {
 	code            int
 	home, work, tmp string
 	curlCalls       int
+	// curlOuts holds one out=PATH line per curl -o call.
+	curlOuts string
+	// sudoLog holds one line per call to the workingSudo stub.
+	sudoLog string
 }
 
 // releaseOpts alters the fake release written by customRelease.
@@ -234,20 +245,29 @@ func runInstall(t *testing.T, release string, opts installOpts, env ...string) i
 			"@TAR@", tarPath, "@CHMOD@", chmodPath,
 		).Replace(tarNoexecStub))
 	}
-	switch {
-	case lookPath("sha256sum"):
-		linkTool(t, bin, "sha256sum")
-	case lookPath("shasum"):
+	switch opts.sha256Tool {
+	case "none":
+	case "shasum":
 		linkTool(t, bin, "shasum")
+	case "":
+		switch {
+		case lookPath("sha256sum"):
+			linkTool(t, bin, "sha256sum")
+		case lookPath("shasum"):
+			linkTool(t, bin, "shasum")
+		default:
+			t.Skip("no sha256sum or shasum on PATH; skipping")
+		}
 	default:
-		t.Skip("no sha256sum or shasum on PATH; skipping")
+		t.Fatalf("sha256Tool = %q, want \"\", \"shasum\" or \"none\"", opts.sha256Tool)
 	}
-	log := filepath.Join(t.TempDir(), "curl.log")
-	writeExec(t, filepath.Join(bin, "curl"), strings.NewReplacer(
-		"@LOG@", log, "@RELEASE@", release, "@VERSION@", installVersion, "@SIGNAL@", opts.signal,
-	).Replace(curlStub))
+	log, outLog := writeCurlStub(t, bin, release, opts.signal)
 	if opts.failingSudo {
 		writeExec(t, filepath.Join(bin, "sudo"), "#!/bin/sh\nexit 1\n")
+	}
+	sudoLog := filepath.Join(t.TempDir(), "sudo.log")
+	if opts.workingSudo {
+		writeExec(t, filepath.Join(bin, "sudo"), fmt.Sprintf("#!/bin/sh\necho \"$*\" >>'%s'\n", sudoLog))
 	}
 	if opts.shadowMade {
 		writeExec(t, filepath.Join(bin, "made"), "#!/bin/sh\necho made v0.0.1\n")
@@ -286,12 +306,61 @@ func runInstall(t *testing.T, release string, opts installOpts, env ...string) i
 	if data, err := os.ReadFile(log); err == nil {
 		res.curlCalls = strings.Count(string(data), "\n")
 	}
+	if data, err := os.ReadFile(outLog); err == nil {
+		res.curlOuts = string(data)
+	}
+	if data, err := os.ReadFile(sudoLog); err == nil {
+		res.sudoLog = string(data)
+	}
 	return res
+}
+
+// writeCurlStub writes curlStub as bin/curl, serving release and sending signal
+// (if set), and returns the files it logs its calls and its -o paths to.
+func writeCurlStub(t *testing.T, bin, release, signal string) (log, outLog string) {
+	t.Helper()
+	dir := t.TempDir()
+	log, outLog = filepath.Join(dir, "curl.log"), filepath.Join(dir, "curl-out.log")
+	writeExec(t, filepath.Join(bin, "curl"), strings.NewReplacer(
+		"@LOG@", log, "@OUTLOG@", outLog, "@RELEASE@", release, "@VERSION@", installVersion, "@SIGNAL@", signal,
+	).Replace(curlStub))
+	return log, outLog
+}
+
+// scriptTmp returns the temp dir install.sh downloaded into, taken from the first
+// curl -o path other than /dev/null. It is not always under TMPDIR: macOS mktemp -d
+// ignores it.
+func scriptTmp(t *testing.T, res installResult) string {
+	t.Helper()
+	for line := range strings.Lines(res.curlOuts) {
+		if out := strings.TrimSuffix(strings.TrimPrefix(line, "out="), "\n"); out != "/dev/null" {
+			return filepath.Dir(out)
+		}
+	}
+	t.Fatalf("no curl -o path other than /dev/null in %q", res.curlOuts)
+	return ""
 }
 
 func lookPath(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
+}
+
+func TestScriptTmpWithSpace(t *testing.T) {
+	bin := t.TempDir()
+	_, outLog := writeCurlStub(t, bin, t.TempDir(), "")
+	tmp := filepath.Join(t.TempDir(), "tmp dir")
+	archive := "made_" + installVersion + "_linux_amd64.tar.gz"
+	url := "https://github.com/Tarektouati/made/releases/download/v" + installVersion + "/" + archive
+	// The release is empty, so curl exits 22 after logging the call.
+	_ = exec.CommandContext(t.Context(), filepath.Join(bin, "curl"), "-fsSL", "-o", filepath.Join(tmp, archive), url).Run()
+	data, err := os.ReadFile(outLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := scriptTmp(t, installResult{curlOuts: string(data)}); got != tmp {
+		t.Errorf("scriptTmp = %q, want %q", got, tmp)
+	}
 }
 
 // requireInstalled fails the test unless path is an executable made binary.
@@ -424,6 +493,14 @@ func TestInstallScript(t *testing.T) {
 			},
 			wantStdout: "Downloading made v1.2.3",
 		},
+		{
+			name:       "missing sha256 tool",
+			env:        func(_ *testing.T, dir string) []string { return []string{"MADE_INSTALL_DIR=" + dir} },
+			opts:       installOpts{sha256Tool: "none"},
+			wantCode:   1,
+			wantStderr: []string{"made-install: required command not found: sha256sum or shasum"},
+			noCurl:     true,
+		},
 	}
 	for _, tool := range []string{"gzip", "awk", "cut", "mktemp", "install"} {
 		cases = append(cases, installCase{
@@ -466,13 +543,18 @@ func TestInstallScript(t *testing.T) {
 	}
 }
 
-// TestInstallScriptDefaultDir covers the default target, so it runs only where
-// /usr/local/bin is not writable and can never be installed into.
-func TestInstallScriptDefaultDir(t *testing.T) {
+// skipUnlessDefaultDirUnwritable skips tests of the default target where
+// /usr/local/bin is writable, so they can never install into it.
+func skipUnlessDefaultDirUnwritable(t *testing.T) {
+	t.Helper()
 	const wOK = 0x2
 	if os.Geteuid() == 0 || syscall.Access("/usr/local/bin", wOK) == nil {
-		t.Skip("/usr/local/bin is writable; skipping")
+		t.Skipf("/usr/local/bin is writable (euid %d); skipping", os.Geteuid())
 	}
+}
+
+func TestInstallScriptDefaultDir(t *testing.T) {
+	skipUnlessDefaultDirUnwritable(t)
 	release := releaseDir(t)
 	cases := []struct {
 		name       string
@@ -501,6 +583,31 @@ func TestInstallScriptDefaultDir(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestInstallScriptSudo checks the commands run through a working sudo. The sudo
+// stub runs nothing, so the check after installing finds no /usr/local/bin/made
+// and the run fails there.
+func TestInstallScriptSudo(t *testing.T) {
+	skipUnlessDefaultDirUnwritable(t)
+	if _, err := os.Lstat("/usr/local/bin/made"); err == nil {
+		t.Skip("/usr/local/bin/made exists; skipping")
+	}
+	res := runInstall(t, releaseDir(t), installOpts{workingSudo: true})
+	if res.code != 1 {
+		t.Fatalf("exit = %d, want 1\nstdout: %s\nstderr: %s", res.code, res.stdout, res.stderr)
+	}
+	if want := "made-install: installed /usr/local/bin/made, but it failed to run"; !strings.Contains(res.stderr, want) {
+		t.Errorf("stderr = %q, want it to contain %q", res.stderr, want)
+	}
+	if strings.Contains(res.stderr, "sudo failed") {
+		t.Errorf("stderr = %q, want no sudo fallback", res.stderr)
+	}
+	want := "mkdir -p /usr/local/bin\ninstall -m 0755 " + scriptTmp(t, res) + "/made /usr/local/bin/made\n"
+	if res.sudoLog != want {
+		t.Errorf("sudo calls = %q, want %q", res.sudoLog, want)
+	}
+	requireNotInstalled(t, filepath.Join(res.home, ".local", "bin", "made"))
 }
 
 func TestInstallScriptTruncated(t *testing.T) {
@@ -606,6 +713,10 @@ func TestInstallScriptRelease(t *testing.T) {
 			}},
 			wantCode:   1,
 			wantStderr: []string{"made-install: no checksum found for made_"},
+		},
+		{
+			name: "shasum only",
+			opts: installOpts{sha256Tool: "shasum"},
 		},
 		{
 			name:       "corrupt archive",
