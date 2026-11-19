@@ -326,8 +326,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		printNames(stdout, tasks)
 		return 0
 	}
+	runTask := !list && fs.NArg() > 0
+	// Before runnableTasks, so its warnings cite lines of a file already named.
+	if runTask && res.fromParent && len(res.others) == 0 { // the duplicate note already named it
+		fmt.Fprintf(stderr, "made: using %s\n", escapeDisplay(file))
+	}
+	tasks = runnableTasks(stderr, tasks)
 
-	if list || fs.NArg() == 0 {
+	if !runTask {
 		printTasks(stdout, stderr, file, tasks)
 		return 0
 	}
@@ -369,10 +375,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		dir = filepath.Dir(abs)
-	}
-
-	if res.fromParent && len(res.others) == 0 { // the duplicate note already named it
-		fmt.Fprintf(stderr, "made: using %s\n", escapeDisplay(file))
 	}
 
 	// Everything after the task name goes to the script. Flag parsing already stopped
@@ -840,6 +842,27 @@ func find(tasks []parser.Task, name string) (parser.Task, bool) {
 		}
 	}
 	return parser.Task{}, false
+}
+
+// runnableTasks drops the tasks that cannot be run by name, reporting each on
+// stderr: one with an empty name, and one whose name an earlier task already has
+// (find returns the first).
+func runnableTasks(stderr io.Writer, tasks []parser.Task) []parser.Task {
+	defined := map[string]int{} // task name -> line of its first definition
+	kept := tasks[:0:0]
+	for _, t := range tasks {
+		if t.Name == "" {
+			fmt.Fprintf(stderr, "made: task at line %d has an empty name; it is skipped\n", t.Line)
+			continue
+		}
+		if first, ok := defined[t.Name]; ok {
+			fmt.Fprintf(stderr, "made: task %q is defined again at line %d; only the first (line %d) runs\n", t.Name, t.Line, first)
+			continue
+		}
+		defined[t.Name] = t.Line
+		kept = append(kept, t)
+	}
+	return kept
 }
 
 // sanitizeDisplay removes C0/C1 control characters, DEL, line/paragraph separators

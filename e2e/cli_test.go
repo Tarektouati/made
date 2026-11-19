@@ -530,6 +530,15 @@ func TestCheckReportsProblems(t *testing.T) {
 	}
 }
 
+func TestDuplicateTaskRunsFirstWithWarning(t *testing.T) {
+	dir := writeTasks(t, "Madefile.md", "### dup\n```bash\necho first\n```\n\n### dup\n```bash\necho second\n```\n")
+	stdout, stderr, code := runMade(t, dir, "dup")
+	want := `made: task "dup" is defined again at line 6; only the first (line 1) runs` + "\n"
+	if code != 0 || stdout != "first\n" || stderr != want {
+		t.Errorf("exit = %d, stdout = %q, stderr = %q; want 0, %q and %q", code, stdout, stderr, "first\n", want)
+	}
+}
+
 func TestCheckStrictAcceptsInlineMarkupName(t *testing.T) {
 	dir := writeTasks(t, "Madefile.md", "### `build`\n```bash\necho ok\n```\n")
 	if stdout, stderr, code := runMade(t, dir, "--check", "--strict"); code != 0 || stdout != "" || stderr != "" {

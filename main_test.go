@@ -1600,6 +1600,151 @@ func TestListNamesSkipsDuplicateNote(t *testing.T) {
 	}
 }
 
+// dupTasksMD defines "dup" twice; the second definition exits 3, so a zero exit
+// code shows the first one ran.
+const dupTasksMD = "### dup\nThe first.\n```bash\nexit 0\n```\n\n" +
+	"### dup\nThe second.\n```bash\nexit 3\n```\n\n" +
+	"### other\n```bash\nexit 0\n```\n"
+
+const dupWarning = `made: task "dup" is defined again at line 7; only the first (line 1) runs` + "\n"
+
+func TestRunWarnsDuplicateTask(t *testing.T) {
+	f := writeTemp(t, "Madefile.md", dupTasksMD)
+	listing := "Tasks in " + f + ":\n  dup    The first.\n  other  \n"
+	for _, tc := range []struct {
+		name       string
+		args       []string
+		wantCode   int
+		wantStdout string // the task's own output goes to the real stdout
+	}{
+		{name: "run duplicated task", args: []string{"dup"}},
+		{name: "run other task", args: []string{"other"}},
+		{name: "list", args: []string{"-l"}, wantStdout: listing},
+		{name: "no task", args: nil, wantStdout: listing},
+		{name: "unknown task", args: []string{"nope"}, wantCode: 1, wantStdout: listing},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := run(append([]string{"-f", f}, tc.args...), &stdout, &stderr)
+			if code != tc.wantCode {
+				t.Errorf("run = %d, want %d (stderr: %s)", code, tc.wantCode, &stderr)
+			}
+			if got := strings.Count(stderr.String(), dupWarning); got != 1 {
+				t.Errorf("stderr = %q, want the warning %q once", &stderr, dupWarning)
+			}
+			if !strings.HasPrefix(stderr.String(), dupWarning) {
+				t.Errorf("stderr = %q, want it to start with the warning", &stderr)
+			}
+			if stdout.String() != tc.wantStdout {
+				t.Errorf("stdout = %q, want %q", &stdout, tc.wantStdout)
+			}
+		})
+	}
+}
+
+// TestRunUsingNoteBeforeDuplicateWarning pins the stderr order when the Madefile
+// comes from a parent directory: the using note names the file whose lines the
+// duplicate warning then cites.
+func TestRunUsingNoteBeforeDuplicateWarning(t *testing.T) {
+	root := filepath.Dir(writeTemp(t, "Madefile.md", dupTasksMD))
+	sub := filepath.Join(root, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(sub)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"dup"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("run = %d, want 0 (stderr: %s)", code, &stderr)
+	}
+	got := stderr.String()
+	if !strings.HasPrefix(got, "made: using ") || !strings.HasSuffix(got, "Madefile.md\n"+dupWarning) || strings.Count(got, "\n") != 2 {
+		t.Errorf("stderr = %q, want one using line and then the duplicate warning", got)
+	}
+}
+
+func TestRunWarnsEachRedefinition(t *testing.T) {
+	f := writeTemp(t, "Madefile.md", "### a\n```bash\nexit 0\n```\n### a\n```bash\nexit 3\n```\n### a\n```bash\nexit 4\n```\n")
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-f", f, "a"}, &stdout, &stderr); code != 0 {
+		t.Errorf("run = %d, want 0 (stderr: %s)", code, &stderr)
+	}
+	want := `made: task "a" is defined again at line 5; only the first (line 1) runs` + "\n" +
+		`made: task "a" is defined again at line 9; only the first (line 1) runs` + "\n"
+	if stderr.String() != want {
+		t.Errorf("stderr = %q, want %q", &stderr, want)
+	}
+}
+
+func TestListNamesQuietOnDuplicates(t *testing.T) {
+	f := writeTemp(t, "Madefile.md", dupTasksMD)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-f", f, "--list-names"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("run(--list-names) = %d, want 0 (stderr: %s)", code, &stderr)
+	}
+	if stderr.Len() != 0 || strings.Contains(stdout.String(), "defined again") {
+		t.Errorf("stdout = %q, stderr = %q; want no warning", &stdout, &stderr)
+	}
+}
+
+func TestRunSkipsEmptyNames(t *testing.T) {
+	f := writeTemp(t, "Madefile.md", "### ok\n```bash\nexit 0\n```\n\n###\n```bash\nexit 3\n```\n\n### ` `\n```bash\nexit 4\n```\n")
+	const warnings = "made: task at line 6 has an empty name; it is skipped\n" +
+		"made: task at line 11 has an empty name; it is skipped\n"
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-f", f, "-l"}, &stdout, &stderr); code != 0 {
+		t.Errorf("run(-l) = %d, want 0 (stderr: %s)", code, &stderr)
+	}
+	if want := "Tasks in " + f + ":\n  ok  \n"; stdout.String() != want {
+		t.Errorf("stdout = %q, want %q", &stdout, want)
+	}
+	if stderr.String() != warnings {
+		t.Errorf("stderr = %q, want %q", &stderr, warnings)
+	}
+
+	for _, name := range []string{"", " "} {
+		stdout.Reset()
+		stderr.Reset()
+		if code := run([]string{"-f", f, name}, &stdout, &stderr); code != 1 {
+			t.Errorf("run(%q) = %d, want 1", name, code)
+		}
+		if want := warnings + fmt.Sprintf("made: unknown task %q\n\n", name); stderr.String() != want {
+			t.Errorf("run(%q) stderr = %q, want %q", name, &stderr, want)
+		}
+	}
+}
+
+// TestRunWarningsMatchCheck keeps the run-time warnings on the same lines as the
+// duplicate-task and empty-name findings of made --check.
+func TestRunWarningsMatchCheck(t *testing.T) {
+	src := "### a\n```bash\nx\n```\n### a\nprose\n### a\n```bash\ny\n```\n" +
+		"###\n```bash\nx\n```\n### ` `\n```bash\nx\n```\n### <br>\n```bash\nx\n```\n" +
+		"## Section\n### b\n```bash\nx\n```\n### b\n```sh\nx\n```\n### a\n```bash\nz\n```\n"
+	var want []int
+	for _, d := range lint.Check([]byte(src), lint.Options{}) {
+		if d.Rule == "duplicate-task" || d.Rule == "empty-name" {
+			want = append(want, d.Line)
+		}
+	}
+	f := writeTemp(t, "Madefile.md", src)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-f", f, "-l"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("run(-l) = %d, want 0 (stderr: %s)", code, &stderr)
+	}
+	var got []int
+	for line := range strings.Lines(stderr.String()) {
+		_, rest, _ := strings.Cut(line, "at line ")
+		var n int
+		if _, err := fmt.Sscanf(rest, "%d", &n); err != nil {
+			t.Fatalf("cannot read the line number in %q: %v", line, err)
+		}
+		got = append(got, n)
+	}
+	if len(want) == 0 || !slices.Equal(got, want) {
+		t.Errorf("warned lines %v, --check lines %v (stderr: %s)", got, want, &stderr)
+	}
+}
+
 // scotlandFlag is an emoji tag sequence: black flag, tags "gbsct", cancel tag.
 const scotlandFlag = "🏴\U000e0067\U000e0062\U000e0073\U000e0063\U000e0074\U000e007f"
 
