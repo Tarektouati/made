@@ -2,9 +2,9 @@
 # Load it with: eval "$(made completion bash)"   (e.g. in ~/.bashrc)
 
 # __made_split_words sets __made_words, __made_cword, __made_cur and __made_prev
-# (locals of the caller) from COMP_WORDS, with words that bash split on ":"
-# (COMP_WORDBREAKS) joined back, so a task name like "ns:task" is one word. Words are
-# joined when nothing separates them in COMP_LINE.
+# (locals of the caller) from COMP_WORDS, with words that bash 4+ split on ":", "="
+# or "@" (COMP_WORDBREAKS) joined back, so "ns:task" or "--file=x" is one word. Words
+# are joined when nothing separates them in COMP_LINE.
 __made_split_words() {
     local line=${COMP_LINE:0:COMP_POINT} trimmed w i n
     __made_words=()
@@ -13,7 +13,7 @@ __made_split_words() {
         trimmed=${line#"${line%%[![:space:]]*}"}
         n=${#__made_words[@]}
         if ((n)) && ((${#trimmed} == ${#line})) &&
-            [[ $w == : || ${__made_words[n-1]} == *: ]]; then
+            [[ $w == [:=@] || ${__made_words[n-1]} == *[:=@] ]]; then
             __made_words[n-1]=${__made_words[n-1]}$w
         else
             __made_words[n]=$w
@@ -60,6 +60,85 @@ __made_dequote() {
     printf '%s' "$out"
 }
 
+# __made_comp_word sets __made_ctx and __made_keep (locals of _made) from the word
+# being completed, as typed. Readline replaces only part of it: the text after a quote
+# left open by the cursor, or else the text after the last unquoted ":" or "=", or from
+# the last unquoted "@", in COMP_WORDBREAKS. __made_keep is the part it leaves, and
+# __made_ctx the open quote.
+__made_comp_word() {
+    local w=$1 c q="" i=0 qi=0 brk=0
+    while ((i < ${#w})); do
+        c=${w:i:1}
+        ((i++))
+        if [[ $q == \' ]]; then
+            if [[ $c == \' ]]; then
+                q=""
+            fi
+        elif [[ -z $q && $c == [\'\"] ]]; then
+            q=$c
+            qi=$((i - 1))
+        elif [[ $c == \" ]]; then
+            q=""
+        elif [[ $c == \\ ]]; then
+            ((i++))
+        elif [[ -z $q && $c == [:=] && $COMP_WORDBREAKS == *"$c"* ]]; then
+            brk=$i
+        elif [[ -z $q && $c == @ && $COMP_WORDBREAKS == *@* ]]; then
+            brk=$((i - 1))
+        fi
+    done
+    __made_ctx=$q
+    if [[ -n $q ]]; then
+        __made_keep=${w:0:qi}
+    else
+        __made_keep=${w:0:brk}
+    fi
+}
+
+# __made_quote sets __made_q to a task name (or its end) quoted so the shell reads it
+# back as one literal word once readline inserts it: with %q, or, after an open quote
+# ($1), escaped for that quote. Readline then adds the closing quote, unless the text
+# already ends with that character, so it is added here in that case. A "!" inside
+# double quotes is history-expanded, so it goes in single quotes.
+__made_quote() {
+    local i c p out
+    if [[ -z $1 ]]; then
+        printf -v __made_q '%q' "$2"
+        # bash 3.2 leaves a ~ unescaped at the start and after = or :, where bash
+        # expands it (a=~root). A loop, as ${q//...} treats a backslash in the
+        # replacement differently across bash versions.
+        if [[ $__made_q == "~"* || $__made_q == *[=:]"~"* ]]; then
+            out= p==
+            for ((i = 0; i < ${#__made_q}; i++)); do
+                c=${__made_q:i:1}
+                if [[ $c == "~" && $p == [=:] ]]; then
+                    out=$out\\
+                fi
+                out=$out$c
+                p=$c
+            done
+            __made_q=$out
+        fi
+        return
+    fi
+    __made_q=
+    for ((i = 0; i < ${#2}; i++)); do
+        c=${2:i:1}
+        if [[ $1 == \' && $c == \' ]]; then
+            __made_q=$__made_q\'\\\'\'
+        elif [[ $1 == \" && $c == [\\\"\$\`] ]]; then
+            __made_q=$__made_q\\$c
+        elif [[ $1 == \" && $c == ! ]]; then
+            __made_q=$__made_q\"\'!\'\"
+        else
+            __made_q=$__made_q$c
+        fi
+    done
+    if [[ ${__made_q: -1} == "$1" ]]; then
+        __made_q=$__made_q$1
+    fi
+}
+
 # __made_file_value prints a -f value as typed with its quoting removed and a leading
 # ~, $NAME or ${NAME} expanded; a variable only outside single quotes. Nothing else is
 # expanded: NAME must be a plain variable name, as ${!NAME} runs the code in a
@@ -98,8 +177,8 @@ _made() {
 
     # Scan the words before the cursor for a -f/--file value, the --check flags and the
     # first positional word. Go's flag package stops at the first non-flag, like this
-    # loop. bash splits "--file=x" into "--file" "=" "x" by default (COMP_WORDBREAKS),
-    # so handle both.
+    # loop. __made_split_words has joined "--file=x" back if bash split it on "=". A
+    # separate "=" word was typed with spaces, and Go reads it as the file name.
     for ((__made_i = 1; __made_i < __made_cword; __made_i++)); do
         __made_w=${__made_words[__made_i]}
         case $__made_w in
@@ -108,9 +187,6 @@ _made() {
                 __made_checkmode=1
                 ;;
             -f | -file | --file)
-                if [[ ${__made_words[__made_i+1]} == "=" ]]; then
-                    ((__made_i++))
-                fi
                 if ((__made_i + 1 < __made_cword)); then
                     __made_fileargs=(-f "$(__made_file_value "${__made_words[__made_i+1]}")")
                 fi
@@ -153,11 +229,6 @@ _made() {
 
     case $__made_prev in
         -f | -file | --file) return 0 ;; # file names, via complete -o default
-        =)
-            case ${__made_words[__made_cword-2]} in
-                -f | -file | --file) return 0 ;;
-            esac
-            ;;
     esac
 
     # --check takes no task, and --strict and --host need --check: offer only the
@@ -175,14 +246,17 @@ _made() {
         return 0
     fi
 
-    # bash replaces only the text after the last ":" in the current word, so drop what
-    # comes before it from each match.
-    local __made_name __made_prefix=""
-    if [[ $__made_cur == *:* && $COMP_WORDBREAKS == *:* ]]; then
-        __made_prefix=${__made_cur%"${__made_cur##*:}"}
-    fi
+    # Match names against the word with its quoting removed, and reply with the part
+    # readline replaces, quoted: names come from the task file and may hold shell syntax.
+    local __made_name __made_full __made_kept __made_ctx __made_keep __made_q
+    __made_comp_word "$__made_cur"
+    __made_full=$(__made_dequote "$__made_cur")
+    __made_kept=$(__made_dequote "$__made_keep")
     while IFS=$'\t' read -r __made_name _; do
-        [[ $__made_name == "$__made_cur"* ]] && COMPREPLY+=("${__made_name#"$__made_prefix"}")
+        if [[ $__made_name == "$__made_full"* ]]; then
+            __made_quote "$__made_ctx" "${__made_name#"$__made_kept"}"
+            COMPREPLY+=("$__made_q")
+        fi
     done < <(__made_list_names "${__made_fileargs[@]}"; printf '%s\n' init completion)
     return 0
 }

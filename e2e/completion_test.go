@@ -33,13 +33,31 @@ const edgeMD = "### back\\\\slash\n" +
 	"echo\n" +
 	"```\n"
 
+// quoteNames are the task names in quoteMD: each has a character the shell would
+// read as syntax if completion inserted it unquoted.
+var quoteNames = []string{
+	"a b", "it's", `say "hi"`, "tick`x", "$(id)", "dollar $(touch MARK)",
+	"with space", "ns:task", "a=b", `back\slash`, "~root", "bang!", "a=~root", "x:~y",
+	"user@host",
+}
+
+// quoteMD is a task file with the quoteNames, escaped as Markdown where needed.
+var quoteMD = func() string {
+	var b strings.Builder
+	for _, name := range quoteNames {
+		name = strings.NewReplacer(`\`, `\\`, "`", "\\`").Replace(name)
+		b.WriteString("### " + name + "\n```sh\n:\n```\n")
+	}
+	return b.String()
+}()
+
 // completionDir returns a repository-like TempDir holding Madefile.md (madefileMD),
-// other.md and "my tasks.md" (both otherMD), and edge.md (edgeMD).
+// other.md and "my tasks.md" (both otherMD), edge.md (edgeMD) and quote.md (quoteMD).
 func completionDir(t *testing.T) string {
 	t.Helper()
 	dir := writeTasks(t, "Madefile.md", madefileMD)
 	mkdir(t, filepath.Join(dir, ".git"))
-	for name, content := range map[string]string{"other.md": otherMD, "my tasks.md": otherMD, "edge.md": edgeMD} {
+	for name, content := range map[string]string{"other.md": otherMD, "my tasks.md": otherMD, "edge.md": edgeMD, "quote.md": quoteMD} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -127,7 +145,14 @@ printf '%s\n' "${COMPREPLY[@]}"`
 		{line: []string{"made", ""}, want: []string{"say-hello", "build", "init", "completion"}},
 		{line: []string{"made", "b"}, want: []string{"build"}, not: []string{"say-hello"}},
 		{line: []string{"made", "-f", "other.md", ""}, want: []string{"ns:task"}, not: []string{"build"}},
-		{line: []string{"made", "--file", "=", "other.md", ""}, want: []string{"ns:task"}, not: []string{"build"}},
+		// bash 4+ splits "--file=other.md" on "=", bash 3.2 does not. With spaces, Go's
+		// flag package reads "=" as the file name and other.md as the task.
+		{line: []string{"made", "--file", "=", "other.md", ""}, compLine: "made --file=other.md ", want: []string{"ns:task"}, not: []string{"build"}},
+		{line: []string{"made", "--file=other.md", ""}, want: []string{"ns:task"}, not: []string{"build"}},
+		{line: []string{"made", "--file", "=", "other.md", ""}, not: []string{"ns:task", "build"}},
+		{line: []string{"made", "-f", "=", ""}, want: []string{"init"}, not: []string{"build", "ns:task"}},
+		{line: []string{"made", "--file", "="}, compLine: "made --file=", not: []string{"build", "--file"}},
+		{line: []string{"made", "--file="}, not: []string{"build", "--file"}},
 		{line: []string{"made", "--"}, want: []string{"--file", "--list", "--version", "--no-chdir", "--check", "--strict", "--host"}, not: []string{"--list-names"}},
 		{line: []string{"made", "completion", ""}, want: []string{"bash", "zsh", "fish"}, not: []string{"build"}},
 		{line: []string{"made", "build", ""}, not: []string{"build", "--file"}},
@@ -139,7 +164,7 @@ printf '%s\n' "${COMPREPLY[@]}"`
 		{line: []string{"made", "-f", "'my tasks.md'", ""}, want: []string{"ns:task"}, not: []string{"build"}},
 		{line: []string{"made", "-f", `my\ tasks.md`, ""}, want: []string{"ns:task"}, not: []string{"build"}},
 		{line: []string{"made", "-f", `"my tasks.md"`, ""}, want: []string{"ns:task"}, not: []string{"build"}},
-		{line: []string{"made", "-f", "edge.md", ""}, want: []string{`back\slash`}, not: []string{"empty"}},
+		{line: []string{"made", "-f", "edge.md", ""}, want: []string{`back\\slash`}, not: []string{"empty"}},
 		// --check takes no task, and --strict and --host need --check.
 		{line: []string{"made", "--check", ""}, not: []string{"build", "init", "completion"}},
 		{line: []string{"made", "--strict", ""}, not: []string{"build", "init", "completion"}},
@@ -172,6 +197,78 @@ printf '%s\n' "${COMPREPLY[@]}"`
 		args := append([]string{"-c", script, "bash", compLine}, tc.line...)
 		got := lines(runShell(t, dir, "bash", args...))
 		checkCompletions(t, got, tc)
+	}
+	checkNoRun(t, dir)
+}
+
+// TestCompletionBashQuoting checks that each task name bash completion offers, once
+// inserted the way readline does it, is one shell word equal to the name, and that no
+// insertion runs a command. Readline replaces the text after an open quote, or else
+// after the last unquoted ":" or "=" (keep is what it leaves before the reply), and
+// then closes an open quote unless the reply already ends with it (close). Each line
+// is read by a bash with history expansion on, as in an interactive shell. words is
+// the word under the cursor as bash 3.2 and as bash 4+ split it into COMP_WORDS.
+func TestCompletionBashQuoting(t *testing.T) {
+	dir := completionDir(t)
+	const script = `eval "$(made completion bash)"
+keep=$1 close=$2 COMP_LINE=$3; COMP_POINT=${#COMP_LINE}; shift 3
+COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _made
+for r in "${COMPREPLY[@]}"; do
+    line=$keep$r
+    if [[ -n $close && ${r: -1} != "$close" ]]; then line=$line$close; fi
+    out=$(printf 'set -o history -H\nset -- %s\nprintf "%%s\\t%%s\\n" "$#" "$1"\n' "$line" | bash 2>/dev/null)
+    [[ -n $out ]] || out="error"$'\t'"$line"
+    printf '%s\n' "$out"
+done`
+	t.Logf("bash %s", runShell(t, dir, "bash", "-c", `printf %s "$BASH_VERSION"`))
+
+	type quoteCase struct {
+		words       [][]string
+		keep, close string
+		want        []string
+	}
+	for _, tc := range []quoteCase{
+		{words: [][]string{{""}}, want: quoteNames},
+		{words: [][]string{{`with\ s`}}, want: []string{"with space"}},
+		{words: [][]string{{"'with s"}}, keep: "'", close: "'", want: []string{"with space"}},
+		{words: [][]string{{`"with s`}}, keep: `"`, close: `"`, want: []string{"with space"}},
+		{words: [][]string{{"'it"}}, keep: "'", close: "'", want: []string{"it's"}},
+		{words: [][]string{{`"say`}}, keep: `"`, close: `"`, want: []string{`say "hi"`}},
+		{words: [][]string{{`"dol`}}, keep: `"`, close: `"`, want: []string{"dollar $(touch MARK)"}},
+		{words: [][]string{{`"ban`}}, keep: `"`, close: `"`, want: []string{"bang!"}},
+		{words: [][]string{{`\$\(i`}}, want: []string{"$(id)"}},
+		{words: [][]string{{`\~r`}}, want: []string{"~root"}},
+		{words: [][]string{{`back\\s`}}, want: []string{`back\slash`}},
+		{words: [][]string{{"'ns:t"}, {"'ns", ":", "t"}}, keep: "'", close: "'", want: []string{"ns:task"}},
+		{words: [][]string{{`ns\:t`}, {`ns\`, ":", "t"}}, want: []string{"ns:task"}},
+		{words: [][]string{{"ns:t"}, {"ns", ":", "t"}}, keep: "ns:", want: []string{"ns:task"}},
+		{words: [][]string{{"a="}, {"a", "="}, {"a", "=", ""}}, keep: "a=", want: []string{"a=b", "a=~root"}},
+		{words: [][]string{{"'a="}, {"'a", "="}}, keep: "'", close: "'", want: []string{"a=b", "a=~root"}},
+		{words: [][]string{{"x:"}, {"x", ":"}}, keep: "x:", want: []string{"x:~y"}},
+		// Readline keeps an "@" in the text it replaces.
+		{words: [][]string{{"user@h"}, {"user", "@", "h"}}, keep: "user", want: []string{"user@host"}},
+		{words: [][]string{{"user@"}, {"user", "@"}, {"user", "@", ""}}, keep: "user", want: []string{"user@host"}},
+		{words: [][]string{{`user\@h`}, {`user\`, "@", "h"}}, want: []string{"user@host"}},
+		{words: [][]string{{"'user@h"}, {"'user", "@", "h"}}, keep: "'", close: "'", want: []string{"user@host"}},
+	} {
+		for _, words := range tc.words {
+			compLine := "made -f quote.md " + strings.Join(words, "")
+			args := append([]string{"-c", script, "bash", tc.keep, tc.close, compLine, "made", "-f", "quote.md"}, words...)
+			got := lines(runShell(t, dir, "bash", args...))
+			for _, g := range got {
+				if !strings.HasPrefix(g, "1\t") {
+					t.Errorf("%q: inserted completion is not one word: %q", compLine, g)
+				}
+			}
+			for _, name := range tc.want {
+				if n := strings.Count("\n"+strings.Join(got, "\n")+"\n", "\n1\t"+name+"\n"); n != 1 {
+					t.Errorf("%q: %q offered %d times, want once; got %q", compLine, name, n, got)
+				}
+			}
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "MARK")); err == nil {
+		t.Error("an inserted completion ran a command substitution")
 	}
 	checkNoRun(t, dir)
 }
