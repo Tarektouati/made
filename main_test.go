@@ -1564,6 +1564,25 @@ func TestListNames(t *testing.T) {
 	}
 }
 
+// TestListNamesSkipsEmptyName leaves out tasks whose name is empty once sanitized: a
+// line "\tdesc" would make bash's read take the description as the name.
+func TestListNamesSkipsEmptyName(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tasks.md")
+	md := "### \nempty\n```sh\necho\n```\n" +
+		"### \u200b\ninvisible\n```sh\necho\n```\n" +
+		"### hello\nSay hello.\n```sh\necho\n```\n"
+	if err := os.WriteFile(path, []byte(md), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-f", path, "--list-names"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("run(--list-names) = %d, want 0 (stderr: %s)", code, &stderr)
+	}
+	if got, want := stdout.String(), "hello\tSay hello.\n"; got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+}
+
 // TestListNamesSkipsDuplicateNote keeps stdout and stderr clean for completion
 // scripts when several Madefile names exist.
 func TestListNamesSkipsDuplicateNote(t *testing.T) {
