@@ -285,6 +285,120 @@ func TestRunInterpreterStartErrors(t *testing.T) {
 	}
 }
 
+func TestResolve(t *testing.T) {
+	tests := []struct {
+		name     string
+		lang     string
+		bins     []fakeBin
+		unixOnly bool
+		wantIs   error // nil: Resolve returns nil
+	}{
+		{name: "ruby not found", lang: "ruby", wantIs: exec.ErrNotFound},
+		{name: "python not found", lang: "python", wantIs: exec.ErrNotFound},
+		{name: "plain fence not found", wantIs: exec.ErrNotFound},
+		{name: "not executable", lang: "ruby", bins: []fakeBin{{"ruby", 0o644, "#!/bin/sh\nexit 0\n"}}, unixOnly: true, wantIs: fs.ErrPermission},
+		{name: "found", lang: "ruby", bins: []fakeBin{{"ruby", 0o755, "#!/bin/sh\nexit 0\n"}}, unixOnly: true},
+		{name: "python falls back", lang: "python", bins: []fakeBin{{"python", 0o755, "#!/bin/sh\nexit 0\n"}}, unixOnly: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.unixOnly && runtime.GOOS == "windows" {
+				t.Skip("needs Unix permission bits and shebangs")
+			}
+			fakePath(t, tt.bins...)
+			task := parser.Task{Name: "rb", Lang: tt.lang, Script: "x"}
+			err := Resolve(task)
+			if tt.wantIs == nil {
+				if err != nil {
+					t.Fatalf("Resolve: %v, want nil", err)
+				}
+				return
+			}
+			if !errors.Is(err, tt.wantIs) {
+				t.Fatalf("Resolve: error = %v, want it to wrap %v", err, tt.wantIs)
+			}
+			var ie *InterpreterError
+			if !errors.As(err, &ie) {
+				t.Fatalf("Resolve: error = %v (%T), want *InterpreterError", err, err)
+			}
+			if runErr := Run(context.Background(), nil, task, "", nil); runErr == nil || runErr.Error() != err.Error() {
+				t.Errorf("Resolve: error = %q, want Run's %q", err, runErr)
+			}
+		})
+	}
+}
+
+func TestResolveUnsupported(t *testing.T) {
+	if err := Resolve(parser.Task{Name: "x", Lang: "cobol", Script: "x"}); err == nil || !strings.Contains(err.Error(), "unsupported language") {
+		t.Errorf("Resolve: error = %v, want unsupported language", err)
+	}
+}
+
+func TestScriptTooLarge(t *testing.T) {
+	tests := []struct {
+		name, lang, script string
+		want               bool
+	}{
+		{"under limit", "bash", strings.Repeat("x", ArgLimit-1), false},
+		{"at limit", "bash", strings.Repeat("x", ArgLimit), true},
+		{"pad counts", "bash", "-" + strings.Repeat("x", ArgLimit-2), true},
+		{"python is not padded", "python", "-" + strings.Repeat("x", ArgLimit-2), false},
+		{"unsupported", "cobol", strings.Repeat("x", ArgLimit), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ScriptTooLarge(tt.lang, tt.script); got != tt.want {
+				t.Errorf("ScriptTooLarge(%q, %d bytes) = %v, want %v", tt.lang, len(tt.script), got, tt.want)
+			}
+		})
+	}
+}
+
+// nonASCIIScript returns a script of n argLen units mixing multi-byte characters
+// (Cyrillic, CJK, and an emoji, two UTF-16 units) with ASCII padding.
+func nonASCIIScript(t *testing.T, n int) string {
+	t.Helper()
+	chunk := "жи漢字🙂"
+	k := n / (2 * argLen(chunk))
+	s := strings.Repeat(chunk, k)
+	s += strings.Repeat("x", n-argLen(s))
+	if argLen(s) != n {
+		t.Fatalf("nonASCIIScript: argLen = %d, want %d", argLen(s), n)
+	}
+	return s
+}
+
+func TestScriptTooLargeNonASCII(t *testing.T) {
+	for _, tt := range []struct {
+		n    int
+		want bool
+	}{{ArgLimit - 1, false}, {ArgLimit, true}} {
+		script := nonASCIIScript(t, tt.n)
+		if got := ScriptLen("bash", script); got != tt.n {
+			t.Errorf("ScriptLen(%d units) = %d", tt.n, got)
+		}
+		if got := ScriptTooLarge("bash", script); got != tt.want {
+			t.Errorf("ScriptTooLarge(%d units, %d bytes) = %v, want %v", tt.n, len(script), got, tt.want)
+		}
+	}
+}
+
+func TestScriptLen(t *testing.T) {
+	for _, tt := range []struct {
+		lang, script string
+		want         int
+	}{
+		{"bash", "ab", 2},
+		{"bash", "-ab", 4},
+		{"python", "-ab", 3},
+		{"cobol", "-ab", 3},
+	} {
+		if got := ScriptLen(tt.lang, tt.script); got != tt.want {
+			t.Errorf("ScriptLen(%q, %q) = %d, want %d", tt.lang, tt.script, got, tt.want)
+		}
+	}
+}
+
 func TestInterpreterErrorMessage(t *testing.T) {
 	// A start errno that matches fs.ErrPermission (EACCES, e.g. a noexec mount) is not
 	// the "not executable" case, which only a PATH scan finding the file reports.
@@ -344,7 +458,7 @@ func TestRunPythonFallback(t *testing.T) {
 
 func TestRunScriptSize(t *testing.T) {
 	// 4 MiB exceeds the argument limit on Linux (per argument), macOS (total), and
-	// Windows; half of argLimit leaves room for the rest of the command line.
+	// Windows; half of ArgLimit leaves room for the rest of the command line.
 	requireCmd(t, "bash")
 	tests := []struct {
 		name, script string
@@ -352,7 +466,7 @@ func TestRunScriptSize(t *testing.T) {
 	}{
 		{"one 4 MiB line", strings.Repeat("x", 4<<20), true},
 		{"many lines", strings.Repeat("echo x >/dev/null\n", 250_000), true},
-		{"under limit", strings.Repeat(":\n", argLimit/4), false},
+		{"under limit", strings.Repeat(":\n", ArgLimit/4), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -373,7 +487,7 @@ func TestRunScriptSize(t *testing.T) {
 			if !argListTooLong(err) {
 				t.Errorf("Run: error = %v, want it to wrap the OS argument-size error", err)
 			}
-			for _, w := range []string{"too large", `task "big"`, strconv.Itoa(len(tt.script)) + " bytes"} {
+			for _, w := range []string{"too large", `task "big"`, strconv.Itoa(ScriptLen("", tt.script)) + " " + ArgUnit} {
 				if !strings.Contains(err.Error(), w) {
 					t.Errorf("error = %q, want it to contain %q", err.Error(), w)
 				}
