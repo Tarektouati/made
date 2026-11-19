@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/Tarektouati/made/internal/lint"
 	"github.com/Tarektouati/made/internal/parser"
+	"github.com/Tarektouati/made/internal/testenv"
 )
 
 // runTasksMD defines tasks for the run tests. The check tasks exit non-zero unless they
@@ -78,12 +78,10 @@ func checkContains(t *testing.T, label, got string, subs []string, want bool) {
 	}
 }
 
-// requireCmd skips the test when name is not on PATH.
+// requireCmd skips the test when name is not on PATH (see testenv.RequireCmd).
 func requireCmd(t *testing.T, name string) {
 	t.Helper()
-	if _, err := exec.LookPath(name); err != nil {
-		t.Skipf("%s not found on PATH; skipping", name)
-	}
+	testenv.RequireCmd(t, name)
 }
 
 // TestRun covers the paths that never start a task process.

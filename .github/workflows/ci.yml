@@ -33,20 +33,24 @@ jobs:
         # -race needs cgo + a C compiler; skip it on Windows where the
         # hosted runner has no compiler reliably on PATH. The code has no
         # concurrency, so this only trades a slower detector run for safety.
+        # require lists the interpreters whose tests must run: a missing one fails the
+        # job instead of skipping them (MADE_TEST_REQUIRE, see internal/testenv).
         include:
-          - { os: ubuntu-latest, race: "-race" }
-          - { os: macos-latest, race: "-race" }
-          - { os: windows-latest, race: "" }
+          - { os: ubuntu-latest, race: "-race", require: "bash sh zsh fish python3 node ruby perl" }
+          - { os: macos-latest, race: "-race", require: "bash sh zsh fish python3 node ruby perl" }
+          - { os: windows-latest, race: "", require: "bash sh python3 node ruby perl" }
+    env:
+      MADE_TEST_REQUIRE: ${{ matrix.require }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - name: Install fish
+      - name: Install fish and zsh
         if: runner.os != 'Windows'
         run: |
-          if [ "$RUNNER_OS" = Linux ]; then sudo apt-get update && sudo apt-get install -y fish
-          else brew install fish; fi
+          if [ "$RUNNER_OS" = Linux ]; then sudo apt-get update && sudo apt-get install -y fish zsh
+          else brew install fish; fi # macOS ships zsh
       - name: Run tests
         if: runner.os == 'Windows'
         run: go test -v ${{ matrix.race }} -count=1 ./...
