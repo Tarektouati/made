@@ -50,10 +50,11 @@ type Task struct {
 // Parse extracts tasks from Markdown source, preserving document order.
 //
 // Each H3 heading starts a task; the first fenced code block after it provides the
-// script and completes the task. Paragraph text between the heading and that code
-// block becomes the description. Headings of any other level end the current task's
-// scope. A heading with no following code block is skipped. A leading UTF-8 byte
-// order mark is ignored, and a file with only CR line endings reads as LF.
+// script and completes the task, even when that block is empty (the runner refuses
+// an empty script); later blocks are ignored. Paragraph text between the heading and
+// that code block becomes the description. Headings of any other level end the
+// current task's scope. A heading with no following code block is skipped. A leading
+// UTF-8 byte order mark is ignored, and a file with only CR line endings reads as LF.
 func Parse(source []byte) ([]Task, error) {
 	source = normalizeLoneCR(bytes.TrimPrefix(source, utf8BOM))
 	if err := validateNesting(source); err != nil {
@@ -65,30 +66,30 @@ func Parse(source []byte) ([]Task, error) {
 	var tasks []Task
 	var cur *Task     // task currently being assembled
 	var desc []string // description paragraphs collected so far
+	hasScript := false
 	for n := doc.FirstChild(); n != nil; n = n.NextSibling() {
 		switch node := n.(type) {
 		case *ast.Heading:
 			if node.Level == taskHeadingLevel {
 				cur = &Task{Name: NormalizeSpace(headingText(node, source))}
-				desc = nil
 			} else {
 				cur = nil
-				desc = nil
 			}
+			desc = nil
+			hasScript = false
 		case *ast.Paragraph:
-			if cur != nil && cur.Script == "" {
+			if cur != nil && !hasScript {
 				if t := NormalizeSpace(headingText(node, source)); t != "" {
 					desc = append(desc, t)
 				}
 			}
 		case *ast.FencedCodeBlock:
-			if cur != nil && cur.Script == "" {
+			if cur != nil && !hasScript {
 				cur.Lang = fenceLanguage(node, source)
 				cur.Description = strings.Join(desc, "\n")
 				cur.Script = codeText(node, source)
 				tasks = append(tasks, *cur)
-				cur = nil
-				desc = nil
+				hasScript = true
 			}
 		}
 	}
