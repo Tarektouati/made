@@ -310,6 +310,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		err = out.err
 	}
 	tasks := out.tasks
+	if nest := (*parser.NestingError)(nil); errors.As(err, &nest) {
+		fmt.Fprintf(stderr, "made: cannot parse %s: line %d: %s\n", escapeDisplay(file), nest.Line, escapeErr(err))
+		fmt.Fprintf(stderr, "made: hint: flatten the lists or blockquotes on that line or indent it less (lines in code blocks count too); run made --check -f %s\n", shellQuotePath(file))
+		return 1
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "made: cannot parse %s: %s\n", escapeDisplay(file), escapeErr(err))
 		return 1
@@ -858,6 +863,28 @@ func displayPath(p string) string {
 		return `"` + s + `"`
 	}
 	return s
+}
+
+// shellQuotePath is escapeDisplay for a path used as an argument in a suggested
+// command: in single quotes, each embedded single quote closed, escaped with a
+// backslash and reopened, unless the escaped path has only characters a POSIX shell
+// takes literally.
+func shellQuotePath(p string) string {
+	s := escapeDisplay(p)
+	if s != "" && strings.IndexFunc(s, func(r rune) bool { return !shellLiteral(r) }) < 0 {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// shellLiteral reports whether a POSIX shell takes r literally in a word. Non-ASCII
+// runes are left to escapeDisplay, which has already escaped the invisible ones.
+func shellLiteral(r rune) bool {
+	switch {
+	case r >= 0x80, 'a' <= r && r <= 'z', 'A' <= r && r <= 'Z', '0' <= r && r <= '9':
+		return true
+	}
+	return strings.ContainsRune("_-./:@%+=,", r)
 }
 
 // pathOnlyOnce returns the reason inside err when it is a *fs.PathError for path, so

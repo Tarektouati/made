@@ -220,31 +220,66 @@ func TestUsage(t *testing.T) {
 	}
 }
 
-func writeDeepNestMadefile(t *testing.T, marker string, depth int) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "deep.md")
-	if err := os.WriteFile(path, []byte(strings.Repeat(marker, depth)+"\n"), 0o644); err != nil {
+func TestRunRejectsDeepNesting(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "deep.md")
+	if err := os.WriteFile(f, []byte("### t\n\n"+strings.Repeat("> ", 257)+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return path
-}
-
-func TestRunRejectsDeepNesting(t *testing.T) {
-	f := writeDeepNestMadefile(t, "> ", 257)
+	want := []string{"made: cannot parse ", "deep.md: line 3: nesting too deep (max 256)\n", "\nmade: hint: "}
 	checkRunCases(t, []runCase{
 		{
 			name:       "list",
 			args:       []string{"-f", f, "-l"},
 			wantCode:   1,
-			wantStderr: []string{"cannot parse", "nesting too deep"},
+			wantStderr: want,
 		},
 		{
 			name:       "list-names",
 			args:       []string{"-f", f, "--list-names"},
 			wantCode:   1,
-			wantStderr: []string{"cannot parse", "nesting too deep"},
+			wantStderr: want,
 		},
 	})
+}
+
+// TestRunDeepNestingHintQuotesPath checks the hint's command can be pasted into a
+// shell: a path with a space is single-quoted, a plain one is left as is.
+func TestRunDeepNestingHintQuotesPath(t *testing.T) {
+	t.Chdir(t.TempDir())
+	src := []byte(strings.Repeat("> ", 257) + "\n")
+	for _, tc := range []struct{ file, want string }{
+		{"my tasks.md", "run made --check -f 'my tasks.md'\n"},
+		{"deep.md", "run made --check -f deep.md\n"},
+	} {
+		t.Run(tc.file, func(t *testing.T) {
+			if err := os.WriteFile(tc.file, src, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			if code := run([]string{"-f", tc.file, "-l"}, &stdout, &stderr); code != 1 {
+				t.Errorf("run = %d, want 1", code)
+			}
+			if got := stderr.String(); !strings.HasSuffix(got, tc.want) {
+				t.Errorf("stderr = %q, want it to end with %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestShellQuotePath(t *testing.T) {
+	for _, tc := range []struct{ path, want string }{
+		{"Madefile.md", "Madefile.md"},
+		{"docs/tasks-v2.md", "docs/tasks-v2.md"},
+		{"my tasks.md", "'my tasks.md'"},
+		{"it's.md", `'it'\''s.md'`},
+		{"a;b$c.md", "'a;b$c.md'"},
+		{"x\x1b.md", `'x\x1b.md'`},
+		{"", "''"},
+	} {
+		if got := shellQuotePath(tc.path); got != tc.want {
+			t.Errorf("shellQuotePath(%q) = %s, want %s", tc.path, got, tc.want)
+		}
+	}
 }
 
 // TestRunTaskArgs runs real bash tasks to check what reaches the script. notStderr
