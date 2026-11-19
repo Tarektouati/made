@@ -54,10 +54,15 @@ Linux agree — in the current directory and then in each parent directory, and
 uses the first directory that has one. If a directory holds more than one of these
 names, `made` uses the first in that order and says so on stderr (`made: using
 Madefile.md (also found madefile.md)`). A name that is present but cannot be used
-(a broken symlink, a symlink loop, something other than a regular file, or a
-permission error) is skipped with a warning such as `made: skipping
+(a broken symlink, a symlink loop, something other than a regular file, or a name
+that cannot be looked up because a directory it is in, or links through, can be
+listed but not searched) is skipped with a warning such as `made: skipping
 /path/Madefile.md: broken symlink to missing.md`, and the search goes on. A
-directory that exists but cannot be listed is reported the same way.
+directory that exists but cannot be listed is skipped the same way. A Madefile
+that is found but cannot be read, such as a mode 000 file or a symlink to one, is
+not skipped: `made` stops with `made: cannot read Madefile.md: permission denied`
+(exit `1`) instead of falling back to a parent's Madefile and running a task you
+did not mean to run.
 
 The search starts from the physical current directory, with symlinks resolved
 like `pwd -P` and `git` do. After `cd`-ing into a symlinked directory, `made`
