@@ -289,10 +289,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	file = res.path
 
 	if check {
-		return runCheck(stdout, stderr, file, strict, lint.Options{Host: host})
+		return runCheck(stdout, stderr, file, res.explicit, strict, lint.Options{Host: host})
 	}
 
-	source, err := readMadefile(file)
+	// Tab completion runs --list-names with the typed -f value, so a pipe there must
+	// fail at once rather than block or read the terminal.
+	source, regular, err := readMadefile(file, res.explicit && !listNames)
 	if err != nil {
 		fmt.Fprintf(stderr, "made: cannot read %s: %s\n", displayPath(file), escapeErr(pathOnlyOnce(file, err)))
 		return 1
@@ -357,8 +359,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	ctx, force, stop, received := notifySignal(sigs...)
 	defer stop()
 
+	// A pipe or device has no directory of its own (it would be /dev or /dev/fd), so
+	// its tasks run in the current directory.
 	dir := ""
-	if !noChdir {
+	if !noChdir && regular {
 		abs, err := filepath.Abs(file)
 		if err != nil {
 			fmt.Fprintf(stderr, "made: %s\n", escapeErr(err))
@@ -579,6 +583,7 @@ func writeTemplate(name string, flags int) error {
 // resolved is the task file chosen by resolveFile.
 type resolved struct {
 	path       string   // path to read; a bare name when found in the current directory
+	explicit   bool     // given with -f rather than discovered
 	fromParent bool     // discovered in a parent of the current directory
 	others     []string // other Madefile names found in the same directory, by priority
 	skipped    []skippedMadefile
@@ -597,7 +602,7 @@ type skippedMadefile struct {
 // candidates are reported in skipped, also alongside the not-found error.
 func resolveFile(file string) (resolved, error) {
 	if file != "" {
-		return resolved{path: file}, nil
+		return resolved{path: file, explicit: true}, nil
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -668,34 +673,44 @@ func findMadefile(start string) (dir, name string, others []string, skipped []sk
 	}
 }
 
-// readMadefile reads a task file after checking it is a regular file within
-// maxMadefileBytes. The path is checked before it is opened, because opening a FIFO
-// blocks. The size check is repeated while reading, because some files report a
-// wrong size (0 for /proc files) or grow after the stat.
-func readMadefile(path string) ([]byte, error) {
+// readMadefile reads a task file of at most maxMadefileBytes. A discovered file must
+// be a regular file, checked before it is opened, because opening a FIFO blocks. An
+// explicit (-f) file may be anything readable but a directory, such as a pipe or
+// /dev/stdin; a FIFO with no writer then blocks, like cat. The size check is repeated
+// while reading, because some files report a wrong size (0 for /proc files) or grow
+// after the stat. regular reports whether the file read was a regular file.
+func readMadefile(path string, explicit bool) (source []byte, regular bool, err error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s is not a regular file", path)
+	if explicit && info.IsDir() {
+		return nil, false, &fs.PathError{Op: "read", Path: path, Err: errIsDir}
 	}
-	if info.Size() > maxMadefileBytes {
-		return nil, fmt.Errorf("%s %w (%d bytes)", path, errTooLarge, maxMadefileBytes)
+	if !explicit && !info.Mode().IsRegular() {
+		return nil, false, fmt.Errorf("%s is not a regular file", path)
+	}
+	if info.Mode().IsRegular() && info.Size() > maxMadefileBytes {
+		return nil, false, fmt.Errorf("%s %w (%d bytes)", path, errTooLarge, maxMadefileBytes)
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer func() { _ = f.Close() }()
 	if info, err = f.Stat(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("%s is not a regular file", path)
+	regular = info.Mode().IsRegular()
+	if !explicit && !regular {
+		return nil, false, fmt.Errorf("%s is not a regular file", path)
 	}
-	return readLimited(f, path)
+	source, err = readLimited(f, path)
+	return source, regular, err
 }
+
+// errIsDir is readMadefile's reason for an explicit path that is a directory.
+var errIsDir = errors.New("is a directory")
 
 // readLimited reads r to the end, or fails with errTooLarge once it passes
 // maxMadefileBytes.
@@ -716,10 +731,10 @@ var errTooLarge = errors.New("exceeds maximum size")
 // runCheck lints the task file at path for made --check, prints the findings to
 // stdout, and returns the exit code: 1 if there is an error (or, with strict, a
 // warning), otherwise 0. A file that cannot be read is reported on stderr, exit 1.
-// opts selects the optional checks.
-func runCheck(stdout, stderr io.Writer, path string, strict bool, opts lint.Options) int {
+// explicit is as for readMadefile; opts selects the optional checks.
+func runCheck(stdout, stderr io.Writer, path string, explicit, strict bool, opts lint.Options) int {
 	var diags []lint.Diagnostic
-	source, err := readMadefile(path)
+	source, _, err := readMadefile(path, explicit)
 	switch {
 	case errors.Is(err, errTooLarge):
 		diags = []lint.Diagnostic{{Severity: lint.Error, Rule: "file-too-large",

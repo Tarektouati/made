@@ -1025,6 +1025,56 @@ func TestInit(t *testing.T) {
 	}
 }
 
+func TestFileFromStdinPipe(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("/dev/stdin needs Unix")
+	}
+	for _, args := range [][]string{{"-f", "/dev/stdin", "-l"}, {"--check", "-f", "/dev/stdin"}} {
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		cmd := exec.CommandContext(ctx, madeBin, args...)
+		cmd.Dir = t.TempDir()
+		cmd.Stdin = strings.NewReader(tasksMD)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+		cancel()
+		if err != nil {
+			t.Errorf("made %q: %v (stderr: %s)", args, err, &stderr)
+		}
+		if args[0] == "-f" && !strings.Contains(stdout.String(), "greet") {
+			t.Errorf("made %q stdout = %q, want it to list greet", args, &stdout)
+		}
+	}
+}
+
+// TestPipedFileRunsInCurrentDir checks that a task read from a pipe runs in the
+// current directory, not in the pipe's (/dev).
+func TestPipedFileRunsInCurrentDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("/dev/stdin needs Unix")
+	}
+	dir := t.TempDir()
+	want, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, madeBin, "-f", "/dev/stdin", "where")
+	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader("### where\n```bash\npwd -P\n```\n")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("made -f /dev/stdin where: %v (stderr: %s)", err, &stderr)
+	}
+	if got := strings.TrimSpace(stdout.String()); got != want {
+		t.Errorf("task ran in %q, want the current directory %q", got, want)
+	}
+}
+
 func TestListDoesNotHangOnFIFOMadefile(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("FIFOs are not supported on Windows")
