@@ -7,11 +7,26 @@ import (
 
 const (
 	flagTagBase   = '\U0001F3F4' // WAVING BLACK FLAG, the base of emoji flag tag sequences
-	tagSpecFirst  = '\U000E0020'
-	tagSpecLast   = '\U000E007E'
 	tagCancel     = '\U000E007F'
 	tagBlockFirst = '\U000E0000'
 )
+
+// flagTagSeqs are the tag characters, cancel tag included, of the only emoji flag tag
+// sequences kept after a flag base: England (gbeng), Scotland (gbsct) and Wales
+// (gbwls), the subdivision flags Unicode recommends. They are matched exactly in
+// lowercase, the only form those flags take; any other tag run, including uppercase
+// letters or extra tags before the cancel tag, can carry hidden text.
+var flagTagSeqs = []string{tagSeq("gbeng"), tagSeq("gbsct"), tagSeq("gbwls")}
+
+// tagSeq returns code written in tag characters, followed by the cancel tag.
+func tagSeq(code string) string {
+	var b strings.Builder
+	for _, c := range code {
+		b.WriteRune(tagBlockFirst + c)
+	}
+	b.WriteRune(tagCancel)
+	return b.String()
+}
 
 // isInvisible reports whether r is a formatting character that can hide or reorder
 // text: the Arabic letter mark, zero width space, LRM/RLM, bidi embeddings and
@@ -30,28 +45,19 @@ func isInvisible(r rune) bool {
 }
 
 // flagTagSeqLen returns the byte length of the tag characters following a flag base
-// in s when they form an emoji flag tag sequence (one or more tag specs ended by the
-// cancel tag, as in the Scotland flag), or 0 if they do not.
+// at the start of s when they are one of flagTagSeqs, or 0 if they are not.
 func flagTagSeqLen(s string) int {
-	n, specs := 0, 0
-	for n < len(s) {
-		r, size := utf8.DecodeRuneInString(s[n:])
-		n += size
-		switch {
-		case r >= tagSpecFirst && r <= tagSpecLast:
-			specs++
-		case r == tagCancel && specs > 0:
-			return n
-		default:
-			return 0
+	for _, seq := range flagTagSeqs {
+		if strings.HasPrefix(s, seq) {
+			return len(seq)
 		}
 	}
 	return 0
 }
 
 // ReplaceInvisible returns s with each invisible formatting character (see
-// isInvisible) replaced by repl(r). Tag characters that complete an emoji flag tag
-// sequence are kept.
+// isInvisible) replaced by repl(r). Tag characters outside the England, Scotland and
+// Wales flag sequences (see flagTagSeqs) are replaced like the rest.
 func ReplaceInvisible(s string, repl func(r rune) string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); {
