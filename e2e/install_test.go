@@ -71,7 +71,19 @@ type installOpts struct {
 	// noexecTmp wraps tar to strip the exec bit from the extracted made, so running it
 	// from the temp dir fails as it would on a noexec TMPDIR.
 	noexecTmp bool
+	// uname, when set, replaces uname with a stub printing uname[0] for -s and
+	// uname[1] for -m.
+	uname [2]string
 }
+
+// unameStub stands in for uname, answering only -s and -m.
+const unameStub = `#!/bin/sh
+case $1 in
+-s) echo '@S@' ;;
+-m) echo '@M@' ;;
+*) exit 1 ;;
+esac
+`
 
 // tarNoexecStub runs the real tar, then makes the extracted made non-executable.
 const tarNoexecStub = `#!/bin/sh
@@ -97,6 +109,8 @@ type releaseOpts struct {
 	archive []byte
 	// checksums rewrites the checksums.txt line for the archive.
 	checksums func(line string) string
+	// os and arch name the archive's platform (default: the host's).
+	os, arch string
 }
 
 // releaseDir writes a fake made release for the host platform (the archive holding the
@@ -137,7 +151,14 @@ func customRelease(t *testing.T, opts releaseOpts) string {
 	if opts.archive != nil {
 		data = opts.archive
 	}
-	archive := fmt.Sprintf("made_%s_%s_%s.tar.gz", installVersion, runtime.GOOS, runtime.GOARCH)
+	goos, goarch := runtime.GOOS, runtime.GOARCH
+	if opts.os != "" {
+		goos = opts.os
+	}
+	if opts.arch != "" {
+		goarch = opts.arch
+	}
+	archive := fmt.Sprintf("made_%s_%s_%s.tar.gz", installVersion, goos, goarch)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, archive), data, 0o644); err != nil {
 		t.Fatal(err)
@@ -191,9 +212,15 @@ func runInstall(t *testing.T, release string, opts installOpts, env ...string) i
 
 	bin := t.TempDir()
 	for _, name := range append(installTools[:len(installTools):len(installTools)], "gzip") {
-		if !slices.Contains(opts.omit, name) && (name != "tar" || !opts.noexecTmp) {
+		stubbed := (name == "tar" && opts.noexecTmp) || (name == "uname" && opts.uname != [2]string{})
+		if !slices.Contains(opts.omit, name) && !stubbed {
 			linkTool(t, bin, name)
 		}
+	}
+	if opts.uname != [2]string{} {
+		writeExec(t, filepath.Join(bin, "uname"), strings.NewReplacer(
+			"@S@", opts.uname[0], "@M@", opts.uname[1],
+		).Replace(unameStub))
 	}
 	if opts.noexecTmp {
 		var tarPath, chmodPath string
@@ -655,6 +682,50 @@ func TestInstallScriptRelease(t *testing.T) {
 					requireNotInstalled(t, filepath.Join(dir, "made"))
 				}
 			}
+		})
+	}
+}
+
+func TestInstallScriptUname(t *testing.T) {
+	cases := []struct {
+		name  string
+		uname [2]string
+		// os and arch name the platform install.sh should pick, unset when it must refuse.
+		os, arch   string
+		wantStderr string
+	}{
+		{name: "Linux x86_64", uname: [2]string{"Linux", "x86_64"}, os: "linux", arch: "amd64"},
+		{name: "Linux aarch64", uname: [2]string{"Linux", "aarch64"}, os: "linux", arch: "arm64"},
+		{name: "Darwin arm64", uname: [2]string{"Darwin", "arm64"}, os: "darwin", arch: "arm64"},
+		{name: "Darwin amd64", uname: [2]string{"Darwin", "amd64"}, os: "darwin", arch: "amd64"},
+		{name: "unsupported OS", uname: [2]string{"FreeBSD", "amd64"}, wantStderr: "made-install: unsupported OS: FreeBSD"},
+		{name: "unsupported arch", uname: [2]string{"Linux", "i686"}, wantStderr: "made-install: unsupported architecture: i686"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			release := customRelease(t, releaseOpts{os: tc.os, arch: tc.arch})
+			dir := filepath.Join(t.TempDir(), "bin")
+			res := runInstall(t, release, installOpts{uname: tc.uname}, "MADE_VERSION=v1.2.3", "MADE_INSTALL_DIR="+dir)
+			if tc.wantStderr != "" {
+				if res.code != 1 {
+					t.Fatalf("exit = %d, want 1\nstdout: %s\nstderr: %s", res.code, res.stdout, res.stderr)
+				}
+				if !strings.Contains(res.stderr, tc.wantStderr) {
+					t.Errorf("stderr = %q, want it to contain %q", res.stderr, tc.wantStderr)
+				}
+				if res.curlCalls != 0 {
+					t.Errorf("curl called %d times, want 0", res.curlCalls)
+				}
+				requireNotInstalled(t, filepath.Join(dir, "made"))
+				return
+			}
+			if res.code != 0 {
+				t.Fatalf("exit = %d, want 0\nstdout: %s\nstderr: %s", res.code, res.stdout, res.stderr)
+			}
+			if want := fmt.Sprintf("Downloading made v1.2.3 (%s/%s)", tc.os, tc.arch); !strings.Contains(res.stdout, want) {
+				t.Errorf("stdout = %q, want it to contain %q", res.stdout, want)
+			}
+			requireInstalled(t, filepath.Join(dir, "made"))
 		})
 	}
 }
