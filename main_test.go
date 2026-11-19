@@ -1339,6 +1339,7 @@ func TestSanitizeDisplay(t *testing.T) {
 		{name: "zwnj word kept", in: "می\u200cخواهم", want: "می\u200cخواهم"},
 		{name: "soft hyphen kept", in: "co\u00adop", want: "co\u00adop"},
 		{name: "scotland flag kept", in: scotlandFlag, want: scotlandFlag},
+		{name: "hidden tag text after flag", in: "a🏴\U000e0068\U000e0065\U000e006c\U000e006c\U000e006f\U000e007fb", want: "a🏴b"},
 		{name: "unterminated tag sequence", in: "🏴\U000e0067\U000e0062x", want: "🏴x"},
 		{name: "cancel tag alone", in: "a\U000e007fb", want: "ab"},
 	}
@@ -1371,6 +1372,7 @@ func TestEscapeDisplay(t *testing.T) {
 		{name: "stray tag", in: "a\U000e0041b", want: `a\U000e0041b`},
 		{name: "zwj emoji kept", in: "🧑\u200d💻", want: "🧑\u200d💻"},
 		{name: "scotland flag kept", in: scotlandFlag, want: scotlandFlag},
+		{name: "hidden tag text after flag", in: "a🏴\U000e0068\U000e0065\U000e006c\U000e006c\U000e006f\U000e007fb", want: `a🏴\U000e0068\U000e0065\U000e006c\U000e006c\U000e006f\U000e007fb`},
 		{name: "unicode kept", in: "保留", want: "保留"},
 	}
 	for _, tt := range tests {

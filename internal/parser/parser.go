@@ -272,8 +272,8 @@ func resolveEntity(body []byte) (string, bool) {
 }
 
 // NormalizeSpace drops control characters and invisible formatting characters (bidi
-// controls, zero-width space, stray tags; see ReplaceInvisible), then trims s and
-// collapses each run of whitespace (tabs, newlines, repeated spaces, line and
+// controls, zero-width space, tag characters outside the England, Scotland and Wales
+// flag sequences; see ReplaceInvisible), then trims s and collapses each run of whitespace (tabs, newlines, repeated spaces, line and
 // paragraph separators) to a single space. Both kinds are stripped from listed names,
 // so keeping them would make a listed name unrunnable, or let it display differently
 // from what runs. Task names are stored normalized; apply it to a name typed by the

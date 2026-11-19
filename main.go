@@ -704,9 +704,10 @@ func find(tasks []parser.Task, name string) (parser.Task, bool) {
 }
 
 // sanitizeDisplay removes C0/C1 control characters, DEL, line/paragraph separators
-// and invisible formatting characters (bidi controls, zero-width space, stray tags;
-// see parser.ReplaceInvisible) from task names, descriptions and lint messages
-// printed to the terminal. Task lookup still uses the parsed values.
+// and invisible formatting characters (bidi controls, zero-width space, tag
+// characters outside the England, Scotland and Wales flag sequences; see
+// parser.ReplaceInvisible) from task names, descriptions and lint messages printed to
+// the terminal. Task lookup still uses the parsed values.
 func sanitizeDisplay(s string) string {
 	s = strings.Map(func(r rune) rune {
 		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) || unicode.In(r, unicode.Zl, unicode.Zp) {
