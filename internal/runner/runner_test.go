@@ -14,7 +14,6 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/Tarektouati/made/internal/parser"
 )
@@ -610,82 +609,6 @@ func TestRunRejectsNUL(t *testing.T) {
 			for _, w := range []string{`task "nul"`, "contains a NUL byte", tt.wantLine} {
 				if !strings.Contains(err.Error(), w) {
 					t.Errorf("error = %q, want it to contain %q", err.Error(), w)
-				}
-			}
-		})
-	}
-}
-
-func TestRunForceSkipsGrace(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("windows kills the interpreter on the first cancel; there is no grace period")
-	}
-	requireCmd(t, "bash")
-	tests := []struct {
-		name  string
-		force bool
-		// terminal cancels with a signal that may have come from the terminal, which
-		// starts with a grace period where nothing is signaled (see terminalCancel).
-		terminal   bool
-		minElapsed time.Duration
-		maxElapsed time.Duration
-	}{
-		{name: "force skips grace", force: true, maxElapsed: 2 * time.Second},
-		{name: "force skips terminal grace", force: true, terminal: true, maxElapsed: 2 * time.Second},
-		{name: "no force waits grace", minElapsed: killGrace, maxElapsed: killGrace + 5*time.Second},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dir := t.TempDir()
-			var cause error
-			if tt.terminal {
-				cause = terminalCancel(t)
-			}
-			// The script and its child ignore SIGTERM, so only SIGKILL ends them; the
-			// child writes "survived" if it outlives a forced teardown.
-			task := parser.Task{Name: "stubborn", Script: "trap '' TERM\n( sleep 1.5; touch survived ) &\ntouch marker\nsleep 5\n"}
-			ctx, cancelCause := context.WithCancelCause(context.Background())
-			cancel := func() { cancelCause(cause) }
-			defer cancel()
-			var force chan struct{}
-			if tt.force {
-				force = make(chan struct{})
-			}
-			errc := make(chan error, 1)
-			go func() { errc <- Run(ctx, force, task, dir, nil) }()
-
-			deadline := time.Now().Add(10 * time.Second)
-			for {
-				if _, err := os.Stat(filepath.Join(dir, "marker")); err == nil {
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatal("task never wrote its marker")
-				}
-				time.Sleep(10 * time.Millisecond)
-			}
-
-			begin := time.Now()
-			cancel()
-			if tt.force {
-				time.Sleep(100 * time.Millisecond)
-				close(force)
-			}
-			select {
-			case err := <-errc:
-				if err == nil {
-					t.Error("Run after cancel = nil, want an error")
-				}
-			case <-time.After(tt.maxElapsed):
-				t.Fatalf("Run did not return within %v of cancel", tt.maxElapsed)
-			}
-			if elapsed := time.Since(begin); elapsed < tt.minElapsed {
-				t.Errorf("Run returned after %v, want at least %v", elapsed, tt.minElapsed)
-			}
-			if tt.force {
-				time.Sleep(time.Until(begin.Add(2 * time.Second)))
-				if _, err := os.Stat(filepath.Join(dir, "survived")); err == nil {
-					t.Error("the task's child survived the forced teardown")
 				}
 			}
 		})

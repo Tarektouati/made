@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Tarektouati/made/internal/parser"
+	"github.com/Tarektouati/made/internal/testenv"
 )
 
 // stdinMode is a teardown mode: a process group when stdin is not a terminal, and the
@@ -102,25 +103,24 @@ func markers(t *testing.T, dir string) []string {
 
 // TestRunCancelTearsDownDescendants cancels tasks whose background children write a
 // marker after a delay, and checks that none survives in either stdin mode. Each script
-// writes "ready" once its children are running; a child that ignores SIGTERM must
-// outlive killGrace to prove it was force-killed.
+// appends its children's pids to "pids" and writes "ready" once they are running; a
+// child that ignores SIGTERM must outlive killGrace to prove it was force-killed.
 func TestRunCancelTearsDownDescendants(t *testing.T) {
 	requireCmd(t, "bash")
 	scripts := []struct {
 		name   string
 		script string
-		delay  time.Duration // how long the children wait before writing their markers
 	}{
-		{"background children", "( sleep 1; echo alive > m1 ) &\n( sleep 1; echo alive > m2 ) &\necho ok > ready\nwait", time.Second},
-		{"nested grandchild", "bash -c '( sleep 1; echo alive > m ) & echo ok > ready; wait' &\nwait", time.Second},
-		{"TERM ignored", "trap '' TERM\n( sleep 4; echo alive > m ) &\necho ok > ready\nwait", 4 * time.Second},
+		{"background children", "( sleep 1; echo alive > m1 ) &\necho $! >> pids\n( sleep 1; echo alive > m2 ) &\necho $! >> pids\necho ok > ready\nwait"},
+		{"nested grandchild", "bash -c '( sleep 1; echo alive > m ) & echo $! >> pids; echo ok > ready; wait' &\nwait"},
+		{"TERM ignored", "trap '' TERM\n( sleep 4; echo alive > m ) &\necho $! >> pids\necho ok > ready\nwait"},
 	}
 	forEachStdinMode(t, func(t *testing.T, _ stdinMode) {
 		for _, tc := range scripts {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
-				dir, cancelled := cancelTask(t, tc.script, nil)
-				time.Sleep(time.Until(cancelled.Add(tc.delay + 500*time.Millisecond)))
+				dir, _ := cancelTask(t, tc.script, nil)
+				waitGone(t, filepath.Join(dir, "pids"))
 				if m := markers(t, dir); len(m) > 0 {
 					t.Errorf("descendants survived cancellation and wrote %v", m)
 				}
@@ -135,9 +135,11 @@ func TestRunCancelTearsDownDescendants(t *testing.T) {
 // nothing is signaled during the grace period and a child left to handle the signal
 // itself (here: one that never receives it) survives it. Every other signal, and every
 // signal without a terminal or with made in the background, tears the task down.
+// A surviving child has written its marker by the time Run returns, since the
+// interpreter waits for it.
 func TestRunCancelBySignal(t *testing.T) {
 	requireCmd(t, "bash")
-	const script = "( sleep 1; echo alive > m ) &\necho ok > ready\nwait"
+	const script = "( sleep 1; echo alive > m ) &\necho $! >> pids\necho ok > ready\nwait"
 	signals := []struct {
 		name string
 		sig  os.Signal // nil: plain cancel without a signal cause
@@ -156,9 +158,11 @@ func TestRunCancelBySignal(t *testing.T) {
 				if tc.sig != nil {
 					cause = signalCause{tc.sig}
 				}
-				dir, cancelled := cancelTask(t, script, cause)
-				time.Sleep(time.Until(cancelled.Add(1500 * time.Millisecond)))
+				dir, _ := cancelTask(t, script, cause)
 				wantSurvivor := mode.foreground && terminalSignal(tc.sig)
+				if !wantSurvivor {
+					waitGone(t, filepath.Join(dir, "pids"))
+				}
 				if got := len(markers(t, dir)) > 0; got != wantSurvivor {
 					t.Errorf("child survived = %v, want %v", got, wantSurvivor)
 				}
@@ -173,7 +177,7 @@ func TestRunCancelBySignal(t *testing.T) {
 func TestRunTerminalSignalEscalatesAfterGrace(t *testing.T) {
 	requireCmd(t, "bash")
 	setMode(t, stdinMode{"tty", true, true})
-	const script = "( sleep 4; echo alive > m ) &\necho ok > ready\nwait"
+	const script = "( sleep 4; echo alive > m ) &\necho $! >> pids\necho ok > ready\nwait"
 	for _, sig := range []os.Signal{os.Interrupt, syscall.SIGQUIT} {
 		t.Run(sig.String(), func(t *testing.T) {
 			t.Parallel()
@@ -181,7 +185,7 @@ func TestRunTerminalSignalEscalatesAfterGrace(t *testing.T) {
 			if elapsed := time.Since(cancelled); elapsed < killGrace {
 				t.Errorf("Run returned %v after cancel, want it to wait out the %v grace period first", elapsed, killGrace)
 			}
-			time.Sleep(time.Until(cancelled.Add(4500 * time.Millisecond)))
+			waitGone(t, filepath.Join(dir, "pids"))
 			if m := markers(t, dir); len(m) > 0 {
 				t.Errorf("child survived the escalation after the grace period and wrote %v", m)
 			}
@@ -241,6 +245,92 @@ func readPid(t *testing.T, path string) int {
 		t.Fatalf("parse pid in %s: %v", path, err)
 	}
 	return pid
+}
+
+// waitGone fails the test for each pid listed in path that is still running 2s
+// later, and kills it when the test ends. Orphans are reaped by init, not by the
+// test, so a zombie counts as gone.
+func waitGone(t *testing.T, path string) {
+	t.Helper()
+	pids := testenv.ReadPids(t, path)
+	t.Cleanup(func() {
+		for _, pid := range pids {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
+	deadline := time.Now().Add(2 * time.Second)
+	for _, pid := range pids {
+		for testenv.Alive(t, pid) {
+			if time.Now().After(deadline) {
+				t.Errorf("descendant pid %d still running after Run returned", pid)
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+}
+
+func TestRunForceSkipsGrace(t *testing.T) {
+	requireCmd(t, "bash")
+	tests := []struct {
+		name  string
+		force bool
+		// terminal cancels with a signal that may have come from the terminal, which
+		// starts with a grace period where nothing is signaled (see terminalCancel).
+		terminal   bool
+		minElapsed time.Duration
+		maxElapsed time.Duration
+	}{
+		{name: "force skips grace", force: true, maxElapsed: 2 * time.Second},
+		{name: "force skips terminal grace", force: true, terminal: true, maxElapsed: 2 * time.Second},
+		{name: "no force waits grace", minElapsed: killGrace, maxElapsed: killGrace + 5*time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			var cause error
+			if tt.terminal {
+				cause = terminalCancel(t)
+			}
+			// The script and its child ignore SIGTERM, so only SIGKILL ends them; the
+			// child writes "survived" if it outlives a forced teardown.
+			task := parser.Task{Name: "stubborn", Script: "trap '' TERM\n( sleep 1.5; touch survived ) &\necho $! > pids\necho ok > marker\nsleep 5\n"}
+			ctx, cancelCause := context.WithCancelCause(context.Background())
+			cancel := func() { cancelCause(cause) }
+			defer cancel()
+			var force chan struct{}
+			if tt.force {
+				force = make(chan struct{})
+			}
+			errc := make(chan error, 1)
+			go func() { errc <- Run(ctx, force, task, dir, nil) }()
+
+			waitForFile(t, filepath.Join(dir, "marker"))
+			begin := time.Now()
+			cancel()
+			if tt.force {
+				time.Sleep(100 * time.Millisecond)
+				close(force)
+			}
+			select {
+			case err := <-errc:
+				if err == nil {
+					t.Error("Run after cancel = nil, want an error")
+				}
+			case <-time.After(tt.maxElapsed):
+				t.Fatalf("Run did not return within %v of cancel", tt.maxElapsed)
+			}
+			if elapsed := time.Since(begin); elapsed < tt.minElapsed {
+				t.Errorf("Run returned after %v, want at least %v", elapsed, tt.minElapsed)
+			}
+			if tt.force {
+				waitGone(t, filepath.Join(dir, "pids"))
+				if _, err := os.Stat(filepath.Join(dir, "survived")); err == nil {
+					t.Error("the task's child survived the forced teardown")
+				}
+			}
+		})
+	}
 }
 
 // TestSurvivorsIgnoresZombies checks that a task member which has exited but not yet
