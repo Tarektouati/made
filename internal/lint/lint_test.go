@@ -42,6 +42,7 @@ func TestCheck(t *testing.T) {
 		{name: "image name altered", src: "### ![logo](x.png) build\n```bash\nx\n```\n", want: []finding{{1, Warning, "name-altered"}}},
 		{name: "empty script", src: "### a\n```bash\n```\n", want: []finding{{2, Error, "empty-script"}}},
 		{name: "blank script", src: "### a\n```bash\n  \n\n```\n", want: []finding{{2, Error, "empty-script"}}},
+		{name: "empty script before code", src: "### a\n```bash\n```\n\n```bash\nx\n```\n", want: []finding{{2, Error, "empty-script"}, {5, Warning, "extra-code-block"}}},
 		{name: "nul byte", src: "### a\n```bash\necho\nx\x00\n```\n", want: []finding{{4, Error, "nul-byte"}}},
 		{name: "nesting", src: "### a\n" + strings.Repeat("> ", 257) + "\n", want: []finding{{2, Error, "nesting-too-deep"}}},
 		{name: "name altered", src: "### <b>build</b> all\n```bash\nx\n```\n", want: []finding{{1, Warning, "name-altered"}}},
