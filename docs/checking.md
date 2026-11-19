@@ -23,9 +23,9 @@ these exit with `2`.
 
 | Rule | Severity | Reported when |
 |---|---|---|
-| `duplicate-task` | error | A task has the same name as an earlier one, which is the one `made` runs |
+| `duplicate-task` | error | A task has the same name as an earlier one, which is the one `made` runs (a run and `-l` also warn about it on stderr) |
 | `unsupported-language` | error | The code block's language isn't one of the [supported languages](languages.md) |
-| `empty-name` | error | The heading's name is empty, e.g. `### <br>` (HTML tags are not part of the name) |
+| `empty-name` | error | The heading's name is empty, e.g. `### <br>` (HTML tags are not part of the name); a run and `-l` skip the task with a warning on stderr |
 | `empty-script` | error | The task's code block is empty or blank; running the task fails |
 | `unreachable-name` | error | The name is `init` or `completion`, which `made` reserves, so the task can never run |
 | `nul-byte` | error | The script contains a NUL byte, which can't be run |

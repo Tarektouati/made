@@ -70,6 +70,13 @@ n makes `made` exit with `128+n`, as shells report it: `137` for `kill -9`, `141
 `-l`/`--list` always lists and ignores any task name after it, even an unknown one:
 `made -l build` lists the tasks without running `build`.
 
+A task whose name an earlier task already has is left out of the list, since only
+the first one runs, and so is a task with an empty name. Running or listing such a
+file prints one warning per left-out task on stderr, for example
+`made: task "dup" is defined again at line 9; only the first (line 3) runs`; the
+exit code does not change. `made --check` reports the same tasks as errors (see
+[Checking a Madefile](checking.md)).
+
 A closed stdout or stderr (`made build >&-`) is not reported: the Go runtime reopens
 it as `/dev/null` before `made` starts, so the output is discarded and `made` exits
 with the task's code. Use `>/dev/null` to discard output on purpose.

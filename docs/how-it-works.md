@@ -13,6 +13,9 @@ literally, with no decoding; that is the name you pass to `made`. Paragraphs
 between the heading and the first fenced code block become the task's
 description, and that code block becomes its script. Any heading of another level
 ends the current task's scope, and an H3 with no code block after it is skipped.
+When two tasks have the same name, the first one runs; a run or a listing warns on
+stderr with the line of each, without changing the exit code. A task whose name is
+empty (`###`, or a heading that is only `` ` ` ``) is skipped with a warning.
 Only top-level blocks count: code inside lists or blockquotes is never a task.
 Files with LF, CRLF or CR-only (classic Mac OS) line endings all work; in a file
 with any LF, a lone CR stays part of its line, so a script can contain one.
