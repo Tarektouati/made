@@ -50,7 +50,9 @@ others are named on stderr and left unchanged. Directories with these names are
 not Madefiles and are never overwritten. A Madefile name that is a **symlink** is
 not overwritten, even with `--force`: `made` exits with `1` and leaves the link and
 its target alone. The flag goes after `init`. With no existing Madefile, it behaves
-like plain `made init`.
+like plain `made init`. If `Madefile.md` exists but is not a regular file (a
+directory, a broken symlink, or a symlink to a directory), `made init` and
+`made init --force` exit with `1` and say what it is; remove it first.
 
 **`made completion <shell>`** prints the completion script for `bash`, `zsh`, or
 `fish` (see [Shell completion](installation.md#shell-completion)). Like `init`, it needs no task

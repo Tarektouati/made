@@ -108,3 +108,24 @@ func TestRunEscapesControlCharsInPaths(t *testing.T) {
 		})
 	}
 }
+
+// TestInitSymlinkNotRegular checks that made init, plain or with --force, names a
+// Madefile.md symlink that does not lead to a regular file instead of reporting
+// "file exists", and leaves it alone.
+func TestInitSymlinkNotRegular(t *testing.T) {
+	for _, tc := range []struct{ name, target, kind string }{
+		{"dangling", "nowhere\x1b[2J", `a broken symlink to nowhere\x1b[2J`},
+		{"to a directory", "sub", "a symlink to a directory"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			mkTree(t, dir, "sub/")
+			mkSymlink(t, tc.target, filepath.Join(dir, "Madefile.md"))
+			t.Chdir(dir)
+			checkInitNonRegular(t, "made: cannot create Madefile.md: it exists and is not a regular file ("+tc.kind+"); remove it first\n")
+			if got, err := os.Readlink("Madefile.md"); err != nil || got != tc.target {
+				t.Errorf("Madefile.md link = %q (err: %v), want it to still point to %q", got, err, tc.target)
+			}
+		})
+	}
+}
