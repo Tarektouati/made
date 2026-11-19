@@ -26,10 +26,14 @@ _made_tasks() {
   done
   (( $#fileargs )) && fileargs[2]=${fileargs[2]/#\~/$HOME}
 
+  # _describe reads "name:description" and removes backslashes, so escape "\" and
+  # then ":" in both.
   for line in ${(f)"$(_made_list_names "${fileargs[@]}")"}; do
     name=${line%%$'\t'*}
     desc=${line#*$'\t'}
-    tasks+=("${name//:/\\:}${desc:+:$desc}")
+    name=${${name//\\/\\\\}//:/\\:}
+    desc=${${desc//\\/\\\\}//:/\\:}
+    tasks+=("$name${desc:+:$desc}")
   done
   tasks+=(
     'init:create a starter Madefile.md'
