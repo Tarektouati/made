@@ -19,14 +19,22 @@ const otherMD = "### ns:task\n" +
 	"echo\n" +
 	"```\n"
 
-// completionDir returns a repository-like TempDir holding Madefile.md (madefileMD), and
-// other.md and "my tasks.md" (both otherMD).
+// edgeMD is a task file with names the scripts must pass through unchanged: the task
+// back\slash, whose description has a backslash and a colon.
+const edgeMD = "### back\\\\slash\n" +
+	"has \\\\ a: b\n" +
+	"```bash\n" +
+	"echo\n" +
+	"```\n"
+
+// completionDir returns a repository-like TempDir holding Madefile.md (madefileMD),
+// other.md and "my tasks.md" (both otherMD), and edge.md (edgeMD).
 func completionDir(t *testing.T) string {
 	t.Helper()
 	dir := writeTasks(t, "Madefile.md", madefileMD)
 	mkdir(t, filepath.Join(dir, ".git"))
-	for _, name := range []string{"other.md", "my tasks.md"} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(otherMD), 0o644); err != nil {
+	for name, content := range map[string]string{"other.md": otherMD, "my tasks.md": otherMD, "edge.md": edgeMD} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -135,10 +143,12 @@ words=("$@"); CURRENT=$#
 _made_tasks`
 	for _, tc := range []completionCase{
 		{line: []string{"made", ""}, want: []string{"say-hello:Prints a friendly greeting.", "build:Compiles all packages.", "init:create a starter Madefile.md"}},
-		{line: []string{"made", "-f", "other.md", ""}, want: []string{`ns\:task:Has a colon: here.`}, not: []string{"build:Compiles all packages."}},
-		{line: []string{"made", "--file=other.md", ""}, want: []string{`ns\:task:Has a colon: here.`}},
-		{line: []string{"made", "-f", "'my tasks.md'", ""}, want: []string{`ns\:task:Has a colon: here.`}, not: []string{"build:Compiles all packages."}},
-		{line: []string{"made", `--file=my\ tasks.md`, ""}, want: []string{`ns\:task:Has a colon: here.`}},
+		{line: []string{"made", "-f", "other.md", ""}, want: []string{`ns\:task:Has a colon\: here.`}, not: []string{"build:Compiles all packages."}},
+		{line: []string{"made", "--file=other.md", ""}, want: []string{`ns\:task:Has a colon\: here.`}},
+		{line: []string{"made", "-f", "'my tasks.md'", ""}, want: []string{`ns\:task:Has a colon\: here.`}, not: []string{"build:Compiles all packages."}},
+		{line: []string{"made", `--file=my\ tasks.md`, ""}, want: []string{`ns\:task:Has a colon\: here.`}},
+		// _describe removes backslashes, so they are doubled.
+		{line: []string{"made", "-f", "edge.md", ""}, want: []string{`back\\slash:has \\ a\: b`}},
 	} {
 		got := lines(runShell(t, dir, "zsh", append([]string{"-f", "-c", script, "zsh"}, tc.line...)...))
 		checkCompletions(t, got, tc)
