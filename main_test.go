@@ -96,7 +96,7 @@ func TestRun(t *testing.T) {
 		{name: "list flag ignores unknown task", args: []string{"-f", f, "-l", "nope"}, wantStdout: []string{"Tasks in"}, notStderr: []string{"unknown task"}},
 		{name: "list flag does not run task", args: []string{"-f", f, "-l", "hello"}, wantStdout: []string{"Tasks in", "Say hello."}},
 		{name: "unknown task", args: []string{"-f", f, "nope"}, wantCode: 1, wantStdout: []string{"Tasks in"}, wantStderr: []string{`unknown task "nope"`}},
-		{name: "bad flag", args: []string{"-bogus"}, wantCode: 2, wantStderr: []string{"flag provided but not defined: -bogus", "Usage: made", "--no-chdir"}, notStdout: []string{"Usage"}},
+		{name: "bad flag", args: []string{"-bogus"}, wantCode: 2, wantStderr: []string{"made: unknown flag -bogus (see made --help)"}, notStdout: []string{"Usage"}, notStderr: []string{"Usage"}},
 		{name: "help", args: []string{"-h"}, wantStdout: []string{"Usage: made", "--no-chdir", "--file"}, notStderr: []string{"Usage"}},
 		{name: "missing file", args: []string{"-f", missing}, wantCode: 1, wantStderr: []string{"cannot read " + missing}},
 		// The package dir has a Madefile.md, so falling back to discovery would list it.
@@ -106,6 +106,41 @@ func TestRun(t *testing.T) {
 		{name: "empty -f with task", args: []string{"-f", "", "hello"}, wantCode: 2, wantStderr: []string{"-f requires a file path"}, notStdout: []string{"Tasks in"}},
 		{name: "empty -f with -l", args: []string{"-f", "", "-l"}, wantCode: 2, wantStderr: []string{"-f requires a file path"}, notStdout: []string{"Tasks in"}},
 	})
+}
+
+// TestFlagErrors checks that a bad flag gets a single line on stderr naming the flag as
+// it was typed, exit code 2, and no usage text.
+func TestFlagErrors(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--nope"}, "made: unknown flag --nope (see made --help)\n"},
+		{[]string{"-nope"}, "made: unknown flag -nope (see made --help)\n"},
+		{[]string{"-lV"}, "made: unknown flag -lV (see made --help)\n"},
+		{[]string{"--nope=3"}, "made: unknown flag --nope (see made --help)\n"},
+		{[]string{"---x"}, "made: unknown flag ---x (see made --help)\n"},
+		{[]string{"-l", "--nope", "task"}, "made: unknown flag --nope (see made --help)\n"},
+		{[]string{"-f"}, "made: flag -f needs an argument (see made --help)\n"},
+		{[]string{"-l", "--file"}, "made: flag --file needs an argument (see made --help)\n"},
+		{[]string{"--list=maybe"}, "made: invalid value for flag --list (see made --help)\n"},
+		{[]string{"--list=maybe", "---x"}, "made: invalid value for flag --list (see made --help)\n"},
+		{[]string{"init", "--bogus"}, "made: unknown flag --bogus (see made init --help)\n"},
+		{[]string{"init", "--force=maybe"}, "made: invalid value for flag --force (see made init --help)\n"},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := run(tc.args, &stdout, &stderr); code != 2 {
+				t.Errorf("run(%q) = %d, want 2", tc.args, code)
+			}
+			if got := stderr.String(); got != tc.want {
+				t.Errorf("stderr = %q, want %q", got, tc.want)
+			}
+			if stdout.Len() > 0 {
+				t.Errorf("stdout = %q, want it empty", &stdout)
+			}
+		})
+	}
 }
 
 // TestUsage checks the help text: on stdout for -h, in the README's synopsis, with
@@ -136,7 +171,7 @@ func TestUsage(t *testing.T) {
 		runCase{name: "single-dash -file", args: []string{"-file", f}, wantStdout: []string{"Tasks in " + f}},
 		runCase{name: "single-dash -version", args: []string{"-version"}, wantStdout: []string{"made "}},
 		runCase{name: "init --help", args: []string{"init", "--help"}, wantStdout: []string{"Usage: made init [--force]", "    --force", "-h, --help"}, notStdout: []string{"\n  -force"}, notStderr: []string{"Usage"}},
-		runCase{name: "init bad flag", args: []string{"init", "--bogus"}, wantCode: 2, wantStderr: []string{"Usage: made init [--force]"}, notStdout: []string{"Usage"}},
+		runCase{name: "init bad flag", args: []string{"init", "--bogus"}, wantCode: 2, wantStderr: []string{"made: unknown flag --bogus (see made init --help)"}, notStdout: []string{"Usage"}, notStderr: []string{"Usage"}},
 	)
 	checkRunCases(t, cases)
 
@@ -241,7 +276,7 @@ func TestRunDashTaskName(t *testing.T) {
 	}
 	checkRunCases(t, []runCase{
 		{name: "after --", args: []string{"-f", f, "--", "-x"}, notStdout: []string{"Tasks in"}, notStderr: []string{"made: "}},
-		{name: "taken as a flag", args: []string{"-f", f, "-x"}, wantCode: 2, wantStderr: []string{"flag provided but not defined: -x"}},
+		{name: "taken as a flag", args: []string{"-f", f, "-x"}, wantCode: 2, wantStderr: []string{"made: unknown flag -x (see made --help)"}},
 	})
 }
 
@@ -1007,14 +1042,14 @@ func TestInitUsageErrors(t *testing.T) {
 		{name: "with empty -f", args: []string{"-f", "", "init"}, wantCode: 2, wantStderr: []string{"-f requires a file path"}},
 		{name: "extra args", args: []string{"init", "extra"}, wantCode: 2, wantStderr: []string{"init takes no arguments"}},
 		{name: "force with extra args", args: []string{"init", "--force", "extra"}, wantCode: 2, wantStderr: []string{"init takes no arguments"}},
-		{name: "unknown init flag", args: []string{"init", "--bogus"}, wantCode: 2, wantStderr: []string{"flag provided but not defined: -bogus", "Usage: made init [--force]"}},
-		{name: "-f after init", args: []string{"init", "-f", "x"}, wantCode: 2, wantStderr: []string{"flag provided but not defined: -f"}},
+		{name: "unknown init flag", args: []string{"init", "--bogus"}, wantCode: 2, wantStderr: []string{"made: unknown flag --bogus (see made init --help)"}, notStderr: []string{"Usage"}},
+		{name: "-f after init", args: []string{"init", "-f", "x"}, wantCode: 2, wantStderr: []string{"made: unknown flag -f (see made init --help)"}},
 		{name: "init help", args: []string{"init", "-h"}, wantCode: 0, wantStdout: []string{"Usage: made init [--force]", "--force"}},
 		{name: "-l before init", args: []string{"-l", "init"}, wantCode: 2, wantStderr: []string{"init does not take -l"}},
 		{name: "--list before init", args: []string{"--list", "init"}, wantCode: 2, wantStderr: []string{"init does not take --list"}},
 		{name: "--no-chdir before init", args: []string{"--no-chdir", "init"}, wantCode: 2, wantStderr: []string{"init does not take --no-chdir"}},
 		{name: "--list-names before init", args: []string{"--list-names", "init"}, wantCode: 2, wantStderr: []string{"init does not take --list-names"}},
-		{name: "-l after init", args: []string{"init", "-l"}, wantCode: 2, wantStderr: []string{"flag provided but not defined: -l"}},
+		{name: "-l after init", args: []string{"init", "-l"}, wantCode: 2, wantStderr: []string{"made: unknown flag -l (see made init --help)"}},
 	})
 	if entries, _ := os.ReadDir("."); len(entries) != 0 {
 		t.Errorf("cwd has %d entries after usage errors, want none", len(entries))

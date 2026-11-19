@@ -142,7 +142,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var strict bool
 	var host bool
 	fs := flag.NewFlagSet("made", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs.SetOutput(io.Discard) // parse errors are reported by flagError
 	fs.StringVar(&file, "file", "", "Markdown file to read tasks from (default: nearest Madefile.md, searched up to the repository root, or the filesystem root outside a repository)")
 	fs.StringVar(&file, "f", "", "shorthand for --file")
 	fs.BoolVar(&noChdir, "no-chdir", false, "run the task in the current directory instead of the task file's directory")
@@ -167,8 +167,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(w, "`made --check` reports problems in the task file without running anything.\n\n")
 		printOptions(w, fs, mainOptions)
 	}
-	// fs still reports parse errors on stderr; the usage is printed below so that help
-	// can go to stdout.
+	// The usage is printed below so that help can go to stdout.
 	fs.Usage = func() {}
 	if err := fs.Parse(args); err != nil {
 		// Keep the exit codes flag.ExitOnError used: 0 for -h/-help, 2 for a bad flag.
@@ -176,7 +175,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			printUsage(stdout)
 			return 0
 		}
-		printUsage(stderr)
+		fmt.Fprintf(stderr, "made: %s (see made --help)\n", flagError(fs, args, err))
 		return 2
 	}
 
@@ -229,7 +228,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		var force bool
 		ifs := flag.NewFlagSet("made init", flag.ContinueOnError)
-		ifs.SetOutput(stderr)
+		ifs.SetOutput(io.Discard)
 		ifs.BoolVar(&force, "force", false, "overwrite an existing Madefile in the current directory")
 		printInitUsage := func(w io.Writer) {
 			fmt.Fprintf(w, "Usage: made init [--force]\n\n")
@@ -237,12 +236,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 			printOptions(w, ifs, initOptions)
 		}
 		ifs.Usage = func() {}
-		if err := ifs.Parse(fs.Args()[1:]); err != nil {
+		initArgs := fs.Args()[1:]
+		if err := ifs.Parse(initArgs); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
 				printInitUsage(stdout)
 				return 0
 			}
-			printInitUsage(stderr)
+			fmt.Fprintf(stderr, "made: %s (see made init --help)\n", flagError(ifs, initArgs, err))
 			return 2
 		}
 		if ifs.NArg() > 0 {
@@ -930,6 +930,38 @@ var mainOptions = []usageOption{
 var initOptions = []usageOption{
 	{long: "force"},
 	{short: "h", long: "help"},
+}
+
+// flagError describes err, the error fs.Parse(args) returned, naming the flag as it
+// was typed (flag's own errors drop a dash from --name). Parse leaves fs.Args() just
+// past the failing argument, except for bad syntax such as ---x, which it rejects
+// before consuming it.
+func flagError(fs *flag.FlagSet, args []string, err error) string {
+	rest := fs.Args()
+	if strings.HasPrefix(err.Error(), "bad flag syntax") && len(rest) > 0 {
+		return "unknown flag " + escapeDisplay(rest[0])
+	}
+	var arg string
+	if i := len(args) - len(rest) - 1; i >= 0 {
+		arg = args[i]
+	}
+	typed, _, hasValue := strings.Cut(arg, "=")
+	f := fs.Lookup(strings.TrimPrefix(strings.TrimPrefix(typed, "-"), "-"))
+	typed = escapeDisplay(typed)
+	switch {
+	case f == nil:
+		return "unknown flag " + typed
+	case !hasValue && !isBoolFlag(f):
+		return "flag " + typed + " needs an argument"
+	default:
+		return "invalid value for flag " + typed
+	}
+}
+
+// isBoolFlag reports whether f takes no argument, like -l.
+func isBoolFlag(f *flag.Flag) bool {
+	b, ok := f.Value.(interface{ IsBoolFlag() bool })
+	return ok && b.IsBoolFlag()
 }
 
 // printOptions writes opts as an aligned "-s, --long <arg>  description" list. The
