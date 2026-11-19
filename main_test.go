@@ -794,20 +794,101 @@ func mkUnreadable(t *testing.T, path string) {
 	}
 }
 
-func TestRunRejectsNonRegularExplicitFile(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("FIFOs are not supported on Windows")
+func TestRunReadsExplicitFIFO(t *testing.T) {
+	clean := "### hello\n```bash\necho hi\n```\n"
+	tests := []struct {
+		name    string
+		check   bool
+		content string
+		runCase
+	}{
+		{name: "list", content: clean, runCase: runCase{wantStdout: []string{"hello"}}},
+		{name: "check clean", check: true, content: clean, runCase: runCase{notStdout: []string{"problem"}}},
+		{name: "check errors", check: true, content: "### a\n```yaml\nk\n```\n",
+			runCase: runCase{wantCode: 1, wantStdout: []string{":2: error: unsupported-language: "}}},
+		{name: "list too large", content: strings.Repeat("x", maxMadefileBytes+1),
+			runCase: runCase{wantCode: 1, wantStderr: []string{"exceeds maximum size"}}},
+		{name: "check too large", check: true, content: strings.Repeat("x", maxMadefileBytes+1),
+			runCase: runCase{wantCode: 1, wantStdout: []string{": error: file-too-large: "}}},
 	}
-	dir := t.TempDir()
-	fifo := filepath.Join(dir, "tasks.md")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fifo := filepath.Join(t.TempDir(), "tasks.md")
+			mkFIFO(t, fifo)
+			feedFIFO(t, fifo, []byte(tt.content))
+			tt.runCase.name = tt.name
+			tt.args = []string{"-f", fifo, "-l"}
+			if tt.check {
+				tt.args = []string{"--check", "-f", fifo}
+			}
+			checkRunCases(t, []runCase{tt.runCase})
+		})
+	}
+}
+
+// TestListNamesRefusesExplicitFIFO checks that --list-names, which tab completion runs
+// with the typed -f value, fails at once on a FIFO with no writer instead of blocking.
+func TestListNamesRefusesExplicitFIFO(t *testing.T) {
+	fifo := filepath.Join(t.TempDir(), "tasks.md")
 	mkFIFO(t, fifo)
-	t.Chdir(dir)
-	var stdout, stderr bytes.Buffer
-	code := run([]string{"-f", fifo, "-l"}, &stdout, &stderr)
-	if code != 1 {
-		t.Errorf("run(-f fifo -l) = %d, want 1", code)
+	type result struct {
+		code   int
+		stderr string
 	}
-	checkContains(t, "stderr", stderr.String(), []string{"not a regular file"}, true)
+	done := make(chan result, 1)
+	go func() {
+		var stdout, stderr bytes.Buffer
+		code := run([]string{"-f", fifo, "--list-names"}, &stdout, &stderr)
+		done <- result{code, stderr.String()}
+	}()
+	select {
+	case r := <-done:
+		if r.code != 1 || !strings.Contains(r.stderr, "not a regular file") {
+			t.Errorf("run(-f fifo --list-names) = %d, stderr %q; want 1, not a regular file", r.code, r.stderr)
+		}
+	case <-time.After(2 * time.Second):
+		feedFIFO(t, fifo, nil)
+		t.Fatal("run(-f fifo --list-names) blocked on a FIFO with no writer")
+	}
+}
+
+func TestRunExplicitDirectory(t *testing.T) {
+	dir := t.TempDir()
+	for _, args := range [][]string{{"-f", dir, "-l"}, {"--check", "-f", dir}} {
+		var stdout, stderr bytes.Buffer
+		code := run(args, &stdout, &stderr)
+		if want := "made: cannot read " + displayPath(dir) + ": is a directory\n"; code != 1 || stderr.String() != want {
+			t.Errorf("run(%q) = %d, stderr %q; want 1, %q", args, code, stderr.String(), want)
+		}
+	}
+}
+
+func TestRunExplicitDevNull(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("/dev/null needs Unix")
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"-f", os.DevNull, "-l"}, &stdout, &stderr); code != 0 {
+		t.Errorf("run(-f /dev/null -l) = %d, want 0 (stderr: %s)", code, &stderr)
+	}
+}
+
+func TestReadMadefileDiscoveryRejectsFIFO(t *testing.T) {
+	fifo := filepath.Join(t.TempDir(), "Madefile.md")
+	mkFIFO(t, fifo)
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := readMadefile(fifo, false)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "not a regular file") {
+			t.Errorf("readMadefile(fifo, false) error = %v, want not a regular file", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("readMadefile(fifo, false) blocked on a FIFO")
+	}
 }
 
 func TestReadMadefileRejectsOversize(t *testing.T) {
@@ -823,7 +904,7 @@ func TestReadMadefileRejectsOversize(t *testing.T) {
 	if err = f.Close(); err != nil {
 		t.Fatal(err)
 	}
-	_, err = readMadefile(path)
+	_, _, err = readMadefile(path, false)
 	if err == nil {
 		t.Fatal("readMadefile(oversize) = nil, want error")
 	}
