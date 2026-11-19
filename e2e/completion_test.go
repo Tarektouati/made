@@ -124,6 +124,12 @@ printf '%s\n' "${COMPREPLY[@]}"`
 		{line: []string{"made", "-f", `my\ tasks.md`, ""}, want: []string{"ns:task"}, not: []string{"build"}},
 		{line: []string{"made", "-f", `"my tasks.md"`, ""}, want: []string{"ns:task"}, not: []string{"build"}},
 		{line: []string{"made", "-f", "edge.md", ""}, want: []string{`back\slash`}, not: []string{"empty"}},
+		// --check takes no task, and --strict and --host need --check.
+		{line: []string{"made", "--check", ""}, not: []string{"build", "init", "completion"}},
+		{line: []string{"made", "--strict", ""}, not: []string{"build", "init", "completion"}},
+		{line: []string{"made", "-host", ""}, not: []string{"build", "init", "completion"}},
+		{line: []string{"made", "-f", "other.md", "--check", ""}, not: []string{"ns:task"}},
+		{line: []string{"made", "--check", "--"}, want: []string{"--strict", "--host", "--file", "--no-chdir"}, not: []string{"--list", "--version"}},
 	} {
 		compLine := tc.compLine
 		if compLine == "" {
@@ -178,6 +184,11 @@ func TestCompletionFish(t *testing.T) {
 		{line: []string{"made init "}, not: []string{"build\tCompiles all packages.", "Madefile.md"}},
 		{line: []string{"made init -"}, want: []string{"--force\tOverwrite an existing Madefile"}},
 		{line: []string{"made init --force -"}, not: []string{"--force\tOverwrite an existing Madefile"}},
+		// --check takes no task, and --strict and --host need --check.
+		{line: []string{"made --check "}, not: []string{"build\tCompiles all packages.", "init\tCreate a starter Madefile.md", "completion\tPrint a shell completion script"}},
+		{line: []string{"made --strict "}, not: []string{"build\tCompiles all packages.", "init\tCreate a starter Madefile.md"}},
+		{line: []string{"made -host "}, not: []string{"build\tCompiles all packages.", "init\tCreate a starter Madefile.md"}},
+		{line: []string{"made --check -"}, want: []string{"--strict\tWith --check, fail on warnings too", "--file\tMarkdown file to read tasks from"}, not: []string{"--list\tList available tasks", "--version\tPrint version and exit"}},
 	} {
 		got := lines(runShell(t, dir, "fish", "-N", "-c", `made completion fish | source; complete -C "$argv[1]"`, tc.line[0]))
 		checkCompletions(t, got, tc)
