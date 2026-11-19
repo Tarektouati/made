@@ -28,6 +28,7 @@ with `2`.
 | `empty-name` | error | The heading's name is empty, e.g. `### <br>` (HTML tags are not part of the name) |
 | `empty-script` | error | The task's code block is empty or blank |
 | `nul-byte` | error | The script contains a NUL byte, which can't be run |
+| `script-too-large` | error | The script is too large to pass to its interpreter as a command-line argument: 128 KiB on Linux and macOS, 32,767 UTF-16 characters on Windows (see below) |
 | `nesting-too-deep` | error | Lists or blockquotes nest deeper than 256 levels |
 | `file-too-large` | error | The file is larger than 10 MiB |
 | `parse-timeout` | error | Parsing the file took longer than 1.5 s (see [How it works](how-it-works.md)) |
@@ -43,5 +44,13 @@ least two columns). It errs on the strict side and checks every line, including
 lines inside code blocks and HTML: a line starting with more than 256 `>`, `-` or
 `1.` markers, or a non-blank line indented 514 columns or more, is reported even
 when it isn't nested. Blank lines never count, however wide.
+
+`script-too-large` uses the limit of the OS `made --check` runs on. Linux caps a
+single argument at 128 KiB (counted in bytes), and macOS is checked against the
+same limit so that a Madefile that passes there also runs on Linux, although macOS
+itself accepts a larger script. Windows caps the whole command line at 32,767
+UTF-16 characters, so a script with many non-ASCII characters fits in more bytes,
+and a script just under the limit can still be too long once quoted. The size
+reported includes the space `made` adds before a script starting with `-` or `+`.
 
 To run the check on commit, see [Pre-commit and prek](pre-commit.md).

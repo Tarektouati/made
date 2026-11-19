@@ -697,7 +697,9 @@ func TestCheck(t *testing.T) {
 	bad := writeTemp(t, "bad.md", "### a\n```yaml\nk\n```\n")
 	warn := writeTemp(t, "warn.md", "### a\n```bash\nx\n```\n```bash\ny\n```\n")
 	docs := writeTemp(t, "docs.md", "### a\n```bash\nx\n```\n## Options\n### `--verbose`\nPrints more.\n")
+	big := writeTemp(t, "big.md", "### big\n```bash\n"+strings.Repeat("x", 280000)+"\n```\n")
 	checkRunCases(t, []runCase{
+		{name: "script too large", args: []string{"--check", "-f", big}, wantCode: 1, wantStdout: []string{big + ":2: error: script-too-large: ", "script is 280001 "}},
 		{name: "clean", args: []string{"-f", clean, "--check"}, notStdout: []string{clean}, notStderr: []string{"made: "}},
 		{name: "clean strict", args: []string{"--check", "--strict", "-f", clean}},
 		{name: "no-chdir allowed", args: []string{"--no-chdir", "--check", "-f", clean}},

@@ -104,6 +104,10 @@ func Check(src []byte) []Diagnostic {
 		} else if i := strings.IndexByte(f.Script, 0); i >= 0 {
 			add(f.Line+1+strings.Count(f.Script[:i], "\n"), Error, "nul-byte", "task %q script contains a NUL byte", t.Name)
 		}
+		if runner.ScriptTooLarge(f.Lang, f.Script) {
+			add(f.Line, Error, "script-too-large", "task %q script is %d %s; the OS rejects a command-line argument of about %d %s or more, so it cannot run; move the bulk of it into a file the task runs",
+				t.Name, runner.ScriptLen(f.Lang, f.Script), runner.ArgUnit, runner.ArgLimit, runner.ArgUnit)
+		}
 		for _, extra := range t.Fences[1:] {
 			add(extra.Line, Warning, "extra-code-block", "ignored: task %q runs only its first code block (line %d)", t.Name, f.Line)
 		}
