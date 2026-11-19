@@ -643,6 +643,34 @@ func TestRunRejectsNUL(t *testing.T) {
 	}
 }
 
+func TestRunRejectsEmptyScript(t *testing.T) {
+	for _, lang := range []string{"bash", "sh", "python"} {
+		for _, script := range []string{"", "\n", " \n\t\n"} {
+			t.Run(fmt.Sprintf("%s/%q", lang, script), func(t *testing.T) {
+				err := Run(context.Background(), nil, parser.Task{Name: "x", Lang: lang, Script: script}, "", nil)
+				if err == nil {
+					t.Fatal("Run: want error for empty script, got nil")
+				}
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) {
+					t.Fatalf("Run: error = %v, want a refusal before anything runs", err)
+				}
+				for _, w := range []string{`task "x"`, "empty code block"} {
+					if !strings.Contains(err.Error(), w) {
+						t.Errorf("error = %q, want it to contain %q", err.Error(), w)
+					}
+				}
+			})
+		}
+	}
+	t.Run("unsupported language first", func(t *testing.T) {
+		err := Run(context.Background(), nil, parser.Task{Name: "x", Lang: "cobol"}, "", nil)
+		if err == nil || !strings.Contains(err.Error(), "unsupported language") {
+			t.Errorf("Run: error = %v, want unsupported language", err)
+		}
+	})
+}
+
 func TestRunNoArgsSeparatorNotPassed(t *testing.T) {
 	// The "--" separator is always appended; with no task arguments it must not show
 	// up as an argument itself.
