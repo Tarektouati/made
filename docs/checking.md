@@ -26,7 +26,7 @@ these exit with `2`.
 | `duplicate-task` | error | A task has the same name as an earlier one, which is the one `made` runs |
 | `unsupported-language` | error | The code block's language isn't one of the [supported languages](languages.md) |
 | `empty-name` | error | The heading's name is empty, e.g. `### <br>` (HTML tags are not part of the name) |
-| `empty-script` | error | The task's code block is empty or blank |
+| `empty-script` | error | The task's code block is empty or blank; running the task fails |
 | `unreachable-name` | error | The name is `init` or `completion`, which `made` reserves, so the task can never run |
 | `nul-byte` | error | The script contains a NUL byte, which can't be run |
 | `script-too-large` | error | The script is too large to pass to its interpreter as a command-line argument: 128 KiB on Linux and macOS, 32,767 UTF-16 characters on Windows (see below) |

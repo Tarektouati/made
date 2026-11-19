@@ -66,7 +66,7 @@ Running `made` with no task lists the tasks, same as `--list`. When a task runs,
 `made` exits with the script's exit code, so it composes with `&&`, CI steps, and
 git hooks (see [Pre-commit and prek](pre-commit.md)). A task killed by signal
 n makes `made` exit with `128+n`, as shells report it: `137` for `kill -9`, `141` for
-`SIGPIPE` (e.g. `made task | head -1`). An unknown task prints an error and the task list, and exits with `1`. If the task's interpreter can't be started, `made` exits with `127` (not on `PATH`) or `126` (found but not executable); see [Supported languages](languages.md).
+`SIGPIPE` (e.g. `made task | head -1`). An unknown task prints an error and the task list, and exits with `1`. A task whose code block is empty or blank exits with `1` without running anything. If the task's interpreter can't be started, `made` exits with `127` (not on `PATH`) or `126` (found but not executable); see [Supported languages](languages.md).
 `-l`/`--list` always lists and ignores any task name after it, even an unknown one:
 `made -l build` lists the tasks without running `build`.
 
