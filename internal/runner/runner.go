@@ -134,8 +134,9 @@ var (
 
 // interpreters maps a fenced code block's language to its interpreter. The language
 // is matched case-insensitively; the empty language defaults to bash so a plain
-// fence keeps working. fish has no errexit option and non-shell interpreters already
-// fail on an uncaught error, so only bash, sh, and zsh get strict-mode options.
+// fence keeps working. fish has no errexit option (a fish task continues past
+// failures) and non-shell interpreters fail on an uncaught error, so only bash, sh,
+// and zsh get strict-mode options.
 var interpreters = map[string]interpreter{
 	"":           {"bash", strictPipefail, "-c", shellSep, false},
 	"bash":       {"bash", strictPipefail, "-c", shellSep, false},

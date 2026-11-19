@@ -40,6 +40,10 @@ exit $rc
 
 To also treat unset variables as errors, opt in with `set -u`.
 
+`fish` tasks already continue past failures, so they need neither `|| true` nor
+`set +e`. To make a `fish` task stop at a failure, add `; or exit` after the command
+(see [`fish` tasks don't fail fast](languages.md#fish-tasks-dont-fail-fast)).
+
 **Keep tasks in the README**
 
 `made` only discovers `Madefile.md`. To run tasks documented in another file, such
