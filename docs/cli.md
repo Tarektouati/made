@@ -71,8 +71,10 @@ it as `/dev/null` before `made` starts, so the output is discarded and `made` ex
 with the task's code. Use `>/dev/null` to discard output on purpose.
 
 The task list aligns descriptions by terminal display width, so CJK and emoji task
-names line up. Multi-codepoint emoji (ZWJ sequences, flags) and ambiguous-width
-characters may still be off by a cell depending on your terminal.
+names line up. An emoji sequence (a ZWJ sequence such as 👨‍👩‍👧, a skin tone, a
+flag) counts as one two-cell emoji, the way terminals that cluster graphemes draw it
+(iTerm2, Terminal.app, Ghostty, WezTerm, kitty). Terminals that draw each code point
+separately, and ambiguous-width characters, may still be off.
 
 ## Passing arguments
 
