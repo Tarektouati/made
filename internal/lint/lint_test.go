@@ -59,6 +59,7 @@ func TestCheck(t *testing.T) {
 		{name: "script under limit", src: "### a\n```bash\n" + strings.Repeat("x", runner.ArgLimit/2) + "\n```\n"},
 		{name: "large unsupported script", src: "### a\n```yaml\n" + strings.Repeat("x", runner.ArgLimit+1) + "\n```\n", want: []finding{{2, Error, "unsupported-language"}}},
 		{name: "crlf and bom", src: "\xef\xbb\xbf### a\r\n```yaml\r\nk\r\n```\r\n", want: []finding{{2, Error, "unsupported-language"}}},
+		{name: "lone cr", src: "### a\r```yaml\rk\r```\r### a\r```bash\rx\r```\r", want: []finding{{2, Error, "unsupported-language"}, {5, Error, "duplicate-task"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

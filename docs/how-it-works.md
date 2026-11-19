@@ -14,6 +14,8 @@ between the heading and the first fenced code block become the task's
 description, and that code block becomes its script. Any heading of another level
 ends the current task's scope, and an H3 with no code block after it is skipped.
 Only top-level blocks count: code inside lists or blockquotes is never a task.
+Files with LF, CRLF or CR-only (classic Mac OS) line endings all work; in a file
+with any LF, a lone CR stays part of its line, so a script can contain one.
 
 To keep a hostile or broken Madefile from stalling `made` (or tab completion in a
 cloned repository), `made` refuses a file larger than 10 MiB, nesting of lists or
