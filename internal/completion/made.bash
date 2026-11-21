@@ -69,7 +69,7 @@ __made_comp_word() {
     local w=$1 c q="" i=0 qi=0 brk=0
     while ((i < ${#w})); do
         c=${w:i:1}
-        ((i++))
+        i=$((i + 1))
         if [[ $q == \' ]]; then
             if [[ $c == \' ]]; then
                 q=""
@@ -80,10 +80,10 @@ __made_comp_word() {
         elif [[ $c == \" ]]; then
             q=""
         elif [[ $c == \\ ]]; then
-            ((i++))
-        elif [[ -z $q && $c == [:=] && $COMP_WORDBREAKS == *"$c"* ]]; then
+            i=$((i + 1))
+        elif [[ -z $q && $c == [:=] && ${COMP_WORDBREAKS-} == *"$c"* ]]; then
             brk=$i
-        elif [[ -z $q && $c == @ && $COMP_WORDBREAKS == *@* ]]; then
+        elif [[ -z $q && $c == @ && ${COMP_WORDBREAKS-} == *@* ]]; then
             brk=$((i - 1))
         fi
     done
@@ -151,7 +151,7 @@ __made_file_value() {
     if [[ $1 =~ $__made_re ]]; then
         __made_name=${BASH_REMATCH[2]}${BASH_REMATCH[3]}
         __made_v=${!__made_name-}${__made_v#"\$${BASH_REMATCH[1]}"}
-    else
+    elif [[ -n ${HOME+set} ]]; then
         __made_v=${__made_v/#\~/$HOME}
     fi
     printf '%s' "$__made_v"
@@ -168,6 +168,9 @@ __made_list_names() {
     fi
 }
 
+# _made also runs in shells with set -e or set -u, so no statement may fail: compgen
+# returns 1 when nothing matches, compopt is missing before bash 4.0 and made fails
+# without a task file. bash 3.2 reads an empty "${a[@]}" as unset, hence ${a[@]+...}.
 _made() {
     local -a __made_words=() __made_fileargs=()
     local __made_cword __made_cur __made_prev
@@ -190,7 +193,7 @@ _made() {
                 if ((__made_i + 1 < __made_cword)); then
                     __made_fileargs=(-f "$(__made_file_value "${__made_words[__made_i+1]}")")
                 fi
-                ((__made_i++))
+                __made_i=$((__made_i + 1))
                 ;;
             -f=* | -file=* | --file=*) __made_fileargs=(-f "$(__made_file_value "${__made_w#*=}")") ;;
             -*) ;;
@@ -209,19 +212,19 @@ _made() {
         # so file names are the right fallback.
         case $__made_first in
             completion)
-                compopt +o default 2>/dev/null
+                compopt +o default 2>/dev/null || :
                 if ((__made_cword == __made_firstidx + 1)); then
-                    COMPREPLY=($(compgen -W "bash zsh fish" -- "$__made_cur"))
+                    COMPREPLY=($(compgen -W "bash zsh fish" -- "$__made_cur")) || :
                 fi
                 ;;
             init)
-                compopt +o default 2>/dev/null
+                compopt +o default 2>/dev/null || :
                 for ((__made_i = __made_firstidx + 1; __made_i < __made_cword; __made_i++)); do
                     case ${__made_words[__made_i]} in
                         -force | --force | -force=* | --force=*) return 0 ;;
                     esac
                 done
-                COMPREPLY=($(compgen -W "--force" -- "$__made_cur"))
+                COMPREPLY=($(compgen -W "--force" -- "$__made_cur")) || :
                 ;;
         esac
         return 0
@@ -234,15 +237,15 @@ _made() {
     # --check takes no task, and --strict and --host need --check: offer only the
     # flags --check accepts, and no file names.
     if ((__made_checkmode)); then
-        compopt +o default 2>/dev/null
+        compopt +o default 2>/dev/null || :
         if [[ $__made_cur == -* ]]; then
-            COMPREPLY=($(compgen -W "-f --file --no-chdir --check --strict --host -h --help" -- "$__made_cur"))
+            COMPREPLY=($(compgen -W "-f --file --no-chdir --check --strict --host -h --help" -- "$__made_cur")) || :
         fi
         return 0
     fi
 
     if [[ $__made_cur == -* ]]; then
-        COMPREPLY=($(compgen -W "-f --file --no-chdir --check --strict --host -l --list -V --version -h --help" -- "$__made_cur"))
+        COMPREPLY=($(compgen -W "-f --file --no-chdir --check --strict --host -l --list -V --version -h --help" -- "$__made_cur")) || :
         return 0
     fi
 
@@ -257,7 +260,7 @@ _made() {
             __made_quote "$__made_ctx" "${__made_name#"$__made_kept"}"
             COMPREPLY+=("$__made_q")
         fi
-    done < <(__made_list_names "${__made_fileargs[@]}"; printf '%s\n' init completion)
+    done < <(__made_list_names ${__made_fileargs[@]+"${__made_fileargs[@]}"} || :; printf '%s\n' init completion)
     return 0
 }
 
