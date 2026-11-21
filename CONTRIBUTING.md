@@ -2,11 +2,24 @@
 
 ## Development
 
+Tool versions (Go, golangci-lint and `made` itself) are pinned in
+[`.prototools`](./.prototools) and installed with [proto](https://moonrepo.dev/proto),
+so local development, no-mistakes and CI all use the same ones. Install proto by
+following its [installation guide](https://moonrepo.dev/docs/proto/install), then,
+once per clone:
+
+```bash
+proto trust     # .prototools loads its golangci-lint and made plugins from tools/proto/
+proto install   # installs the pinned go, golangci-lint and made
+```
+
+proto ignores the plugins in an untrusted `.prototools`. CI trusts it automatically.
+To bump a tool, edit its version in `.prototools`.
+
 This repository's own tasks live in [`Madefile.md`](./Madefile.md): run `made` in
 the repo to list them, and `made check` to build, vet, and test.
 
-`made format` runs `gofmt -w .` and `made lint` runs golangci-lint (v2.15.0, the
-version CI uses).
+`made format` runs `gofmt -w .` and `made lint` runs golangci-lint.
 
 ## Pushing through no-mistakes (optional)
 
@@ -28,6 +41,10 @@ The gate's settings are in [`.no-mistakes.yaml`](./.no-mistakes.yaml) and use th
 and `document.instructions` from `main`, so a branch cannot change those for its
 own run; `auto_fix` and `commit` are read from the pushed branch. Git worktrees of a clone share its remotes, so `init`
 is needed once per clone, not per worktree.
+
+no-mistakes runs those tasks in its own worktrees under `~/.no-mistakes/worktrees`.
+Trust that directory once (`proto trust ~/.no-mistakes/worktrees`) so the pinned
+golangci-lint and made from `.prototools` are used there too.
 
 ## Benchmarks
 

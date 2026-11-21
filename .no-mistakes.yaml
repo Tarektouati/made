@@ -1,7 +1,8 @@
 # Config for the no-mistakes local gate (https://github.com/kunchenguid/no-mistakes).
 # `commands` and `document.instructions` are read from the default branch
 # (main), so changes to them take effect once merged; `auto_fix` and `commit`
-# follow the pushed branch.
+# follow the pushed branch. The tools these commands use (go, golangci-lint,
+# made) come from .prototools via proto; see CONTRIBUTING.md.
 
 commands:
   lint: "made lint"
