@@ -110,6 +110,34 @@ variables are honoured.
 
 Shell completion offers `self-update` and its `--dry-run` flag.
 
+### New-version notice
+
+`made` tells you when a newer release is out, at most once a day, with one line on
+stderr after listing or running tasks:
+
+```
+made: v0.7.0 is available (you have v0.6.0); run made self-update
+```
+
+The command is the one for your install: `made self-update`,
+`brew upgrade Tarektouati/tap/made`, or `go install github.com/Tarektouati/made@latest`.
+The notice never changes stdout or the exit code and never delays a task: `made`
+shows it from a small cache and refreshes the cache in the background, at most once a
+day (once an hour while checks are cut short by `made` exiting), without waiting for
+the answer. It stays quiet in CI, when output is piped or
+redirected, offline, for development builds, and for the commands scripts and tab
+completion use; see [New-version notice](cli.md#new-version-notice).
+
+To turn it off, set `MADE_NO_UPDATE_CHECK=1` (or `NO_UPDATE_NOTIFIER=1`) in your
+shell profile.
+
+**Privacy.** The check is one plain HTTPS GET to
+`https://github.com/Tarektouati/made/releases/latest`, the same request `install.sh`
+makes, with a one-second timeout. No telemetry, no identifiers, and nothing about
+your version, system or tasks is sent beyond what any HTTP request carries (your IP
+address and Go's default `User-Agent`). The answer is kept in
+`made/update-check.json` in your user cache directory.
+
 ## Shell completion
 
 `made <TAB>` completes task names (with their descriptions in zsh and fish) from the
