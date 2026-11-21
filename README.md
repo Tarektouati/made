@@ -120,6 +120,8 @@ Tasks in Madefile.md:
   build      Compiles all packages.
   test       Runs the test suite.
   check      Builds, vets, and tests in one go.
+  format     Formats all Go sources in place.
+  lint       Runs golangci-lint with the repo's .golangci.yml.
   bench      Benchmarks the working tree against a base ref (default origin/main): Go benchmarks (benchstat), CLI timings (hyperfine) and binary size. Needs hyperfine and benchstat on PATH. Usage: made bench [base-ref].
 ```
 
@@ -134,6 +136,8 @@ Tasks in Madefile.md:
   build      Compiles all packages.
   test       Runs the test suite.
   check      Builds, vets, and tests in one go.
+  format     Formats all Go sources in place.
+  lint       Runs golangci-lint with the repo's .golangci.yml.
   bench      Benchmarks the working tree against a base ref (default origin/main): Go benchmarks (benchstat), CLI timings (hyperfine) and binary size. Needs hyperfine and benchstat on PATH. Usage: made bench [base-ref].
 ```
 

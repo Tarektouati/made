@@ -29,6 +29,18 @@ Builds, vets, and tests in one go.
 go build ./... && go vet ./... && go test ./...
 ```
 
+### format
+Formats all Go sources in place.
+```bash
+gofmt -w .
+```
+
+### lint
+Runs golangci-lint with the repo's `.golangci.yml`.
+```bash
+golangci-lint run ./...
+```
+
 ### bench
 Benchmarks the working tree against a base ref (default `origin/main`): Go benchmarks (benchstat), CLI timings (hyperfine) and binary size. Needs `hyperfine` and `benchstat` on PATH. Usage: `made bench [base-ref]`.
 ```bash

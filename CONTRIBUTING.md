@@ -5,6 +5,30 @@
 This repository's own tasks live in [`Madefile.md`](./Madefile.md): run `made` in
 the repo to list them, and `made check` to build, vet, and test.
 
+`made format` runs `gofmt -w .` and `made lint` runs golangci-lint (v2.15.0, the
+version CI uses).
+
+## Pushing through no-mistakes (optional)
+
+[`no-mistakes`](https://github.com/kunchenguid/no-mistakes) is an optional local
+gate. Pushing to its `no-mistakes` remote instead of `origin` runs an AI-driven
+pipeline (review, test, docs, lint, push, PR, CI) in a disposable worktree, and
+opens the PR only once every check passes. `made check` remains the baseline
+whether or not you use it. Install it by following the upstream
+[installation guide](https://kunchenguid.github.io/no-mistakes/start-here/installation/), then:
+
+```bash
+no-mistakes init            # once per clone; adds the `no-mistakes` git remote
+git push no-mistakes        # from your feature branch
+no-mistakes                 # open the TUI for the active run
+```
+
+The gate's settings are in [`.no-mistakes.yaml`](./.no-mistakes.yaml) and use the
+`made format`, `made lint` and `made check` tasks. no-mistakes reads `commands`
+and `document.instructions` from `main`, so a branch cannot change those for its
+own run; `auto_fix` and `commit` are read from the pushed branch. Git worktrees of a clone share its remotes, so `init`
+is needed once per clone, not per worktree.
+
 ## Benchmarks
 
 Every pull request gets a base-vs-head performance table from the `bench` CI job
