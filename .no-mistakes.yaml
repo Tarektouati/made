@@ -1,0 +1,26 @@
+# Config for the no-mistakes local gate (https://github.com/kunchenguid/no-mistakes).
+# `commands` and `document.instructions` are read from the default branch
+# (main), so changes to them take effect once merged; `auto_fix` and `commit`
+# follow the pushed branch.
+
+commands:
+  lint: "made lint"
+  format: "made format"
+  # Deterministic local baseline: build, vet and test. The Test step still
+  # follows it with agent-driven validation of the change's intent. The full
+  # -race matrix (ubuntu, macos, windows) stays in .github/workflows/ci.yml.
+  test: "made check"
+
+# Review findings park for a human decision; other steps keep their defaults.
+auto_fix:
+  review: 0
+
+commit:
+  fix_message: "fix(no-mistakes-{{.Step}}): {{.Summary}}"
+
+document:
+  instructions: |
+    README.md is the short introduction; docs/*.md own the detailed guidance
+    (cli.md, installation.md, pre-commit.md, checking.md, ...). Contributor
+    workflow lives in CONTRIBUTING.md. Do not add agent-memory files such as
+    CLAUDE.md or AGENTS.md.
