@@ -1,0 +1,27 @@
+# proto TOML plugin for made's own GitHub releases (built by .goreleaser.yaml):
+# https://moonrepo.dev/docs/proto/plugins#toml-plugin
+# Releases exist for macOS and Linux only.
+
+name = "made"
+type = "cli"
+
+[platform.macos]
+download-file = "made_{version}_darwin_{arch}.tar.gz"
+checksum-file = "checksums.txt"
+exe-path = "made"
+
+[platform.linux]
+download-file = "made_{version}_linux_{arch}.tar.gz"
+checksum-file = "checksums.txt"
+exe-path = "made"
+
+[install]
+download-url = "https://github.com/Tarektouati/made/releases/download/v{version}/{download_file}"
+checksum-url = "https://github.com/Tarektouati/made/releases/download/v{version}/{checksum_file}"
+
+[install.arch]
+aarch64 = "arm64"
+x86_64 = "amd64"
+
+[resolve]
+git-url = "https://github.com/Tarektouati/made"
