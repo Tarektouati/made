@@ -44,6 +44,12 @@ const tasksMD = "### greet\n" +
 const proseMD = "# made\n\nJust prose. No tasks defined here.\n"
 
 func TestMain(m *testing.M) {
+	// The PTY tests run made on a real terminal, where it would check github.com for
+	// a new release and write to the user's cache directory.
+	if err := os.Setenv("MADE_NO_UPDATE_CHECK", "1"); err != nil {
+		fmt.Fprintln(os.Stderr, "e2e: setenv:", err)
+		os.Exit(1)
+	}
 	dir, err := os.MkdirTemp("", "made-e2e")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "e2e: mktemp:", err)
