@@ -10,6 +10,7 @@ made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]
 made [-f file] --check [--strict] [--host]
 made init [--force]
 made completion <bash|zsh|fish>
+made self-update [vX.Y.Z] [--dry-run]
 ```
 
 | Flag | Default | Description |
@@ -59,6 +60,29 @@ directory, a broken symlink, or a symlink to a directory), `made init` and
 `fish` (see [Shell completion](installation.md#shell-completion)). Like `init`, it needs no task
 file, takes no top-level flags, and is reserved: a task named `completion` cannot be run with
 `made completion`.
+
+**`made self-update`** replaces the running `made` with the latest release, after
+verifying its checksum and checking that the new binary runs, and prints
+`made: updated v0.6.0 -> v0.7.0`. If `made` is already the latest release it prints
+`made: v0.7.0 is the latest version`; it never installs an older release unless you
+name one, as in `made self-update v0.6.0` (`0.6.0` works too). Only releases
+(`vX.Y.Z`) can be named: a pre-release such as `v0.7.0-rc.1` would install as a
+development build, which `made self-update` could not replace later. `--dry-run` prints
+the release, the download URL and the binary that would be replaced, and whether its
+directory is writable, without downloading or changing anything. The version and
+`--dry-run` may come in either order. Binaries installed with Homebrew or
+`go install`, development builds and Windows are not replaced: `made` prints the
+command to use instead. Like `init`, it needs no task file, takes no top-level flags,
+and is reserved: a task named `self-update` cannot be run with `made self-update` (a
+task named `update` still runs). See [Updating](installation.md#updating) for details.
+
+| Exit code | `made self-update` |
+|---|---|
+| `0` | Updated, already the latest (or requested) release, or a dry run |
+| `1` | A download, checksum, extraction or verification failure, or the binary could not be replaced; nothing was changed |
+| `2` | Usage error: an unknown flag, more than one version, or a version that is not a release `vX.Y.Z` |
+| `3` | This install is managed elsewhere (Homebrew, `go install`), is a development build, or has no release archive (Windows); the command to use is printed |
+| `4` | The binary's directory is not writable; run `sudo made self-update` or reinstall with `install.sh` |
 
 ## Listing and exit codes
 
