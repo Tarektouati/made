@@ -3,8 +3,9 @@
 // Tasks are H3 headings in a Markdown file (the nearest Madefile.md by default), each
 // followed by a fenced code block. `made <task> [args...]` runs that block with args
 // as its positional parameters; `made` with no task lists them. `made init` writes a
-// starter Madefile.md in the current directory, and `made completion <shell>` prints a
-// bash, zsh or fish completion script.
+// starter Madefile.md in the current directory, `made completion <shell>` prints a
+// bash, zsh or fish completion script, and `made self-update` replaces made with the
+// latest release.
 package main
 
 import (
@@ -32,6 +33,7 @@ import (
 	"github.com/Tarektouati/made/internal/lint"
 	"github.com/Tarektouati/made/internal/parser"
 	"github.com/Tarektouati/made/internal/runner"
+	"github.com/Tarektouati/made/internal/selfupdate"
 	"github.com/Tarektouati/made/internal/task"
 	"golang.org/x/text/width"
 )
@@ -125,6 +127,13 @@ func initTemplate(v string) string {
 	return "<!-- made " + v + " -->\n\n" + madefileTemplate
 }
 
+// selfUpdateBaseURL replaces github.com for made self-update; tests point it at a
+// local server.
+var selfUpdateBaseURL = ""
+
+// detectInstall describes the running binary for made self-update; tests replace it.
+var detectInstall = selfupdate.Current
+
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
@@ -160,11 +169,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(w, "Usage: made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]\n")
 		fmt.Fprintf(w, "       made [-f file] --check [--strict] [--host]\n")
 		fmt.Fprintf(w, "       made init [--force]\n")
-		fmt.Fprintf(w, "       made completion <%s>\n\n", strings.Join(completion.Shells, "|"))
+		fmt.Fprintf(w, "       made completion <%s>\n", strings.Join(completion.Shells, "|"))
+		fmt.Fprintf(w, "       made self-update [vX.Y.Z] [--dry-run]\n\n")
 		fmt.Fprintf(w, "Run a task defined as an H3 heading + code block in a Markdown file.\n")
 		fmt.Fprintf(w, "`made init` creates a starter Madefile.md in the current directory;\n")
 		fmt.Fprintf(w, "--force overwrites an existing one.\n")
 		fmt.Fprintf(w, "`made completion <shell>` prints a shell completion script.\n")
+		fmt.Fprintf(w, "`made self-update` replaces made with the latest release (or vX.Y.Z).\n")
 		fmt.Fprintf(w, "`made --check` reports problems in the task file without running anything.\n\n")
 		printOptions(w, fs, mainOptions)
 	}
@@ -274,6 +285,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		_, _ = stdout.Write(script)
 		return 0
+	}
+
+	// self-update is reserved like init: it replaces the made binary and needs no task file.
+	if fs.NArg() > 0 && fs.Arg(0) == "self-update" {
+		if file != "" {
+			fmt.Fprintln(stderr, "made: self-update does not take -f")
+			return 2
+		}
+		if f := firstSetFlag(fs, "f", "file"); f != "" {
+			fmt.Fprintf(stderr, "made: self-update does not take %s\n", f)
+			return 2
+		}
+		return selfUpdate(fs.Args()[1:], stdout, stderr)
 	}
 
 	res, err := resolveFile(file)
@@ -538,6 +562,89 @@ func initMadefile(stdout, stderr io.Writer, force bool) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "made: overwrote %s\n", target)
+	return 0
+}
+
+// selfUpdate runs made self-update with args, the words after "self-update", and
+// returns the exit code: 0 when made was updated or already current, or for a dry
+// run; 2 for a usage error; otherwise one of the selfupdate.Exit codes. The version
+// and --dry-run may come in either order.
+func selfUpdate(args []string, stdout, stderr io.Writer) int {
+	var dryRun bool
+	sfs := flag.NewFlagSet("made self-update", flag.ContinueOnError)
+	sfs.SetOutput(io.Discard)
+	sfs.BoolVar(&dryRun, "dry-run", false, "print what would happen without changing anything")
+	sfs.Usage = func() {}
+	var versions []string
+	for rest := args; ; {
+		if err := sfs.Parse(rest); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				fmt.Fprintf(stdout, "Usage: made self-update [vX.Y.Z] [--dry-run]\n\n")
+				fmt.Fprintf(stdout, "Replace made with the latest release, or with release vX.Y.Z (which may be older).\n")
+				fmt.Fprintf(stdout, "Installs from Homebrew or go install are left to those tools.\n\n")
+				printOptions(stdout, sfs, selfUpdateOptions)
+				return 0
+			}
+			fmt.Fprintf(stderr, "made: %s (see made self-update --help)\n", flagError(sfs, rest, err))
+			return 2
+		}
+		if sfs.NArg() == 0 {
+			break
+		}
+		// Parse stops at the first word that is not a flag, or after "--", which ends
+		// the flags for good.
+		if i := len(rest) - sfs.NArg() - 1; i >= 0 && rest[i] == "--" {
+			versions = append(versions, sfs.Args()...)
+			break
+		}
+		versions = append(versions, sfs.Arg(0))
+		rest = sfs.Args()[1:]
+	}
+	if len(versions) > 1 {
+		fmt.Fprintln(stderr, "made: self-update takes at most one version")
+		return 2
+	}
+	target := ""
+	if len(versions) == 1 && versions[0] != "latest" {
+		// A pre-release would be installed as a development build, which made
+		// self-update then refuses to replace.
+		var err error
+		if target, err = selfupdate.NormalizeTag(versions[0]); err != nil || !selfupdate.IsRelease(target) {
+			fmt.Fprintf(stderr, "made: invalid version %q: give a release such as v1.2.3\n", versions[0])
+			return 2
+		}
+	}
+
+	in := detectInstall(resolveVersion(), version != "")
+	if m := selfupdate.Detect(in); m != selfupdate.Manual {
+		fmt.Fprintf(stderr, "made: %s\n", escapeDisplay(selfupdate.Refusal(m, in)))
+		return selfupdate.ExitNotSelfUpdatable
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	u := selfupdate.Updater{
+		Client:  selfupdate.Client{BaseURL: selfUpdateBaseURL},
+		Exe:     in.Exe,
+		Current: in.Version,
+		Target:  target,
+		GOOS:    in.GOOS,
+		GOARCH:  in.GOARCH,
+		DryRun:  dryRun,
+		Stdout:  stdout,
+	}
+	if err := u.Run(ctx); err != nil {
+		fmt.Fprintf(stderr, "made: %s\n", escapeErr(err))
+		code := selfupdate.ExitFailure
+		var ue *selfupdate.Error
+		if errors.As(err, &ue) {
+			code = ue.Code
+			if ue.Hint != "" {
+				fmt.Fprintf(stderr, "made: hint: %s\n", ue.Hint)
+			}
+		}
+		return code
+	}
 	return 0
 }
 
@@ -1063,6 +1170,12 @@ var mainOptions = []usageOption{
 // initOptions are the flags shown by made init --help.
 var initOptions = []usageOption{
 	{long: "force"},
+	{short: "h", long: "help"},
+}
+
+// selfUpdateOptions are the flags shown by made self-update --help.
+var selfUpdateOptions = []usageOption{
+	{long: "dry-run"},
 	{short: "h", long: "help"},
 }
 

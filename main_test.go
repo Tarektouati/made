@@ -949,8 +949,11 @@ func TestCheck(t *testing.T) {
 	docs := writeTemp(t, "docs.md", "### a\n```bash\nx\n```\n## Options\n### `--verbose`\nPrints more.\n")
 	reserved := writeTemp(t, "reserved.md", "### init\n```bash\nx\n```\n### -x\n```bash\nx\n```\n")
 	big := writeTemp(t, "big.md", "### big\n```bash\n"+strings.Repeat("x", 280000)+"\n```\n")
+	selfUpdate := writeTemp(t, "self-update.md", "### update\n```bash\nx\n```\n### self-update\n```bash\nx\n```\n")
 	checkRunCases(t, []runCase{
 		{name: "reserved name", args: []string{"--check", "-f", reserved}, wantCode: 1, wantStdout: []string{reserved + ":1: error: unreachable-name: ", reserved + ":5: warning: unreachable-name: ", "(1 error, 1 warning)"}},
+		{name: "reserved self-update", args: []string{"--check", "-f", selfUpdate}, wantCode: 1, wantStdout: []string{selfUpdate + `:5: error: unreachable-name: task "self-update" cannot be run: made self-update is reserved`, "1 problem (1 error, 0 warnings)"}},
+		{name: "self-update", args: []string{"--check", "self-update"}, wantCode: 2, wantStderr: []string{"made: --check takes no task name"}},
 		{name: "script too large", args: []string{"--check", "-f", big}, wantCode: 1, wantStdout: []string{big + ":2: error: script-too-large: ", "script is 280001 "}},
 		{name: "clean", args: []string{"-f", clean, "--check"}, notStdout: []string{clean}, notStderr: []string{"made: "}},
 		{name: "clean strict", args: []string{"--check", "--strict", "-f", clean}},

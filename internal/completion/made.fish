@@ -78,7 +78,7 @@ function __made_check_mode
     return 1
 end
 
-# __made_task_start succeeds where a task name, init or completion may come.
+# __made_task_start succeeds where a task name, init, completion or self-update may come.
 function __made_task_start
     __made_no_positional; and not __made_check_mode
 end
@@ -101,13 +101,19 @@ end
 # __made_in_task succeeds once a task name is on the line; its arguments are files.
 function __made_in_task
     set -l pos (__made_positional)
-    set -q pos[1]; and not contains -- $pos[1] init completion
+    set -q pos[1]; and not contains -- $pos[1] init completion self-update
 end
 
 # __made_after_init succeeds after `init` until --force has been given.
 function __made_after_init
     set -l pos (__made_positional)
     test "$pos[1]" = init; and not contains -- --force $pos[2..]
+end
+
+# __made_after_self_update succeeds after `self-update` until --dry-run has been given.
+function __made_after_self_update
+    set -l pos (__made_positional)
+    test "$pos[1]" = self-update; and not contains -- --dry-run $pos[2..]
 end
 
 function __made_completion_shell
@@ -127,6 +133,8 @@ complete -c made -n __made_no_positional -s h -l help -d 'Show help'
 complete -c made -n __made_task_start -a '(__made_tasks)'
 complete -c made -n __made_task_start -a init -d 'Create a starter Madefile.md'
 complete -c made -n __made_task_start -a completion -d 'Print a shell completion script'
+complete -c made -n __made_task_start -a self-update -d 'Update made to the latest release'
 complete -c made -n __made_completion_shell -a 'bash zsh fish'
 complete -c made -n __made_after_init -l force -d 'Overwrite an existing Madefile'
+complete -c made -n __made_after_self_update -l dry-run -d 'Print what would happen without changing anything'
 complete -c made -n __made_in_task -F

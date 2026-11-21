@@ -69,6 +69,7 @@ _made_tasks() {
   __made_tasks+=(
     'init:create a starter Madefile.md'
     'completion:print a shell completion script'
+    'self-update:update made to the latest release'
   )
   _describe -t tasks 'task' __made_tasks
 }
@@ -96,6 +97,7 @@ _made() {
       case $words[1] in
         (completion) (( CURRENT == 2 )) && _values 'shell' bash zsh fish && __made_ret=0 ;;
         (init) _arguments '--force[overwrite an existing Madefile]' && __made_ret=0 ;;
+        (self-update) _arguments '--dry-run[print what would happen without changing anything]' '1::version: ' && __made_ret=0 ;;
         (*) _files && __made_ret=0 ;;
       esac
       ;;

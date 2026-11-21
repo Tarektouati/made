@@ -48,6 +48,8 @@ func TestCheck(t *testing.T) {
 		{name: "name altered", src: "### <b>build</b> all\n```bash\nx\n```\n", want: []finding{{1, Warning, "name-altered"}}},
 		{name: "escapes are not markup", src: "### a\\_b &amp; c\n```bash\nx\n```\n"},
 		{name: "reserved name", src: "### init\n```bash\nx\n```\n### completion\n```bash\nx\n```\n", want: []finding{{1, Error, "unreachable-name"}, {5, Error, "unreachable-name"}}},
+		{name: "reserved self-update", src: "### self-update\n```bash\nx\n```\n", want: []finding{{1, Error, "unreachable-name"}}},
+		{name: "update is not reserved", src: "### update\n```bash\nx\n```\n"},
 		{name: "dash name", src: "### -x\n```bash\nx\n```\n", want: []finding{{1, Warning, "unreachable-name"}}},
 		{name: "no code block", src: "### a\nprose\n## next\n```bash\nx\n```\n", want: []finding{{1, Warning, "no-code-block"}}},
 		{name: "fence-less code span heading", src: "### `--verbose`\nSome prose.\n", want: []finding{{1, Warning, "no-code-block"}}},
