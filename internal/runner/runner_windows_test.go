@@ -3,8 +3,12 @@
 package runner
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/Tarektouati/made/internal/parser"
 )
 
 // terminalCancel skips t: Windows has no terminal foreground group.
@@ -26,4 +30,21 @@ func TestScriptTooLargeCountsUTF16(t *testing.T) {
 	if ScriptTooLarge("bash", script) {
 		t.Errorf("ScriptTooLarge(%d bytes, 12000 UTF-16 units) = true, want false", len(script))
 	}
+}
+
+// TestRunArgsCountUTF16 checks that the size of the task arguments in an ArgLimitError
+// is counted in UTF-16 code units, as CreateProcess counts the command line: an emoji
+// outside the Basic Multilingual Plane is 4 bytes but 2 units.
+func TestRunArgsCountUTF16(t *testing.T) {
+	requireCmd(t, "bash")
+	arg := strings.Repeat("🙂", 20000) // 80,000 bytes, 40,000 UTF-16 units
+	err := Run(context.Background(), nil, parser.Task{Name: "s", Script: "echo ok"}, "", []string{arg})
+	var argErr *ArgLimitError
+	if !errors.As(err, &argErr) {
+		t.Fatalf("Run: error = %v (%T), want an *ArgLimitError", err, err)
+	}
+	if argErr.ArgsLen != 40000 {
+		t.Errorf("ArgsLen = %d, want 40000 (UTF-16 units, not %d bytes)", argErr.ArgsLen, len(arg))
+	}
+	checkMessage(t, err.Error(), []string{"1 argument of 40000 UTF-16 characters"}, []string{"80000", "script is"})
 }

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -54,6 +55,38 @@ func setMode(t *testing.T, mode stdinMode) {
 func terminalCancel(t *testing.T) error {
 	setMode(t, stdinMode{"tty", true, true})
 	return signalCause{os.Interrupt}
+}
+
+// TestRunEnvTooLarge checks that an environment too large to exec is reported as such,
+// with its size only. One 4 MiB variable is over Linux's per-string limit and macOS's
+// total. Windows is not covered: its environment is not part of the command line.
+func TestRunEnvTooLarge(t *testing.T) {
+	requireCmd(t, "bash")
+	t.Setenv("MADE_TEST_BIG_ENV", strings.Repeat("e", 4<<20))
+	err := Run(context.Background(), nil, parser.Task{Name: "s", Script: "echo ok"}, "", nil)
+	wantArgLimit(t, err,
+		[]string{`task "s": arguments plus environment are too large`, "script 7 bytes", "0 arguments", "environment about "},
+		[]string{"script is", "eeee", "MADE_TEST_BIG_ENV"})
+}
+
+// TestRunScriptAndEnvTooLarge checks that a script over 128 KiB is blamed only where the
+// OS rejects it by itself: Linux with 4 KiB pages caps one argument at 128 KiB, while
+// macOS caps only the total, here mostly the 1 MiB environment variable.
+func TestRunScriptAndEnvTooLarge(t *testing.T) {
+	requireCmd(t, "bash")
+	script := ":" + strings.Repeat(" ", 200<<10-1)
+	t.Setenv("MADE_TEST_BIG_ENV", strings.Repeat("e", 1<<20))
+	err := Run(context.Background(), nil, parser.Task{Name: "s", Script: script}, "", nil)
+	notWant := []string{"eeee", "MADE_TEST_BIG_ENV"}
+	switch {
+	case runtime.GOOS == "linux" && os.Getpagesize() == 4096:
+		wantArgLimit(t, err, []string{`task "s": script is 204800 bytes`, "Linux rejects a single argument of 131072 bytes or more"}, notWant)
+	case runtime.GOOS == "darwin":
+		wantArgLimit(t, err, []string{`task "s": arguments plus environment are too large`, "script 204800 bytes", "macOS limits their total to about "},
+			append(notWant, "script is"))
+	default:
+		t.Skipf("no expectation for %s with %d-byte pages", runtime.GOOS, os.Getpagesize())
+	}
 }
 
 // terminalSignal reports whether sig is one a terminal sends (Ctrl-C, Ctrl-\).

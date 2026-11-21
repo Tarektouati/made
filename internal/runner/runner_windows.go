@@ -71,3 +71,12 @@ func survivors(cmd *exec.Cmd, td *teardown) bool {
 
 // argListTooLong reports whether err is Windows rejecting the command line as too long.
 func argListTooLong(err error) bool { return errors.Is(err, errorFilenameExcedRange) }
+
+// hostLimits reports that CreateProcess caps the whole command line, which the
+// environment is not part of.
+func hostLimits() osLimits {
+	return osLimits{os: "Windows", unit: ArgUnit, perArg: ArgLimit, cmdLine: true}
+}
+
+// envLen returns 0: the environment does not count against the command-line limit.
+func envLen() int { return 0 }

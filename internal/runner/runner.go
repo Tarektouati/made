@@ -167,8 +167,9 @@ var fallbacks = map[string][]string{"python": {"python"}}
 // an *InterpreterError naming it, the task, and its language; it wraps exec.ErrNotFound
 // when the interpreter is not on PATH and fs.ErrPermission when a file of that name is
 // on PATH but not executable. The python fence falls back to python when python3 is
-// not on PATH. A script too large for the OS argument limit returns an error giving
-// its size, before anything runs. A failing script returns an *exec.ExitError whose
+// not on PATH. A task the OS refuses to start because the script, or its arguments and
+// environment, are too large returns an *ArgLimitError giving their sizes, before
+// anything runs. A failing script returns an *exec.ExitError whose
 // ExitCode the caller can propagate.
 //
 // Shell tasks run in strict mode: bash and zsh with errexit and pipefail, sh with
@@ -232,8 +233,13 @@ func Run(ctx context.Context, force <-chan struct{}, t parser.Task, dir string, 
 
 	if err := cmd.Start(); err != nil {
 		if argListTooLong(err) {
-			return fmt.Errorf("task %q: script is %d %s, too large to pass to %q as a command-line argument (the OS limit is about %d %s); move the bulk of it into a file the task runs: %w",
-				t.Name, ScriptLen(t.Lang, t.Script), ArgUnit, filepath.Base(cmd.Path), ArgLimit, ArgUnit, err)
+			e := &ArgLimitError{Task: t.Name, Interp: filepath.Base(cmd.Path), ScriptLen: ScriptLen(t.Lang, t.Script),
+				ArgCount: len(args), EnvLen: envLen(), Err: err, lim: hostLimits()}
+			for _, a := range args {
+				e.ArgsLen += argLen(a)
+			}
+			e.Script = e.lim.blamesScript(e.ScriptLen, e.ArgsLen, e.EnvLen)
+			return e
 		}
 		return startError(err, cmd, name, cands, t)
 	}
@@ -423,6 +429,103 @@ func (e *InterpreterError) ExitCode() int {
 	return 126
 }
 
+// ArgLimitError is the error Run returns when the OS refuses to start a task because
+// what it passes is too large: the script itself when Script is set, otherwise the
+// task's arguments together with, on Unix, the environment. Run blames the script when
+// it alone reaches the OS's cap on one argument (on Windows, the command line) or,
+// where the OS caps only the total, when it is larger than the arguments and
+// environment together. It holds sizes only, never argument or environment contents.
+type ArgLimitError struct {
+	Task      string
+	Interp    string // base name of the interpreter, e.g. "bash"
+	Script    bool   // the script is what the OS rejects
+	ScriptLen int    // see ScriptLen, in ArgUnit
+	ArgCount  int    // number of task arguments
+	ArgsLen   int    // total size of the task arguments, in ArgUnit
+	EnvLen    int    // size of the environment in bytes, counted on Unix only
+	Err       error  // the OS error
+	lim       osLimits
+}
+
+func (e *ArgLimitError) Error() string {
+	l := e.lim
+	if l.os == "" {
+		l = hostLimits()
+	}
+	if e.Script {
+		return fmt.Sprintf("task %q: script is %d %s, %s; move the bulk of it into a file the task runs: %v",
+			e.Task, e.ScriptLen, l.unit, l.scriptDetail(e.Interp, e.ScriptLen), e.Err)
+	}
+	args := fmt.Sprintf("%d arguments totalling %d %s", e.ArgCount, e.ArgsLen, l.unit)
+	if e.ArgCount == 1 {
+		args = fmt.Sprintf("1 argument of %d %s", e.ArgsLen, l.unit)
+	}
+	return fmt.Sprintf("task %q: %s: %v", e.Task, l.argsDetail(e, args), e.Err)
+}
+
+// osLimits describes how an OS limits what exec passes to a new process; hostLimits
+// returns the running OS's.
+type osLimits struct {
+	os      string // name for messages: "Linux", "macOS", "Windows", or "the OS"
+	unit    string // unit sizes are counted in, as ArgUnit
+	perArg  int    // size from which a single argument or environment string is rejected; 0 if none
+	total   int    // approximate limit on arguments plus environment together; 0 if not known
+	cmdLine bool   // perArg is the whole command line, which excludes the environment
+}
+
+// blamesScript reports whether a script of scriptLen is what the OS rejected, given the
+// arguments and environment passed with it: it reaches the cap on one argument or, with
+// only a total cap, is more than the rest together, so moving it into a file fixes most.
+func (l osLimits) blamesScript(scriptLen, argsLen, envLen int) bool {
+	if l.perArg > 0 {
+		return scriptLen >= l.perArg
+	}
+	return scriptLen > argsLen+envLen
+}
+
+// scriptDetail says why a script of scriptLen that blamesScript is too large for interp.
+func (l osLimits) scriptDetail(interp string, scriptLen int) string {
+	switch {
+	case l.cmdLine:
+		return fmt.Sprintf("too large to pass to %q on the command line (%s limits the whole command line to %d %s)", interp, l.os, l.perArg, l.unit)
+	case l.perArg > 0:
+		return fmt.Sprintf("too large to pass to %q as a command-line argument (%s rejects a single argument of %d %s or more)", interp, l.os, l.perArg, l.unit)
+	case l.total > 0 && scriptLen >= l.total:
+		return fmt.Sprintf("too large to pass to %q as a command-line argument (%s limits arguments plus environment to about %d %s in total)", interp, l.os, l.total, l.unit)
+	case l.total > 0:
+		return fmt.Sprintf("most of the arguments plus environment passed to %q, which %s limits to about %d %s in total", interp, l.os, l.total, l.unit)
+	default:
+		return fmt.Sprintf("most of the arguments plus environment passed to %q, which %s limits in total", interp, l.os)
+	}
+}
+
+// argsDetail says why e, whose script is not to blame, is too large; args describes
+// the task arguments.
+func (l osLimits) argsDetail(e *ArgLimitError, args string) string {
+	if l.cmdLine {
+		return fmt.Sprintf("the command line is too long to start %q (script %d %s, %s); %s limits it to %d %s",
+			e.Interp, e.ScriptLen, l.unit, args, l.os, l.perArg, l.unit)
+	}
+	var limit string
+	switch {
+	case l.perArg > 0 && l.total > 0:
+		limit = fmt.Sprintf("%s limits their total to about %d %s and rejects any single one of %d %s or more", l.os, l.total, l.unit, l.perArg, l.unit)
+	case l.perArg > 0:
+		limit = fmt.Sprintf("%s limits their total size and rejects any single one of %d %s or more", l.os, l.perArg, l.unit)
+	case l.total > 0:
+		limit = fmt.Sprintf("%s limits their total to about %d %s", l.os, l.total, l.unit)
+	default:
+		limit = fmt.Sprintf("%s limits their total size", l.os)
+	}
+	return fmt.Sprintf("arguments plus environment are too large to start %q (script %d %s, %s, environment about %d bytes); %s",
+		e.Interp, e.ScriptLen, l.unit, args, e.EnvLen, limit)
+}
+
+func (e *ArgLimitError) Unwrap() error { return e.Err }
+
+// ExitCode is 126, as a shell exits when exec refuses a command it found.
+func (e *ArgLimitError) ExitCode() int { return 126 }
+
 // lookInterpreter returns the first of cands found in an absolute PATH directory, and
 // its path. Relative entries (".", "", "bin") are skipped, so a binary found through
 // one never runs; on Windows the current directory is not searched either.
@@ -469,7 +572,8 @@ func ScriptLen(lang, script string) int {
 }
 
 // ScriptTooLarge reports whether ScriptLen is at least ArgLimit, so Run cannot start
-// the script on Linux or Windows. It is false for an unsupported language.
+// the script on Windows or on Linux with 4 KiB pages; larger pages and macOS accept
+// more. It is false for an unsupported language.
 func ScriptTooLarge(lang, script string) bool {
 	return Supported(lang) && ScriptLen(lang, script) >= ArgLimit
 }
