@@ -17,6 +17,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/Tarektouati/made/internal/selfupdate"
 )
 
 // installVersion is the release served by the fake curl.
@@ -861,6 +863,40 @@ func TestInstallScriptUname(t *testing.T) {
 				t.Errorf("stdout = %q, want it to contain %q", res.stdout, want)
 			}
 			requireInstalled(t, filepath.Join(dir, "made"))
+		})
+	}
+}
+
+// TestInstallTagMatchesSelfUpdate runs install.sh on each MADE_VERSION and checks it
+// accepts the same tags as selfupdate.NormalizeTag and downloads the archive from the
+// URL made self-update would use, so the two cannot drift apart.
+func TestInstallTagMatchesSelfUpdate(t *testing.T) {
+	release := customRelease(t, releaseOpts{os: "linux", arch: "amd64"})
+	for _, in := range []string{
+		"v1.2.3", "1.2.3", "V1.2.3", "v1.2.3-rc.1+b", "v0.10.0", "v1", "v", "vx",
+		"x1.2.3", "vv1.2.3", "v1.2;rm", "v1.2.3/x", "v1.2 3", "v1.2.3_4", "V", "0",
+	} {
+		t.Run(in, func(t *testing.T) {
+			dir := filepath.Join(t.TempDir(), "bin")
+			res := runInstall(t, release, installOpts{uname: [2]string{"Linux", "x86_64"}}, "MADE_VERSION="+in, "MADE_INSTALL_DIR="+dir)
+			tag, err := selfupdate.NormalizeTag(in)
+			if err != nil {
+				if res.code != 1 || res.curlCalls != 0 || !strings.Contains(res.stderr, "release tag") {
+					t.Errorf("NormalizeTag(%q) fails (%v), but install.sh exited %d after %d curl calls: %s", in, err, res.code, res.curlCalls, res.stderr)
+				}
+				return
+			}
+			asset, _ := selfupdate.AssetName(tag, "linux", "amd64")
+			url := selfupdate.ReleaseURL(selfupdate.DefaultBaseURL, tag, asset)
+			if tag == "v"+installVersion {
+				if res.code != 0 || !strings.Contains(res.stdout, "Downloading made "+tag+" (linux/amd64)") {
+					t.Errorf("install.sh with MADE_VERSION=%q: exit %d, stdout %q, want it to install %s", in, res.code, res.stdout, tag)
+				}
+				return
+			}
+			if want := "made-install: download failed: " + url + "\n"; res.code != 1 || !strings.Contains(res.stderr, want) {
+				t.Errorf("install.sh with MADE_VERSION=%q: exit %d, stderr %q, want it to request %s (as made self-update does)", in, res.code, res.stderr, url)
+			}
 		})
 	}
 }

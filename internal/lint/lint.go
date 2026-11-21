@@ -47,7 +47,7 @@ type Diagnostic struct {
 var docsLangs = []string{"markdown", "md", "text", "txt", "plaintext", "console", "output"}
 
 // reservedNames are task names made handles itself, so the task never runs.
-var reservedNames = []string{"init", "completion"}
+var reservedNames = []string{"init", "completion", "self-update"}
 
 // Options selects the optional checks of Check.
 type Options struct {

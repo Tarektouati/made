@@ -149,8 +149,13 @@ COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _made
 printf '%s\n' "${COMPREPLY[@]}"`
 
 	for _, tc := range []completionCase{
-		{line: []string{"made", ""}, want: []string{"say-hello", "build", "init", "completion"}},
+		{line: []string{"made", ""}, want: []string{"say-hello", "build", "init", "completion", "self-update"}},
 		{line: []string{"made", "b"}, want: []string{"build"}, not: []string{"say-hello"}},
+		{line: []string{"made", "se"}, want: []string{"self-update"}, not: []string{"say-hello"}},
+		{line: []string{"made", "self-update", ""}, want: []string{"--dry-run"}, not: []string{"build", "self-update"}},
+		{line: []string{"made", "self-update", "--"}, want: []string{"--dry-run"}},
+		{line: []string{"made", "self-update", "v1.2.3", ""}, want: []string{"--dry-run"}, not: []string{"build"}},
+		{line: []string{"made", "self-update", "--dry-run", ""}, not: []string{"--dry-run", "build"}},
 		{line: []string{"made", "-f", "other.md", ""}, want: []string{"ns:task"}, not: []string{"build"}},
 		// bash 4+ splits "--file=other.md" on "=", bash 3.2 does not. With spaces, Go's
 		// flag package reads "=" as the file name and other.md as the task.
@@ -173,7 +178,7 @@ printf '%s\n' "${COMPREPLY[@]}"`
 		{line: []string{"made", "-f", `"my tasks.md"`, ""}, want: []string{"ns:task"}, not: []string{"build"}},
 		{line: []string{"made", "-f", "edge.md", ""}, want: []string{`back\\slash`}, not: []string{"empty"}},
 		// --check takes no task, and --strict and --host need --check.
-		{line: []string{"made", "--check", ""}, not: []string{"build", "init", "completion"}},
+		{line: []string{"made", "--check", ""}, not: []string{"build", "init", "completion", "self-update"}},
 		{line: []string{"made", "--strict", ""}, not: []string{"build", "init", "completion"}},
 		{line: []string{"made", "-host", ""}, not: []string{"build", "init", "completion"}},
 		{line: []string{"made", "-f", "other.md", "--check", ""}, not: []string{"ns:task"}},
@@ -313,6 +318,8 @@ echo survived`
 		{dir, false, completionCase{line: []string{"made", "completion", ""}, want: []string{"bash", "zsh", "fish"}}},
 		{dir, false, completionCase{line: []string{"made", "completion", "q"}}},
 		{dir, false, completionCase{line: []string{"made", "init", ""}, want: []string{"--force"}}},
+		{dir, false, completionCase{line: []string{"made", "self-update", ""}, want: []string{"--dry-run"}}},
+		{dir, false, completionCase{line: []string{"made", "self-update", "--dry-run", ""}}},
 		{dir, false, completionCase{line: []string{"made", "--check", "--"}, want: []string{"--strict"}}},
 		{dir, false, completionCase{line: []string{"made", "-f", "$PWD/other.md", ""}, want: []string{"ns:task"}}},
 		{dir, false, completionCase{line: []string{"made", "--file=other.md", ""}, want: []string{"ns:task"}}},
@@ -359,7 +366,7 @@ _describe() { print -rl -- "${(@P)${@[-1]}}"; }
 words=("$@"); CURRENT=$#
 _made_tasks`
 	for _, tc := range []completionCase{
-		{line: []string{"made", ""}, want: []string{"say-hello:Prints a friendly greeting.", "build:Compiles all packages.", "init:create a starter Madefile.md"}},
+		{line: []string{"made", ""}, want: []string{"say-hello:Prints a friendly greeting.", "build:Compiles all packages.", "init:create a starter Madefile.md", "self-update:update made to the latest release"}},
 		{line: []string{"made", "-f", "other.md", ""}, want: []string{`ns\:task:Has a colon\: here.`}, not: []string{"build:Compiles all packages."}},
 		{line: []string{"made", "--file=other.md", ""}, want: []string{`ns\:task:Has a colon\: here.`}},
 		{line: []string{"made", "-f", "'my tasks.md'", ""}, want: []string{`ns\:task:Has a colon\: here.`}, not: []string{"build:Compiles all packages."}},
@@ -408,8 +415,13 @@ func TestCompletionFish(t *testing.T) {
 		{line: []string{"made init "}, not: []string{"build\tCompiles all packages.", "Madefile.md"}},
 		{line: []string{"made init -"}, want: []string{"--force\tOverwrite an existing Madefile"}},
 		{line: []string{"made init --force -"}, not: []string{"--force\tOverwrite an existing Madefile"}},
+		{line: []string{"made "}, want: []string{"self-update\tUpdate made to the latest release"}},
+		{line: []string{"made self-update "}, not: []string{"build\tCompiles all packages.", "Madefile.md", "self-update\tUpdate made to the latest release"}},
+		{line: []string{"made self-update -"}, want: []string{"--dry-run\tPrint what would happen without changing anything"}},
+		{line: []string{"made self-update v1.2.3 -"}, want: []string{"--dry-run\tPrint what would happen without changing anything"}},
+		{line: []string{"made self-update --dry-run -"}, not: []string{"--dry-run\tPrint what would happen without changing anything"}},
 		// --check takes no task, and --strict and --host need --check.
-		{line: []string{"made --check "}, not: []string{"build\tCompiles all packages.", "init\tCreate a starter Madefile.md", "completion\tPrint a shell completion script"}},
+		{line: []string{"made --check "}, not: []string{"build\tCompiles all packages.", "init\tCreate a starter Madefile.md", "completion\tPrint a shell completion script", "self-update\tUpdate made to the latest release"}},
 		{line: []string{"made --strict "}, not: []string{"build\tCompiles all packages.", "init\tCreate a starter Madefile.md"}},
 		{line: []string{"made -host "}, not: []string{"build\tCompiles all packages.", "init\tCreate a starter Madefile.md"}},
 		{line: []string{"made --check -"}, want: []string{"--strict\tWith --check, fail on warnings too", "--file\tMarkdown file to read tasks from"}, not: []string{"--list\tList available tasks", "--version\tPrint version and exit"}},

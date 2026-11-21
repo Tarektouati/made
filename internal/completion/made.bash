@@ -206,10 +206,11 @@ _made() {
     done
 
     if [[ -n $__made_first ]]; then
-        # After `completion`, offer the shells; after `init`, its --force flag (once).
-        # Neither takes file names, so turn off the -o default fallback where bash
-        # supports it (4.0+). After a task name, the arguments belong to the task,
-        # so file names are the right fallback.
+        # After `completion`, offer the shells; after `init`, its --force flag, and
+        # after `self-update`, its --dry-run flag (each once). None takes file names,
+        # so turn off the -o default fallback where bash supports it (4.0+). After a
+        # task name, the arguments belong to the task, so file names are the right
+        # fallback.
         case $__made_first in
             completion)
                 compopt +o default 2>/dev/null || :
@@ -225,6 +226,15 @@ _made() {
                     esac
                 done
                 COMPREPLY=($(compgen -W "--force" -- "$__made_cur")) || :
+                ;;
+            self-update)
+                compopt +o default 2>/dev/null || :
+                for ((__made_i = __made_firstidx + 1; __made_i < __made_cword; __made_i++)); do
+                    case ${__made_words[__made_i]} in
+                        -dry-run | --dry-run | -dry-run=* | --dry-run=*) return 0 ;;
+                    esac
+                done
+                COMPREPLY=($(compgen -W "--dry-run" -- "$__made_cur")) || :
                 ;;
         esac
         return 0
@@ -260,7 +270,7 @@ _made() {
             __made_quote "$__made_ctx" "${__made_name#"$__made_kept"}"
             COMPREPLY+=("$__made_q")
         fi
-    done < <(__made_list_names ${__made_fileargs[@]+"${__made_fileargs[@]}"} || :; printf '%s\n' init completion)
+    done < <(__made_list_names ${__made_fileargs[@]+"${__made_fileargs[@]}"} || :; printf '%s\n' init completion self-update)
     return 0
 }
 
