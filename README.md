@@ -69,6 +69,7 @@ made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]
 made [-f file] --check [--strict] [--host]
 made init [--force]
 made completion <bash|zsh|fish>
+made self-update [vX.Y.Z] [--dry-run]
 ```
 
 | Flag | Default | Description |
@@ -86,8 +87,8 @@ made completion <bash|zsh|fish>
 
 Long flags also work with a single dash (`-file`, `-list`).
 
-More: `made init`, `made completion`, exit codes, and passing arguments in
-[docs/cli.md](docs/cli.md).
+More: `made init`, `made completion`, `made self-update`, exit codes, and passing
+arguments in [docs/cli.md](docs/cli.md).
 
 ## Supported languages
 

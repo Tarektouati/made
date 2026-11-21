@@ -56,6 +56,60 @@ from source with `go install` or verify the release yourself.
 go install github.com/Tarektouati/made@latest
 ```
 
+## Updating
+
+```sh
+made self-update            # install the latest release
+made self-update v0.6.0     # install a specific release, older ones included
+made self-update --dry-run  # show what would happen, change nothing
+```
+
+`made self-update` updates a binary installed with `install.sh` or copied from a
+release archive. It works like `install.sh`:
+
+1. It reads the latest release tag from where the `releases/latest` page on
+   github.com redirects to, without following the redirect (no API token, no rate
+   limit), unless you name a version.
+2. If `made` is already that release, it prints `made: v0.7.0 is the latest version`
+   and exits with `0`. It never installs an older release than the one running
+   unless you name it.
+3. It downloads `made_<version>_<os>_<arch>.tar.gz` and `checksums.txt` from that
+   release and checks the archive's SHA-256 before using it.
+4. It writes the new binary next to the old one, runs it with `--version` (it must
+   report the expected version), and only then renames it over the old one. The
+   rename is atomic, so `made` is always either the old or the new binary, and on
+   any failure the old one is left in place.
+
+If `made` is a symlink, the file it points to is replaced and the link is kept.
+
+The checksum comes from the same GitHub release as the archive, as with
+`install.sh`, so it catches a corrupted download but not a tampered release. If you
+need more than that, build from source with `go install` or verify the release
+yourself.
+
+Installs that another tool owns are not replaced, because that would break the
+tool's bookkeeping. `made self-update` prints the command to use and exits with `3`:
+
+| Install | Detected by | Command |
+|---|---|---|
+| Homebrew | the binary is under a Homebrew `Cellar` or `Caskroom` directory | `brew upgrade Tarektouati/tap/made` |
+| `go install` | the binary is in `GOBIN` or `GOPATH/bin` (from the environment; `GOPATH` defaults to `~/go`), or was built from the module without the release version stamp | `go install github.com/Tarektouati/made@latest` |
+| Development build | the version is `dev`, a pre-release or a pseudo-version such as `v0.6.1-0.20260101000000-abcdef123456` | `go install github.com/Tarektouati/made@latest` |
+| Windows (and other platforms without a release archive) | the platform | `go install github.com/Tarektouati/made@latest` |
+
+If the binary's directory is not writable (for example `/usr/local/bin`), it fails
+with exit code `4` before downloading anything, and suggests `sudo made self-update`
+or re-running `install.sh`; it never installs somewhere else. Other failures
+(download, checksum, extraction, the new binary not running) exit with `1`. See the [exit codes](cli.md#subcommands).
+
+The only network requests are plain HTTPS GETs to github.com (and the release
+download host it redirects to): the `releases/latest` redirect, `checksums.txt` and
+the archive, as `install.sh` makes. Nothing else is sent. A redirect from HTTPS to
+plain HTTP is refused. The `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` environment
+variables are honoured.
+
+Shell completion offers `self-update` and its `--dry-run` flag.
+
 ## Shell completion
 
 `made <TAB>` completes task names (with their descriptions in zsh and fish) from the
