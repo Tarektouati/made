@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Tarektouati/made/internal/parser"
+	"github.com/Tarektouati/made/internal/task"
 )
 
 // TestArgLimitMatchesKernel checks that ScriptTooLarge's boundary is where Linux starts
@@ -19,7 +19,7 @@ func TestArgLimitMatchesKernel(t *testing.T) {
 	requireCmd(t, "bash")
 	for _, n := range []int{ArgLimit - 1, ArgLimit} {
 		script := ":" + strings.Repeat(" ", n-1)
-		err := Run(context.Background(), nil, parser.Task{Name: "big", Script: script}, "", nil)
+		err := Run(context.Background(), nil, task.Task{Name: "big", Script: script}, "", nil)
 		tooLarge := ScriptTooLarge("", script)
 		if (tooLarge && !argListTooLong(err)) || (!tooLarge && err != nil) {
 			t.Errorf("%d bytes: ScriptTooLarge = %v, Run error = %v", n, tooLarge, err)
@@ -35,7 +35,7 @@ func TestArgLimitBlamesArgumentAtBoundary(t *testing.T) {
 	}
 	requireCmd(t, "bash")
 	script := ":" + strings.Repeat(" ", ArgLimit-2)
-	err := Run(context.Background(), nil, parser.Task{Name: "s", Script: script}, "", []string{strings.Repeat("a", ArgLimit)})
+	err := Run(context.Background(), nil, task.Task{Name: "s", Script: script}, "", []string{strings.Repeat("a", ArgLimit)})
 	wantArgLimit(t, err,
 		[]string{"arguments plus environment are too large", "script " + strconv.Itoa(ArgLimit-1) + " bytes", "1 argument of " + strconv.Itoa(ArgLimit) + " bytes"},
 		[]string{"script is"})

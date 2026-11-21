@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Tarektouati/made/internal/parser"
+	"github.com/Tarektouati/made/internal/task"
 )
 
 // killGrace is how long a cancelled task is given to exit on SIGTERM before whatever is
@@ -196,7 +196,7 @@ var fallbacks = map[string][]string{"python": {"python"}}
 // An empty or blank script (see EmptyScript) returns an error before anything runs,
 // as does one containing a NUL byte, which cannot be passed as an argument. On Linux
 // the interpreter is also killed if made itself dies.
-func Run(ctx context.Context, force <-chan struct{}, t parser.Task, dir string, args []string) error {
+func Run(ctx context.Context, force <-chan struct{}, t task.Task, dir string, args []string) error {
 	lang := NormalizeLang(t.Lang)
 	in, ok := interpreters[lang]
 	if !ok {
@@ -338,7 +338,7 @@ func inlineScript(in interpreter, script string) string {
 }
 
 // unsupportedError is the error for a task whose fence language Run does not accept.
-func unsupportedError(t parser.Task) error {
+func unsupportedError(t task.Task) error {
 	return fmt.Errorf("unsupported language %q; supported: %s", t.Lang, supportedLanguages())
 }
 
@@ -548,7 +548,7 @@ func lookInterpreter(cands []string) (name, path string, ok bool) {
 // nil when it is found, the error Run would return when the interpreter is missing or
 // not executable (an *InterpreterError), or an unsupported-language error. An
 // interpreter that is found can still fail to start, e.g. through a broken #! line.
-func Resolve(t parser.Task) error {
+func Resolve(t task.Task) error {
 	lang := NormalizeLang(t.Lang)
 	in, ok := interpreters[lang]
 	if !ok {
@@ -586,7 +586,7 @@ func EmptyScript(script string) bool {
 // startError turns a cmd.Start failure into an *InterpreterError when the interpreter
 // was missing, not executable, or could not be executed; other errors pass through.
 // name is the candidate cmd runs, which the error names.
-func startError(err error, cmd *exec.Cmd, name string, cands []string, t parser.Task) error {
+func startError(err error, cmd *exec.Cmd, name string, cands []string, t task.Task) error {
 	if errors.Is(err, exec.ErrNotFound) {
 		return notFoundError(cands, t)
 	}
@@ -599,7 +599,7 @@ func startError(err error, cmd *exec.Cmd, name string, cands []string, t parser.
 
 // notFoundError returns the *InterpreterError for none of cands being on PATH: a
 // not-executable one when a file named after a candidate is on PATH anyway.
-func notFoundError(cands []string, t parser.Task) *InterpreterError {
+func notFoundError(cands []string, t task.Task) *InterpreterError {
 	for _, c := range cands {
 		if p := findNonExecutable(c); p != "" {
 			return &InterpreterError{Cmd: c, Path: p, Task: t.Name, Lang: t.Lang, Err: fs.ErrPermission, NotExecutable: true}

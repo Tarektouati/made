@@ -15,6 +15,7 @@ import (
 
 	"github.com/Tarektouati/made/internal/lint"
 	"github.com/Tarektouati/made/internal/parser"
+	"github.com/Tarektouati/made/internal/task"
 	"github.com/Tarektouati/made/internal/testenv"
 )
 
@@ -2058,32 +2059,32 @@ func TestPrintTasksExactOutput(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
-		tasks []parser.Task
+		tasks []task.Task
 		want  string
 	}{
 		{
 			name:  "ascii matches tabwriter layout",
-			tasks: []parser.Task{{Name: "a", Description: "Short."}, {Name: "long-name"}, {Name: "mid", Description: "Two\nlines."}},
+			tasks: []task.Task{{Name: "a", Description: "Short."}, {Name: "long-name"}, {Name: "mid", Description: "Two\nlines."}},
 			want: "  a          Short.\n" +
 				"  long-name  \n" +
 				"  mid        Two lines.\n",
 		},
 		{
 			name:  "cjk and emoji",
-			tasks: []parser.Task{{Name: "日本語", Description: "Japanese."}, {Name: "emoji🚀", Description: "Rocket."}, {Name: "build", Description: "Build it."}},
+			tasks: []task.Task{{Name: "日本語", Description: "Japanese."}, {Name: "emoji🚀", Description: "Rocket."}, {Name: "build", Description: "Build it."}},
 			want: "  日本語   Japanese.\n" +
 				"  emoji🚀  Rocket.\n" +
 				"  build    Build it.\n",
 		},
 		{
 			name:  "emoji selector",
-			tasks: []parser.Task{{Name: "⚙\ufe0f setup", Description: "Gear."}, {Name: "build", Description: "Build it."}},
+			tasks: []task.Task{{Name: "⚙\ufe0f setup", Description: "Gear."}, {Name: "build", Description: "Build it."}},
 			want: "  ⚙\ufe0f setup  Gear.\n" +
 				"  build     Build it.\n",
 		},
 		{
 			name:  "emoji sequences",
-			tasks: []parser.Task{{Name: "👨\u200d👩\u200d👧family", Description: "Fam."}, {Name: "👩🏻\u200d💻tech", Description: "Tech."}, {Name: "👍🏽ok", Description: "OK."}, {Name: "✌🏽peace", Description: "Peace."}, {Name: "build", Description: "Build."}},
+			tasks: []task.Task{{Name: "👨\u200d👩\u200d👧family", Description: "Fam."}, {Name: "👩🏻\u200d💻tech", Description: "Tech."}, {Name: "👍🏽ok", Description: "OK."}, {Name: "✌🏽peace", Description: "Peace."}, {Name: "build", Description: "Build."}},
 			want: "  👨\u200d👩\u200d👧family  Fam.\n" +
 				"  👩🏻\u200d💻tech    Tech.\n" +
 				"  👍🏽ok      OK.\n" +

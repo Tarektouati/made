@@ -32,6 +32,7 @@ import (
 	"github.com/Tarektouati/made/internal/lint"
 	"github.com/Tarektouati/made/internal/parser"
 	"github.com/Tarektouati/made/internal/runner"
+	"github.com/Tarektouati/made/internal/task"
 	"golang.org/x/text/width"
 )
 
@@ -301,7 +302,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	type parsed struct {
-		tasks []parser.Task
+		tasks []task.Task
 		err   error
 	}
 	out, err := withinParseTimeout(func() parsed {
@@ -837,20 +838,20 @@ func isSymlink(path string) bool {
 
 // find returns the task called name, normalized like the parser normalizes headings
 // so a name typed as written in the Madefile matches.
-func find(tasks []parser.Task, name string) (parser.Task, bool) {
+func find(tasks []task.Task, name string) (task.Task, bool) {
 	name = parser.NormalizeSpace(name)
 	for _, t := range tasks {
 		if t.Name == name {
 			return t, true
 		}
 	}
-	return parser.Task{}, false
+	return task.Task{}, false
 }
 
 // runnableTasks drops the tasks that cannot be run by name, reporting each on
 // stderr: one with an empty name, and one whose name an earlier task already has
 // (find returns the first).
-func runnableTasks(stderr io.Writer, tasks []parser.Task) []parser.Task {
+func runnableTasks(stderr io.Writer, tasks []task.Task) []task.Task {
 	defined := map[string]int{} // task name -> line of its first definition
 	kept := tasks[:0:0]
 	for _, t := range tasks {
@@ -1007,7 +1008,7 @@ func isPictographic(r rune) bool {
 		(r >= 0x2b00 && r <= 0x2bff) || (r >= 0x1f000 && r <= 0x1faff)
 }
 
-func printTasks(stdout, stderr io.Writer, file string, tasks []parser.Task) {
+func printTasks(stdout, stderr io.Writer, file string, tasks []task.Task) {
 	if len(tasks) == 0 {
 		fmt.Fprintf(stderr, "made: no tasks found in %s\n", escapeDisplay(file))
 		return
@@ -1031,7 +1032,7 @@ func printTasks(stdout, stderr io.Writer, file string, tasks []parser.Task) {
 // scripts, with no header. The description is flattened to one line. Tasks whose
 // name is empty once sanitized are left out: they cannot be completed, and bash's
 // read would take the description of a "\tdesc" line as the name.
-func printNames(stdout io.Writer, tasks []parser.Task) {
+func printNames(stdout io.Writer, tasks []task.Task) {
 	for _, t := range tasks {
 		name := sanitizeDisplay(t.Name)
 		if name == "" {

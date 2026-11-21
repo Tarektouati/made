@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Tarektouati/made/internal/parser"
+	"github.com/Tarektouati/made/internal/task"
 )
 
 // terminalCancel skips t: Windows has no terminal foreground group.
@@ -38,7 +38,7 @@ func TestScriptTooLargeCountsUTF16(t *testing.T) {
 func TestRunArgsCountUTF16(t *testing.T) {
 	requireCmd(t, "bash")
 	arg := strings.Repeat("🙂", 20000) // 80,000 bytes, 40,000 UTF-16 units
-	err := Run(context.Background(), nil, parser.Task{Name: "s", Script: "echo ok"}, "", []string{arg})
+	err := Run(context.Background(), nil, task.Task{Name: "s", Script: "echo ok"}, "", []string{arg})
 	var argErr *ArgLimitError
 	if !errors.As(err, &argErr) {
 		t.Fatalf("Run: error = %v (%T), want an *ArgLimitError", err, err)

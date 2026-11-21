@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Tarektouati/made/internal/parser"
+	"github.com/Tarektouati/made/internal/task"
 	"github.com/Tarektouati/made/internal/testenv"
 )
 
@@ -63,7 +63,7 @@ func terminalCancel(t *testing.T) error {
 func TestRunEnvTooLarge(t *testing.T) {
 	requireCmd(t, "bash")
 	t.Setenv("MADE_TEST_BIG_ENV", strings.Repeat("e", 4<<20))
-	err := Run(context.Background(), nil, parser.Task{Name: "s", Script: "echo ok"}, "", nil)
+	err := Run(context.Background(), nil, task.Task{Name: "s", Script: "echo ok"}, "", nil)
 	wantArgLimit(t, err,
 		[]string{`task "s": arguments plus environment are too large`, "script 7 bytes", "0 arguments", "environment about "},
 		[]string{"script is", "eeee", "MADE_TEST_BIG_ENV"})
@@ -76,7 +76,7 @@ func TestRunScriptAndEnvTooLarge(t *testing.T) {
 	requireCmd(t, "bash")
 	script := ":" + strings.Repeat(" ", 200<<10-1)
 	t.Setenv("MADE_TEST_BIG_ENV", strings.Repeat("e", 1<<20))
-	err := Run(context.Background(), nil, parser.Task{Name: "s", Script: script}, "", nil)
+	err := Run(context.Background(), nil, task.Task{Name: "s", Script: script}, "", nil)
 	notWant := []string{"eeee", "MADE_TEST_BIG_ENV"}
 	switch {
 	case runtime.GOOS == "linux" && os.Getpagesize() == 4096:
@@ -108,7 +108,7 @@ func cancelTask(t *testing.T, script string, cause error) (dir string, cancelled
 	ctx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(nil)
 	done := make(chan error, 1)
-	go func() { done <- Run(ctx, nil, parser.Task{Name: "gc", Script: script}, dir, nil) }()
+	go func() { done <- Run(ctx, nil, task.Task{Name: "gc", Script: script}, dir, nil) }()
 
 	waitForFile(t, filepath.Join(dir, "ready"))
 	cancelled = time.Now()
@@ -327,7 +327,7 @@ func TestRunForceSkipsGrace(t *testing.T) {
 			}
 			// The script and its child ignore SIGTERM, so only SIGKILL ends them; the
 			// child writes "survived" if it outlives a forced teardown.
-			task := parser.Task{Name: "stubborn", Script: "trap '' TERM\n( sleep 1.5; touch survived ) &\necho $! > pids\necho ok > marker\nsleep 5\n"}
+			task := task.Task{Name: "stubborn", Script: "trap '' TERM\n( sleep 1.5; touch survived ) &\necho $! > pids\necho ok > marker\nsleep 5\n"}
 			ctx, cancelCause := context.WithCancelCause(context.Background())
 			cancel := func() { cancelCause(cause) }
 			defer cancel()
