@@ -32,6 +32,11 @@ go install github.com/Tarektouati/made@latest                                   
 More: version pinning, install directory, checksums, and shell completion in
 [docs/installation.md](docs/installation.md).
 
+**Privacy:** `made` checks for a new release at most once a day with a single GET to
+GitHub's `releases/latest` URL, in the background, and prints a one-line notice on
+stderr when there is one. No telemetry. Set `MADE_NO_UPDATE_CHECK=1` to turn it off;
+see [New-version notice](docs/installation.md#new-version-notice).
+
 ## Quick start
 
 Create a starter `Madefile.md` at the root of your repository:

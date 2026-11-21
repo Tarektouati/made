@@ -1,7 +1,7 @@
 # CLI reference
 
-The full command-line reference: flags, subcommands, exit codes, and how arguments
-reach a task. [← Back to README](../README.md)
+The full command-line reference: flags, subcommands, exit codes, how arguments
+reach a task, the new-version notice, and environment variables. [← Back to README](../README.md)
 
 ## Synopsis
 
@@ -140,3 +140,38 @@ echo "deploying to $env"
 made deploy            # deploying to staging
 made deploy production # deploying to production
 ```
+
+## New-version notice
+
+When a newer release is out, listing or running tasks prints one line on stderr
+after the task finishes, naming the upgrade command for how `made` was installed:
+
+```
+made: v0.7.0 is available (you have v0.6.0); run made self-update
+```
+
+The notice never changes stdout or the exit code, and it is shown at most once a
+day. It comes from a small cache (`made/update-check.json` in the user cache
+directory: `~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or `~/.cache` on Linux,
+`%LocalAppData%` on Windows) holding the time of the last check and the latest
+release seen. When that check is more than a day old, `made` refreshes it in the
+background with one GET to GitHub's `releases/latest` URL and a one-second timeout.
+It never waits for that request, so the result shows on a later run. A check that
+gets an answer, even an error, is not repeated for a day; one cut short because
+`made` exited first is retried after an hour. So the notice needs one run that lasts
+long enough for the request to finish (typically well under a second); a task
+usually does. Being offline, DNS or proxy failures and rate limits are silent.
+
+There is no notice, and no request, for `--list-names`, `completion`, `init`,
+`--check`, `-V`/`--version`, `self-update` or `--help`; when stdout or stderr is
+not a terminal (piped or redirected); when `CI` is set; for development builds
+and pseudo-versions; and when the latest release is a pre-release. See
+[Updating](installation.md#new-version-notice) for what is sent.
+
+## Environment variables
+
+| Variable | Effect |
+|---|---|
+| `MADE_NO_UPDATE_CHECK` | Any non-empty value (for example `1`) turns off the [new-version notice](#new-version-notice) and its check |
+| `NO_UPDATE_NOTIFIER` | Same as `MADE_NO_UPDATE_CHECK`; the variable other command-line tools honour |
+| `CI` | When set, to any value, there is no new-version notice or check |
