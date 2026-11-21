@@ -11,6 +11,7 @@ import (
 
 	"github.com/Tarektouati/made/internal/parser"
 	"github.com/Tarektouati/made/internal/runner"
+	"github.com/Tarektouati/made/internal/task"
 )
 
 // Severity ranks a Diagnostic. Errors fail made --check; warnings fail it only with
@@ -138,7 +139,7 @@ func resolve(cache map[string]error, name, lang string) error {
 	key := runner.NormalizeLang(lang)
 	err, ok := cache[key]
 	if !ok {
-		err = runner.Resolve(parser.Task{Name: name, Lang: lang})
+		err = runner.Resolve(task.Task{Name: name, Lang: lang})
 		cache[key] = err
 	}
 	var ie *runner.InterpreterError

@@ -15,18 +15,18 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/Tarektouati/made/internal/parser"
+	"github.com/Tarektouati/made/internal/task"
 	"github.com/Tarektouati/made/internal/testenv"
 )
 
 func TestRunSuccess(t *testing.T) {
-	if err := Run(context.Background(), nil, parser.Task{Name: "ok", Script: "exit 0"}, "", nil); err != nil {
+	if err := Run(context.Background(), nil, task.Task{Name: "ok", Script: "exit 0"}, "", nil); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 }
 
 func TestRunPropagatesExitCode(t *testing.T) {
-	err := Run(context.Background(), nil, parser.Task{Name: "fail", Script: "exit 3"}, "", nil)
+	err := Run(context.Background(), nil, task.Task{Name: "fail", Script: "exit 3"}, "", nil)
 	if err == nil {
 		t.Fatal("Run: want error, got nil")
 	}
@@ -40,7 +40,7 @@ func TestRunPropagatesExitCode(t *testing.T) {
 }
 
 func TestRunUnsupportedLanguage(t *testing.T) {
-	err := Run(context.Background(), nil, parser.Task{Name: "x", Lang: "cobol", Script: "x"}, "", nil)
+	err := Run(context.Background(), nil, task.Task{Name: "x", Lang: "cobol", Script: "x"}, "", nil)
 	if err == nil {
 		t.Fatal("Run: want error for unsupported language, got nil")
 	}
@@ -51,7 +51,7 @@ func TestRunUnsupportedLanguage(t *testing.T) {
 
 func TestRunNormalizesLanguage(t *testing.T) {
 	// Mixed case and surrounding space still resolve to bash.
-	if err := Run(context.Background(), nil, parser.Task{Name: "ok", Lang: " BASH ", Script: "exit 0"}, "", nil); err != nil {
+	if err := Run(context.Background(), nil, task.Task{Name: "ok", Lang: " BASH ", Script: "exit 0"}, "", nil); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 }
@@ -111,7 +111,7 @@ func TestRunShellStopsOnFailure(t *testing.T) {
 	} {
 		t.Run("lang="+tc.lang, func(t *testing.T) {
 			requireCmd(t, tc.shell)
-			err := Run(context.Background(), nil, parser.Task{Name: "x", Lang: tc.lang, Script: "false\nexit 0\n"}, "", nil)
+			err := Run(context.Background(), nil, task.Task{Name: "x", Lang: tc.lang, Script: "false\nexit 0\n"}, "", nil)
 			wantExitCode(t, err, 1)
 		})
 	}
@@ -134,7 +134,7 @@ func TestRunFishNoFailFast(t *testing.T) {
 		{"syntax error runs nothing", "exit 5\nif true\n", 127},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := Run(context.Background(), nil, parser.Task{Name: "x", Lang: "fish", Script: tc.script}, "", nil)
+			err := Run(context.Background(), nil, task.Task{Name: "x", Lang: "fish", Script: tc.script}, "", nil)
 			if tc.want == 0 {
 				if err != nil {
 					t.Fatalf("Run: %v, want nil", err)
@@ -150,7 +150,7 @@ func TestRunShellPipefail(t *testing.T) {
 	for _, lang := range []string{"bash", "zsh"} {
 		t.Run(lang, func(t *testing.T) {
 			requireCmd(t, lang)
-			err := Run(context.Background(), nil, parser.Task{Name: "x", Lang: lang, Script: "false | true\n"}, "", nil)
+			err := Run(context.Background(), nil, task.Task{Name: "x", Lang: lang, Script: "false | true\n"}, "", nil)
 			wantExitCode(t, err, 1)
 		})
 	}
@@ -160,7 +160,7 @@ func TestRunShNoPipefail(t *testing.T) {
 	// sh gets errexit only: pipefail isn't portable across sh implementations (e.g.
 	// older dash), so a pipeline's status stays the last command's.
 	requireCmd(t, "sh")
-	if err := Run(context.Background(), nil, parser.Task{Name: "x", Lang: "sh", Script: "false | true\n"}, "", nil); err != nil {
+	if err := Run(context.Background(), nil, task.Task{Name: "x", Lang: "sh", Script: "false | true\n"}, "", nil); err != nil {
 		t.Fatalf("Run: %v, want nil (sh must not enable pipefail)", err)
 	}
 }
@@ -172,7 +172,7 @@ func TestRunShellOptOut(t *testing.T) {
 		"pipefail": "set +o pipefail\nfalse | true\n",
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := Run(context.Background(), nil, parser.Task{Name: "x", Lang: "bash", Script: script}, "", nil); err != nil {
+			if err := Run(context.Background(), nil, task.Task{Name: "x", Lang: "bash", Script: script}, "", nil); err != nil {
 				t.Fatalf("Run: %v, want nil after opting out", err)
 			}
 		})
@@ -191,7 +191,7 @@ func TestRunUsesDir(t *testing.T) {
 	dir := t.TempDir()
 	writeMarker(t, dir)
 	t.Chdir(t.TempDir()) // the marker must not be reachable from the cwd
-	if err := Run(context.Background(), nil, parser.Task{Name: "ok", Script: "test -f marker"}, dir, nil); err != nil {
+	if err := Run(context.Background(), nil, task.Task{Name: "ok", Script: "test -f marker"}, dir, nil); err != nil {
 		t.Fatalf("Run in %s: %v", dir, err)
 	}
 }
@@ -200,7 +200,7 @@ func TestRunEmptyDirInheritsCwd(t *testing.T) {
 	dir := t.TempDir()
 	writeMarker(t, dir)
 	t.Chdir(dir)
-	if err := Run(context.Background(), nil, parser.Task{Name: "ok", Script: "test -f marker"}, "", nil); err != nil {
+	if err := Run(context.Background(), nil, task.Task{Name: "ok", Script: "test -f marker"}, "", nil); err != nil {
 		t.Fatalf("Run with empty dir: %v", err)
 	}
 }
@@ -297,7 +297,7 @@ func TestRunInterpreterStartErrors(t *testing.T) {
 				t.Skip("needs Unix permission bits and shebangs")
 			}
 			dir := fakePath(t, tt.bins...)
-			err := Run(context.Background(), nil, parser.Task{Name: "py", Lang: tt.lang, Script: "x"}, "", nil)
+			err := Run(context.Background(), nil, task.Task{Name: "py", Lang: tt.lang, Script: "x"}, "", nil)
 			if !errors.Is(err, tt.wantIs) {
 				t.Fatalf("Run: error = %v, want it to wrap %v", err, tt.wantIs)
 			}
@@ -355,7 +355,7 @@ func TestResolve(t *testing.T) {
 				t.Chdir(cwd)
 				t.Setenv("PATH", pathList(".", dir))
 			}
-			task := parser.Task{Name: "rb", Lang: tt.lang, Script: "x"}
+			task := task.Task{Name: "rb", Lang: tt.lang, Script: "x"}
 			err := Resolve(task)
 			if tt.wantIs == nil {
 				if err != nil {
@@ -378,7 +378,7 @@ func TestResolve(t *testing.T) {
 }
 
 func TestResolveUnsupported(t *testing.T) {
-	if err := Resolve(parser.Task{Name: "x", Lang: "cobol", Script: "x"}); err == nil || !strings.Contains(err.Error(), "unsupported language") {
+	if err := Resolve(task.Task{Name: "x", Lang: "cobol", Script: "x"}); err == nil || !strings.Contains(err.Error(), "unsupported language") {
 		t.Errorf("Resolve: error = %v, want unsupported language", err)
 	}
 }
@@ -445,7 +445,7 @@ func TestRelativePathEntriesSkipped(t *testing.T) {
 			t.Chdir(cwd)
 			t.Setenv("PATH", pathList(dirs...))
 
-			task := parser.Task{Name: "t", Lang: tt.lang, Script: "x"}
+			task := task.Task{Name: "t", Lang: tt.lang, Script: "x"}
 			runErr := Run(context.Background(), nil, task, "", nil)
 			resErr := Resolve(task)
 			for _, err := range []error{runErr, resErr} {
@@ -502,7 +502,7 @@ func TestRunBashVarIsAbsolute(t *testing.T) {
 	t.Setenv("PATH", pathList(".", filepath.Dir(realBash)))
 	out := filepath.Join(t.TempDir(), "bash-var")
 
-	task := parser.Task{Name: "t", Lang: "bash", Script: `printf %s "$BASH" > "$1"`}
+	task := task.Task{Name: "t", Lang: "bash", Script: `printf %s "$BASH" > "$1"`}
 	if runErr := Run(context.Background(), nil, task, "", []string{out}); runErr != nil {
 		t.Fatalf("Run: %v", runErr)
 	}
@@ -713,7 +713,7 @@ func TestRunPythonFallback(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fakePath(t, tt.bins...)
-			err := Run(context.Background(), nil, parser.Task{Name: "py", Lang: "python", Script: "x"}, "", nil)
+			err := Run(context.Background(), nil, task.Task{Name: "py", Lang: "python", Script: "x"}, "", nil)
 			if tt.wantCode == 0 {
 				if err != nil {
 					t.Fatalf("Run: %v, want nil", err)
@@ -739,7 +739,7 @@ func TestRunScriptSize(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := Run(context.Background(), nil, parser.Task{Name: "big", Script: tt.script}, "", nil)
+			err := Run(context.Background(), nil, task.Task{Name: "big", Script: tt.script}, "", nil)
 			if !tt.wantErr {
 				if err != nil {
 					t.Fatalf("Run: %v, want nil", err)
@@ -907,7 +907,7 @@ func TestRunArgsTooLarge(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := Run(context.Background(), nil, parser.Task{Name: "s", Script: "echo ok"}, "", tt.args)
+			err := Run(context.Background(), nil, task.Task{Name: "s", Script: "echo ok"}, "", tt.args)
 			wantArgLimit(t, err, []string{`task "s": `, "script 7 " + ArgUnit, tt.want}, []string{"script is", "aaaa"})
 		})
 	}
@@ -931,7 +931,7 @@ func TestRunPassesArgs(t *testing.T) {
 	} {
 		t.Run("lang="+tc.lang, func(t *testing.T) {
 			requireCmd(t, tc.bin)
-			if err := Run(context.Background(), nil, parser.Task{Name: "x", Lang: tc.lang, Script: tc.script}, "", args); err != nil {
+			if err := Run(context.Background(), nil, task.Task{Name: "x", Lang: tc.lang, Script: tc.script}, "", args); err != nil {
 				t.Fatalf("Run: %v, want args %q passed through", err, args)
 			}
 		})
@@ -944,7 +944,7 @@ func TestRunShellDollarZero(t *testing.T) {
 		for _, args := range [][]string{nil, {"a"}} {
 			t.Run(fmt.Sprintf("%s/args=%d", shell, len(args)), func(t *testing.T) {
 				requireCmd(t, shell)
-				if err := Run(context.Background(), nil, parser.Task{Name: "x", Lang: shell, Script: `[ "$0" = made ]`}, "", args); err != nil {
+				if err := Run(context.Background(), nil, task.Task{Name: "x", Lang: shell, Script: `[ "$0" = made ]`}, "", args); err != nil {
 					t.Fatalf("Run: %v, want $0 = made", err)
 				}
 			})
@@ -1000,7 +1000,7 @@ func TestRunScriptLeadingDash(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			requireCmd(t, tc.bin)
-			err := Run(context.Background(), nil, parser.Task{Name: "x", Lang: tc.lang, Script: tc.script}, "", nil)
+			err := Run(context.Background(), nil, task.Task{Name: "x", Lang: tc.lang, Script: tc.script}, "", nil)
 			wantExitCode(t, err, tc.want)
 		})
 	}
@@ -1016,7 +1016,7 @@ func TestRunRejectsNUL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := Run(context.Background(), nil, parser.Task{Name: "nul", Lang: tt.lang, Script: tt.script}, "", nil)
+			err := Run(context.Background(), nil, task.Task{Name: "nul", Lang: tt.lang, Script: tt.script}, "", nil)
 			if err == nil {
 				t.Fatal("Run: want error for NUL byte, got nil")
 			}
@@ -1037,7 +1037,7 @@ func TestRunRejectsEmptyScript(t *testing.T) {
 	for _, lang := range []string{"bash", "sh", "python"} {
 		for _, script := range []string{"", "\n", " \n\t\n"} {
 			t.Run(fmt.Sprintf("%s/%q", lang, script), func(t *testing.T) {
-				err := Run(context.Background(), nil, parser.Task{Name: "x", Lang: lang, Script: script}, "", nil)
+				err := Run(context.Background(), nil, task.Task{Name: "x", Lang: lang, Script: script}, "", nil)
 				if err == nil {
 					t.Fatal("Run: want error for empty script, got nil")
 				}
@@ -1054,7 +1054,7 @@ func TestRunRejectsEmptyScript(t *testing.T) {
 		}
 	}
 	t.Run("unsupported language first", func(t *testing.T) {
-		err := Run(context.Background(), nil, parser.Task{Name: "x", Lang: "cobol"}, "", nil)
+		err := Run(context.Background(), nil, task.Task{Name: "x", Lang: "cobol"}, "", nil)
 		if err == nil || !strings.Contains(err.Error(), "unsupported language") {
 			t.Errorf("Run: error = %v, want unsupported language", err)
 		}
@@ -1072,7 +1072,7 @@ func TestRunNoArgsSeparatorNotPassed(t *testing.T) {
 	} {
 		t.Run("lang="+tc.lang, func(t *testing.T) {
 			requireCmd(t, tc.bin)
-			if err := Run(context.Background(), nil, parser.Task{Name: "x", Lang: tc.lang, Script: tc.script}, "", nil); err != nil {
+			if err := Run(context.Background(), nil, task.Task{Name: "x", Lang: tc.lang, Script: tc.script}, "", nil); err != nil {
 				t.Fatalf("Run: %v, want no arguments", err)
 			}
 		})

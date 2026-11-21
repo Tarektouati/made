@@ -16,6 +16,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/Tarektouati/made/internal/task"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
@@ -39,15 +40,6 @@ func normalizeLoneCR(source []byte) []byte {
 	return bytes.ReplaceAll(source, []byte("\r"), []byte("\n"))
 }
 
-// Task is a single runnable unit parsed from the Markdown source.
-type Task struct {
-	Name        string
-	Description string
-	Lang        string // fence language (first word of the info string, e.g. "bash")
-	Script      string // code block body
-	Line        int    // 1-based line of the heading
-}
-
 // Parse extracts tasks from Markdown source, preserving document order.
 //
 // Each H3 heading starts a task; the first fenced code block after it provides the
@@ -56,7 +48,7 @@ type Task struct {
 // that code block becomes the description. Headings of any other level end the
 // current task's scope. A heading with no following code block is skipped. A leading
 // UTF-8 byte order mark is ignored, and a file with only CR line endings reads as LF.
-func Parse(source []byte) ([]Task, error) {
+func Parse(source []byte) ([]task.Task, error) {
 	source = normalizeLoneCR(bytes.TrimPrefix(source, utf8BOM))
 	if err := validateNesting(source); err != nil {
 		return nil, err
@@ -65,15 +57,15 @@ func Parse(source []byte) ([]Task, error) {
 	doc := goldmark.DefaultParser().Parse(reader)
 	lineOf := lineCounter(source)
 
-	var tasks []Task
-	var cur *Task     // task currently being assembled
-	var desc []string // description paragraphs collected so far
+	var tasks []task.Task
+	var cur *task.Task // task currently being assembled
+	var desc []string  // description paragraphs collected so far
 	hasScript := false
 	for n := doc.FirstChild(); n != nil; n = n.NextSibling() {
 		switch node := n.(type) {
 		case *ast.Heading:
 			if node.Level == taskHeadingLevel {
-				cur = &Task{Name: NormalizeSpace(headingText(node, source)), Line: lineOf(node)}
+				cur = &task.Task{Name: NormalizeSpace(headingText(node, source)), Line: lineOf(node)}
 			} else {
 				cur = nil
 			}
@@ -101,8 +93,8 @@ func Parse(source []byte) ([]Task, error) {
 // Fence is a fenced code block found under a task heading.
 type Fence struct {
 	Line   int    // 1-based line of the opening fence
-	Lang   string // as Task.Lang
-	Script string // as Task.Script
+	Lang   string // as task.Task.Lang
+	Script string // as task.Task.Script
 }
 
 // RawTask is an H3 heading with its source position and every top-level fenced code

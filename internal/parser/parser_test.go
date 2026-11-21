@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Tarektouati/made/internal/task"
 )
 
 func repeatToken(token string, n int) []byte {
@@ -138,7 +140,7 @@ func TestParseEmptyFirstBlockIsScript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	want := []Task{{Name: "empty", Description: "About it.", Lang: "bash", Script: "", Line: 1}}
+	want := []task.Task{{Name: "empty", Description: "About it.", Lang: "bash", Script: "", Line: 1}}
 	if !reflect.DeepEqual(tasks, want) {
 		t.Errorf("tasks = %+v, want %+v", tasks, want)
 	}
@@ -411,22 +413,22 @@ func TestParseUTF8BOM(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		src  string
-		want []Task
+		want []task.Task
 	}{
 		{
 			name: "bom before heading",
 			src:  bom + "### bom\n```\necho bom\n```\n",
-			want: []Task{{Name: "bom", Script: "echo bom\n", Line: 1}},
+			want: []task.Task{{Name: "bom", Script: "echo bom\n", Line: 1}},
 		},
 		{
 			name: "bom then blank line",
 			src:  bom + "\n### bom\n```bash\necho bom\n```\n",
-			want: []Task{{Name: "bom", Lang: "bash", Script: "echo bom\n", Line: 2}},
+			want: []task.Task{{Name: "bom", Lang: "bash", Script: "echo bom\n", Line: 2}},
 		},
 		{
 			name: "bom with description and multiple tasks",
 			src:  bom + "### one\nfirst task\n```bash\necho 1\n```\n\n### two\n```sh\necho 2\n```\n",
-			want: []Task{
+			want: []task.Task{
 				{Name: "one", Description: "first task", Lang: "bash", Script: "echo 1\n", Line: 1},
 				{Name: "two", Lang: "sh", Script: "echo 2\n", Line: 7},
 			},
@@ -434,7 +436,7 @@ func TestParseUTF8BOM(t *testing.T) {
 		{
 			name: "no bom unchanged",
 			src:  "### bom\n```\necho bom\n```\n",
-			want: []Task{{Name: "bom", Script: "echo bom\n", Line: 1}},
+			want: []task.Task{{Name: "bom", Script: "echo bom\n", Line: 1}},
 		},
 		{
 			name: "bom only",
@@ -444,7 +446,7 @@ func TestParseUTF8BOM(t *testing.T) {
 		{
 			name: "mid-document feff not stripped",
 			src:  "### a\n```\necho " + bom + "\n```\n",
-			want: []Task{{Name: "a", Script: "echo " + bom + "\n", Line: 1}},
+			want: []task.Task{{Name: "a", Script: "echo " + bom + "\n", Line: 1}},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -619,11 +621,11 @@ func TestParseDetailedMatchesParse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got []Task
+	var got []task.Task
 	for _, r := range raw {
 		if len(r.Fences) > 0 {
 			f := r.Fences[0]
-			got = append(got, Task{Name: r.Name, Lang: f.Lang, Script: f.Script, Line: r.Line})
+			got = append(got, task.Task{Name: r.Name, Lang: f.Lang, Script: f.Script, Line: r.Line})
 		}
 	}
 	if len(got) != len(want) {
