@@ -329,6 +329,24 @@ func TestRunInterpreterExitCodes(t *testing.T) {
 	})
 }
 
+// TestRunArgsTooLarge checks that a task the OS refuses to start because its arguments
+// are too large exits with 126, as a shell does, and is not blamed on the script.
+func TestRunArgsTooLarge(t *testing.T) {
+	requireCmd(t, "bash")
+	f := filepath.Join(t.TempDir(), "tasks.md")
+	if err := os.WriteFile(f, []byte("### s\n```bash\necho ok\n```\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"-f", f, "s", strings.Repeat("a", 4<<20)}, &stdout, &stderr)
+	if code != 126 {
+		t.Errorf("run = %d, want 126\nstderr: %s", code, &stderr)
+	}
+	checkContains(t, "stderr", stderr.String(), []string{`made: task "s": `, "1 argument of "}, true)
+	checkContains(t, "stderr", stderr.String(), []string{"script is", "aaaa"}, false)
+	checkContains(t, "stdout", stdout.String(), []string{"ok"}, false)
+}
+
 // TestRunDashTaskName checks that a task whose name starts with "-" runs only after "--".
 func TestRunDashTaskName(t *testing.T) {
 	requireCmd(t, "bash")

@@ -402,8 +402,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "made: %s\n", escapeErr(runErr))
 		code := 1
 		var interpErr *runner.InterpreterError
+		var argErr *runner.ArgLimitError
 		if errors.As(runErr, &interpErr) {
 			code = interpErr.ExitCode()
+		} else if errors.As(runErr, &argErr) {
+			code = argErr.ExitCode()
 		}
 		return code
 	}

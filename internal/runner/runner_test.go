@@ -746,21 +746,169 @@ func TestRunScriptSize(t *testing.T) {
 				}
 				return
 			}
-			if err == nil {
-				t.Fatal("Run: want error for oversized script, got nil")
+			wantArgLimit(t, err,
+				[]string{"too large", `task "big": script is ` + strconv.Itoa(ScriptLen("", tt.script)) + " " + ArgUnit},
+				[]string{"are too large to start", "command line is too long"})
+		})
+	}
+}
+
+// wantArgLimit checks that err is Run refusing to start a task because of the OS
+// argument limit, with exit code 126, and that its message contains every string of
+// want and none of notWant.
+func wantArgLimit(t *testing.T, err error, want, notWant []string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("Run: want error, got nil")
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		t.Fatalf("Run: error = %v, want a start error, not an exit status", err)
+	}
+	if !argListTooLong(err) {
+		t.Errorf("Run: error = %v, want it to wrap the OS argument-size error", err)
+	}
+	var coded interface{ ExitCode() int }
+	if !errors.As(err, &coded) || coded.ExitCode() != 126 {
+		t.Errorf("Run: error = %v (%T), want one with ExitCode 126", err, err)
+	}
+	checkMessage(t, err.Error(), want, notWant)
+}
+
+// checkMessage reports each string of want missing from msg and each of notWant in it.
+func checkMessage(t *testing.T, msg string, want, notWant []string) {
+	t.Helper()
+	for _, w := range want {
+		if !strings.Contains(msg, w) {
+			t.Errorf("error = %q, want it to contain %q", msg, w)
+		}
+	}
+	for _, w := range notWant {
+		if strings.Contains(msg, w) {
+			t.Errorf("error = %q, want it not to contain %q", msg, w)
+		}
+	}
+}
+
+// Limits of each OS, as hostLimits reports them, so every OS's message and blame rule
+// is checked on any host.
+var (
+	linux4K   = osLimits{os: "Linux", unit: "bytes", perArg: 128 << 10}
+	linux16K  = osLimits{os: "Linux", unit: "bytes", perArg: 512 << 10}
+	macOS     = osLimits{os: "macOS", unit: "bytes", total: 1 << 20}
+	otherUnix = osLimits{os: "the OS", unit: "bytes"}
+	windows   = osLimits{os: "Windows", unit: "UTF-16 characters", perArg: 32767, cmdLine: true}
+)
+
+func TestBlamesScript(t *testing.T) {
+	tests := []struct {
+		name                       string
+		lim                        osLimits
+		scriptLen, argsLen, envLen int
+		want                       bool
+	}{
+		{"linux at the per-argument cap", linux4K, 128 << 10, 0, 10, true},
+		{"linux just under it", linux4K, 128<<10 - 1, 4 << 20, 10, false},
+		{"linux 16K pages accept 128 KiB", linux16K, 128 << 10, 0, 10, false},
+		{"linux 16K pages at their cap", linux16K, 512 << 10, 0, 10, true},
+		{"macOS script most of it", macOS, 600 << 10, 0, 500 << 10, true},
+		{"macOS environment most of it", macOS, 200 << 10, 0, 1 << 20, false},
+		{"macOS arguments most of it", macOS, 200 << 10, 4 << 20, 10, false},
+		{"other Unix uses the total rule", otherUnix, 2 << 20, 10, 10, true},
+		{"windows script fills the command line", windows, 32767, 0, 0, true},
+		{"windows arguments overflow it", windows, 32000, 1000, 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.lim.blamesScript(tt.scriptLen, tt.argsLen, tt.envLen); got != tt.want {
+				t.Errorf("blamesScript(%d, %d, %d) = %v, want %v", tt.scriptLen, tt.argsLen, tt.envLen, got, tt.want)
 			}
-			var exitErr *exec.ExitError
-			if errors.As(err, &exitErr) {
-				t.Fatalf("Run: error = %v, want a start error, not an exit status", err)
+		})
+	}
+}
+
+func TestArgLimitErrorMessage(t *testing.T) {
+	boom := errors.New("boom")
+	script := func(lim osLimits, n int) *ArgLimitError {
+		return &ArgLimitError{Task: "big", Interp: "bash", Script: true, ScriptLen: n, EnvLen: 50, Err: boom, lim: lim}
+	}
+	args := func(lim osLimits, count, size int) *ArgLimitError {
+		return &ArgLimitError{Task: "s", Interp: "bash", ScriptLen: 7, ArgCount: count, ArgsLen: size, EnvLen: 50, Err: boom, lim: lim}
+	}
+	tests := []struct {
+		name string
+		err  *ArgLimitError
+		want string
+	}{
+		{"linux script", script(linux4K, 131072),
+			`task "big": script is 131072 bytes, too large to pass to "bash" as a command-line argument (Linux rejects a single argument of 131072 bytes or more); move the bulk of it into a file the task runs: boom`},
+		{"linux 16K pages script", script(linux16K, 524288),
+			`task "big": script is 524288 bytes, too large to pass to "bash" as a command-line argument (Linux rejects a single argument of 524288 bytes or more); move the bulk of it into a file the task runs: boom`},
+		{"macOS script over the total", script(macOS, 4194304),
+			`task "big": script is 4194304 bytes, too large to pass to "bash" as a command-line argument (macOS limits arguments plus environment to about 1048576 bytes in total); move the bulk of it into a file the task runs: boom`},
+		{"macOS script", script(macOS, 900000),
+			`task "big": script is 900000 bytes, most of the arguments plus environment passed to "bash", which macOS limits to about 1048576 bytes in total; move the bulk of it into a file the task runs: boom`},
+		{"other Unix script", script(otherUnix, 900000),
+			`task "big": script is 900000 bytes, most of the arguments plus environment passed to "bash", which the OS limits in total; move the bulk of it into a file the task runs: boom`},
+		{"windows script", script(windows, 32767),
+			`task "big": script is 32767 UTF-16 characters, too large to pass to "bash" on the command line (Windows limits the whole command line to 32767 UTF-16 characters); move the bulk of it into a file the task runs: boom`},
+		{"linux one argument", args(linux4K, 1, 5),
+			`task "s": arguments plus environment are too large to start "bash" (script 7 bytes, 1 argument of 5 bytes, environment about 50 bytes); Linux limits their total size and rejects any single one of 131072 bytes or more: boom`},
+		{"macOS several arguments", args(macOS, 3, 9),
+			`task "s": arguments plus environment are too large to start "bash" (script 7 bytes, 3 arguments totalling 9 bytes, environment about 50 bytes); macOS limits their total to about 1048576 bytes: boom`},
+		{"other Unix no arguments", args(otherUnix, 0, 0),
+			`task "s": arguments plus environment are too large to start "bash" (script 7 bytes, 0 arguments totalling 0 bytes, environment about 50 bytes); the OS limits their total size: boom`},
+		{"windows one argument", args(windows, 1, 40000),
+			`task "s": the command line is too long to start "bash" (script 7 UTF-16 characters, 1 argument of 40000 UTF-16 characters); Windows limits it to 32767 UTF-16 characters: boom`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.err.Error(); got != tt.want {
+				t.Errorf("Error() =\n%s\nwant\n%s", got, tt.want)
 			}
-			if !argListTooLong(err) {
-				t.Errorf("Run: error = %v, want it to wrap the OS argument-size error", err)
+		})
+	}
+}
+
+func TestArgLimitErrorUnwrap(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		err  *ArgLimitError
+	}{
+		{"script", &ArgLimitError{Task: "big", Interp: "bash", Script: true, ScriptLen: ArgLimit, Err: syscall.E2BIG}},
+		{"arguments", &ArgLimitError{Task: "s", Interp: "bash", ScriptLen: 7, ArgCount: 1, ArgsLen: 5, Err: syscall.E2BIG}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.err.Error() == "" {
+				t.Error("Error() is empty with the host's limits")
 			}
-			for _, w := range []string{"too large", `task "big"`, strconv.Itoa(ScriptLen("", tt.script)) + " " + ArgUnit} {
-				if !strings.Contains(err.Error(), w) {
-					t.Errorf("error = %q, want it to contain %q", err.Error(), w)
-				}
+			if got := tt.err.ExitCode(); got != 126 {
+				t.Errorf("ExitCode = %d, want 126", got)
 			}
+			if !errors.Is(tt.err, syscall.E2BIG) {
+				t.Errorf("errors.Is(%v, E2BIG) = false, want it to unwrap to Err", tt.err)
+			}
+		})
+	}
+}
+
+func TestRunArgsTooLarge(t *testing.T) {
+	// One 4 MiB argument is over Linux's per-argument limit, macOS's total, and Windows's
+	// command line. 100 arguments of 100,000 bytes are each under the per-argument
+	// limit but total 10 MB, over Linux's 6 MiB cap on the total and macOS's 1 MiB.
+	requireCmd(t, "bash")
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"one huge argument", []string{strings.Repeat("a", 4<<20)}, "1 argument of " + strconv.Itoa(4<<20) + " " + ArgUnit},
+		{"many arguments", slices.Repeat([]string{strings.Repeat("a", 100_000)}, 100), "100 arguments totalling 10000000 " + ArgUnit},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Run(context.Background(), nil, parser.Task{Name: "s", Script: "echo ok"}, "", tt.args)
+			wantArgLimit(t, err, []string{`task "s": `, "script 7 " + ArgUnit, tt.want}, []string{"script is", "aaaa"})
 		})
 	}
 }
