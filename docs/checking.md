@@ -52,9 +52,11 @@ never count, however wide. Neither does a thematic break (a line of `- - -` or
 `* * *`), however long.
 
 `script-too-large` uses the limit of the OS `made --check` runs on. Linux caps a
-single argument at 128 KiB (counted in bytes), and macOS is checked against the
+single argument at 32 pages, 128 KiB (counted in bytes) with the usual 4 KiB pages,
+and the check uses 128 KiB whatever the page size. macOS is checked against the
 same limit so that a Madefile that passes there also runs on Linux, although macOS
-itself accepts a larger script. Windows caps the whole command line at 32,767
+itself accepts a larger script, as does Linux with larger pages; a run reports the
+limits of the machine it runs on. Windows caps the whole command line at 32,767
 UTF-16 characters, so a script with many non-ASCII characters fits in more bytes,
 and a script just under the limit can still be too long once quoted. The size
 reported includes the space `made` adds before a script starting with `-` or `+`.

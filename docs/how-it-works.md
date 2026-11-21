@@ -37,14 +37,21 @@ A task whose code block is empty or holds only whitespace is refused with an err
 too, before anything runs; a later code block under the same heading is still
 ignored.
 
-Because the script is a single command-line argument, the OS caps its size: 128 KiB
-per argument on Linux, about 1 MiB of total arguments on macOS, and about 32K
-characters on Windows. A larger task fails before running, with an error giving the
-script's size; keep the bulk in a separate file and have the task run it (e.g.
-`bash scripts/build.sh "$@"`). For the same reason, other users on the machine can
-read the script text with `ps` or `/proc/<pid>/cmdline` while the task runs, so
-don't embed secrets in a Madefile; read them from environment variables or files at
-run time.
+Because the script is a single command-line argument, the OS caps its size: 32 pages
+per argument on Linux (128 KiB with the usual 4 KiB pages), about 1 MiB of arguments
+plus environment in total on macOS, and about 32K characters for the whole command
+line on Windows. The arguments passed to the task count against the same limits, and
+so does the environment on Linux and macOS. A task over them fails before running and
+`made` exits with `126`. The error blames the script when it alone reaches the cap
+on one argument (on Windows, the command line), or on macOS when it is larger than
+the arguments and environment together; keep the bulk in a separate file and have
+the task run it (e.g. `bash scripts/build.sh "$@"`). Otherwise it says arguments plus
+environment (on Windows, the command line) are too large, giving the sizes of the
+script, arguments, and environment, never their contents, and the limits of the OS
+it runs on. Because the script is an argument, other users on the machine can read
+the script text with `ps` or `/proc/<pid>/cmdline` while the task runs, so don't
+embed secrets in a Madefile; read them from environment variables or files at run
+time.
 
 **Working directory.** A task runs in the directory that contains its task file,
 not in the directory `made` was started from. Relative paths in a script
