@@ -35,6 +35,8 @@ import (
 	"github.com/Tarektouati/made/internal/runner"
 	"github.com/Tarektouati/made/internal/selfupdate"
 	"github.com/Tarektouati/made/internal/task"
+	"github.com/Tarektouati/made/internal/updatecheck"
+	"golang.org/x/term"
 	"golang.org/x/text/width"
 )
 
@@ -133,6 +135,55 @@ var selfUpdateBaseURL = ""
 
 // detectInstall describes the running binary for made self-update; tests replace it.
 var detectInstall = selfupdate.Current
+
+// updateCacheDir returns the directory of the new-version notice's cache; tests
+// replace it.
+var updateCacheDir = func() (string, error) {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "made"), nil
+}
+
+// updateTimeout bounds the background release check; tests lengthen it.
+var updateTimeout = time.Second
+
+// isTerminal reports whether w is a terminal; tests replace it.
+var isTerminal = func(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && term.IsTerminal(int(f.Fd()))
+}
+
+// startUpdateCheck starts the new-version check (see package updatecheck), or returns
+// nil when the user opted out, in CI, when stdout or stderr is not a terminal, and for
+// builds that are not a release.
+func startUpdateCheck(stdout, stderr io.Writer) *updatecheck.Check {
+	if os.Getenv("MADE_NO_UPDATE_CHECK") != "" || os.Getenv("NO_UPDATE_NOTIFIER") != "" {
+		return nil
+	}
+	if _, ci := os.LookupEnv("CI"); ci {
+		return nil
+	}
+	if !isTerminal(stdout) || !isTerminal(stderr) {
+		return nil
+	}
+	v := resolveVersion()
+	if !selfupdate.IsRelease(v) {
+		return nil
+	}
+	dir, err := updateCacheDir()
+	if err != nil {
+		return nil
+	}
+	return updatecheck.Start(updatecheck.Config{
+		Current:  v,
+		Method:   selfupdate.Detect(detectInstall(v, version != "")),
+		Client:   selfupdate.Client{BaseURL: selfUpdateBaseURL},
+		CacheDir: dir,
+		Timeout:  updateTimeout,
+	})
+}
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -351,6 +402,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 		printNames(stdout, tasks)
 		return 0
 	}
+
+	// Every command that must stay quiet (completion, scripts, init, --check, -V,
+	// self-update) has returned by now. The notice comes from the cache and is printed
+	// after the task, so it is never mixed with the task's output or waited for.
+	notice := startUpdateCheck(stdout, stderr)
+	defer func() {
+		if line := notice.Notice(); line != "" {
+			fmt.Fprintln(stderr, line)
+		}
+	}()
+
 	runTask := !list && fs.NArg() > 0
 	// Before runnableTasks, so its warnings cite lines of a file already named.
 	if runTask && res.fromParent && len(res.others) == 0 { // the duplicate note already named it
