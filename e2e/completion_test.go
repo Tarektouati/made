@@ -69,6 +69,13 @@ func completionDir(t *testing.T) string {
 // PATH, and returns its stdout. It fails the test on a non-zero exit.
 func runShell(t *testing.T, dir, shell string, args ...string) string {
 	t.Helper()
+	out, _ := runShellOut(t, dir, shell, args...)
+	return out
+}
+
+// runShellOut is runShell returning stderr too.
+func runShellOut(t *testing.T, dir, shell string, args ...string) (stdout, stderr string) {
+	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("shell completion scripts are not tested on Windows")
 	}
@@ -85,7 +92,7 @@ func runShell(t *testing.T, dir, shell string, args ...string) string {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("%s %q: %v\nstdout: %s\nstderr: %s", shell, args, err, &out, &errb)
 	}
-	return out.String()
+	return out.String(), errb.String()
 }
 
 // completionCase is a command line (as shell words, the last being the word under the
@@ -269,6 +276,69 @@ done`
 	}
 	if _, err := os.Stat(filepath.Join(dir, "MARK")); err == nil {
 		t.Error("an inserted completion ran a command substitution")
+	}
+	checkNoRun(t, dir)
+}
+
+// TestCompletionBashStrict checks that _made works in a shell with set -e and set -u,
+// which some users run interactively: no statement may return non-zero or expand an
+// unset variable, on bash 3.2 or bash 5. Each line is completed by a plain shell and by
+// one with set -eu, which must survive, write nothing to stderr (an error inside $(...)
+// only ends that subshell) and offer the same completions. noHome unsets HOME first.
+func TestCompletionBashStrict(t *testing.T) {
+	dir := completionDir(t)
+	noMadefile := t.TempDir()
+	mkdir(t, filepath.Join(noMadefile, ".git"))
+	const script = `if [[ $2 == nohome ]]; then unset HOME; fi
+if [[ $1 == strict ]]; then set -eu; fi
+eval "$(made completion bash)"
+COMP_LINE=$3; COMP_POINT=${#COMP_LINE}; shift 3
+COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); COMPREPLY=(); _made
+printf '%s\n' ${COMPREPLY[@]+"${COMPREPLY[@]}"}
+echo survived`
+
+	for _, tc := range []struct {
+		dir    string
+		noHome bool
+		completionCase
+	}{
+		{dir, false, completionCase{line: []string{"made", "b"}, want: []string{"build"}}},
+		{dir, false, completionCase{line: []string{"made", "-f", "quote.md", "wi"}, want: []string{`with\ space`}}},
+		{dir, false, completionCase{line: []string{"made", "-f", "quote.md", "'with s"}, want: []string{"with space"}}},
+		{dir, false, completionCase{line: []string{"made", "-f", "quote.md", `"dol`}, want: []string{`dollar \$(touch MARK)`}}},
+		{dir, false, completionCase{line: []string{"made", "-f", ""}, not: []string{"build"}}},
+		{dir, false, completionCase{line: []string{"made", "-f", "other.md", ""}, want: []string{"ns:task"}}},
+		{dir, false, completionCase{line: []string{"made", "--f"}, want: []string{"--file"}}},
+		{dir, false, completionCase{line: []string{"made", "--zz"}}},
+		{dir, false, completionCase{line: []string{"made", "completion", ""}, want: []string{"bash", "zsh", "fish"}}},
+		{dir, false, completionCase{line: []string{"made", "completion", "q"}}},
+		{dir, false, completionCase{line: []string{"made", "init", ""}, want: []string{"--force"}}},
+		{dir, false, completionCase{line: []string{"made", "--check", "--"}, want: []string{"--strict"}}},
+		{dir, false, completionCase{line: []string{"made", "-f", "$PWD/other.md", ""}, want: []string{"ns:task"}}},
+		{dir, false, completionCase{line: []string{"made", "--file=other.md", ""}, want: []string{"ns:task"}}},
+		{dir, true, completionCase{line: []string{"made", "-f", "other.md", ""}, want: []string{"ns:task"}}},
+		{dir, true, completionCase{line: []string{"made", "-f", "~/other.md", ""}, want: []string{"init"}, not: []string{"ns:task"}}},
+		{noMadefile, false, completionCase{line: []string{"made", ""}, want: []string{"init", "completion"}}},
+	} {
+		compLine := strings.Join(tc.line, " ")
+		home := ""
+		if tc.noHome {
+			home = "nohome"
+		}
+		t.Run(strings.TrimSpace(home+" "+compLine), func(t *testing.T) {
+			plain := runShell(t, tc.dir, "bash", append([]string{"-c", script, "bash", "plain", home, compLine}, tc.line...)...)
+			strict, stderr := runShellOut(t, tc.dir, "bash", append([]string{"-c", script, "bash", "strict", home, compLine}, tc.line...)...)
+			if !strings.HasSuffix(strict, "survived\n") {
+				t.Fatalf("%q: the set -eu shell did not finish: %q", compLine, strict)
+			}
+			if stderr != "" {
+				t.Errorf("%q: the set -eu shell wrote to stderr: %q", compLine, stderr)
+			}
+			if strict != plain {
+				t.Errorf("%q: completions under set -eu %q, want %q as without it", compLine, lines(strict), lines(plain))
+			}
+			checkCompletions(t, lines(strict), tc.completionCase)
+		})
 	}
 	checkNoRun(t, dir)
 }
