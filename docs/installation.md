@@ -83,7 +83,8 @@ All three shells insert a task name quoted, so a name with spaces, quotes or `$(
 is one literal word on the command line and never runs anything. bash escapes it
 (`with\ space`), or quotes it to match a quote you opened (`'with space'`). The part
 you typed may be quoted or escaped too: `with\ s`, `'with s`, `"with s` and `ns\:t`
-all complete.
+all complete. The bash script also works in a shell running with `set -e` or `set -u`,
+from bash 3.2 on.
 
 To get task names, the scripts run `made [-f file] --list-names`, which prints one
 `name<TAB>description` line per task with no header, leaving out tasks with an empty
