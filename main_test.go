@@ -2105,12 +2105,12 @@ func TestPrintTasksExactOutput(t *testing.T) {
 }
 
 // writeSlowParseMadefile writes a task file whose description makes goldmark's inline
-// parser slow (unclosed mixed emphasis): tens of milliseconds, well past the 1ms
-// parseTimeout the caller sets.
+// parser slow (unclosed mixed emphasis): hundreds of milliseconds, far past the 1ms
+// parseTimeout the caller sets even with coarse timers (Windows fires them late).
 func writeSlowParseMadefile(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "slow.md")
-	src := "### t\n\n" + strings.Repeat("_a*", 3000) + "\n\n```bash\necho ok\n```\n"
+	src := "### t\n\n" + strings.Repeat("_a*", 10000) + "\n\n```bash\necho ok\n```\n"
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatal(err)
 	}
