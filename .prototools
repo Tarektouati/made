@@ -2,7 +2,7 @@
 # Run `proto install` once per clone; see CONTRIBUTING.md.
 go = "1.26.11"
 golangci-lint = "2.15.0"
-made = "0.6.0"
+made = "0.7.0"
 
 [plugins]
 golangci-lint = "file://./tools/proto/golangci-lint.toml"
