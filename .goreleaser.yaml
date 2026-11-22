@@ -41,9 +41,8 @@ changelog:
   sort: asc
   filters:
     exclude:
-      - "^docs:"
-      - "^test:"
-      - "^ci:"
+      # Conventional types left out of the notes, with or without a scope or "!".
+      - "^(docs|test|ci)(\\(.*\\))?!?:"
 
 homebrew_casks:
   - name: made
