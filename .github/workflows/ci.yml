@@ -56,6 +56,12 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = Linux ]; then sudo apt-get update && sudo apt-get install -y fish zsh
           else brew install fish; fi # macOS ships zsh
+      # Windows runs go test directly, not made test: made has no Windows release
+      # (.goreleaser.yaml builds linux and darwin) and tools/proto/made.toml has no
+      # Windows platform, so proto cannot install the pinned made here. Once it can,
+      # note that made runs the first bash in an absolute PATH entry: on this image
+      # C:\Program Files\Git\bin (Git Bash) comes before the WSL launcher in
+      # C:\Windows\System32.
       - name: Run tests
         if: runner.os == 'Windows'
         run: go test -v ${{ matrix.race }} -count=1 ./...
