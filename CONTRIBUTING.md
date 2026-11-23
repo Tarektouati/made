@@ -1,5 +1,8 @@
 # Contributing
 
+To report a security vulnerability, don't open an issue: follow
+[SECURITY.md](./SECURITY.md).
+
 ## Development
 
 Tool versions (Go, golangci-lint and `made` itself) are pinned in

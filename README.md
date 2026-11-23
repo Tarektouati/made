@@ -164,6 +164,7 @@ Tasks in Madefile.md:
 - [Pre-commit and prek](docs/pre-commit.md) — run a task or `made --check` as a git hook
 - [Migrating from 0.2](docs/migrating.md) — moving tasks out of `README.md`
 - [Contributing](CONTRIBUTING.md) — development tasks and benchmarks
+- [Security policy](SECURITY.md) — supported versions and how to report a vulnerability
 
 ## License
 
