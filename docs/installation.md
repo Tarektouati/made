@@ -46,6 +46,17 @@ directory; give it as an absolute path (`$HOME/bin`, not a quoted `~/bin`):
 curl -fsSL https://raw.githubusercontent.com/Tarektouati/made/main/install.sh | MADE_VERSION=v0.7.0 MADE_INSTALL_DIR="$HOME/bin" sh
 ```
 
+The script downloads only over HTTPS with TLS 1.2 or later and refuses a redirect to
+anything else, so it needs curl 7.34 or later. It ignores `~/.curlrc`, so a setting
+there (such as `insecure`) cannot weaken the download. Behind a TLS-inspecting proxy,
+point curl at your CA bundle with `CURL_CA_BUNDLE`, exported so both the download of
+the script and the script itself use it:
+
+```sh
+export CURL_CA_BUNDLE=/path/to/ca.pem
+curl -fsSL https://raw.githubusercontent.com/Tarektouati/made/main/install.sh | sh
+```
+
 The checksum is downloaded from the same GitHub release as the archive, so it catches
 a corrupted download but not a tampered release. If you need more than that, build
 from source with `go install` or verify the release yourself.
