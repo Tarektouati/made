@@ -10,6 +10,12 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Weekly, so new advisories in the vulnerability database show up without a push.
+  # Only the vulncheck job runs on it: lint and test skip scheduled runs, and build
+  # needs them, so it is skipped too (bench is pull_request only).
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch: # manual run of lint, test, vulncheck and build (bench is pull_request only)
 
 permissions:
   contents: read
@@ -17,6 +23,7 @@ permissions:
 jobs:
   lint:
     name: Lint
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -40,6 +47,7 @@ jobs:
 
   test:
     name: Test (${{ matrix.os }})
+    if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20 # a lost runner otherwise burns ~45 min
     strategy:
@@ -148,6 +156,25 @@ jobs:
         if: ${{ !cancelled() && runner.os != 'Windows' }}
         timeout-minutes: 8
         run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' made test-pkg -v ${{ matrix.race }} -count=1 -timeout 5m ./internal/parser ./internal/completion ./internal/lint ./internal/testenv
+
+  # govulncheck for each build-matrix target through the Madefile's vulncheck
+  # task, with the Go pinned in .prototools. Also runs on the weekly schedule.
+  vulncheck:
+    name: Vulncheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Toolchain versions are pinned in .prototools.
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
+      - name: Install Go and made
+        run: |
+          proto install go
+          proto install made
+      - name: Run govulncheck
+        run: made vulncheck
 
   build:
     name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
