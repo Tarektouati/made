@@ -1,5 +1,10 @@
 name: CI
 
+# Every action is pinned to a full commit SHA, with its release in a trailing
+# comment. Dependabot (.github/dependabot.yml) bumps the SHA and the comment
+# together. Checkouts set persist-credentials: false: no step pushes or fetches
+# with git (the bench comment authenticates gh with GH_TOKEN instead).
+
 on:
   push:
     branches: [main]
@@ -14,10 +19,20 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Fail when a workflow uses an action by tag or branch instead of a full
+      # commit SHA (local ./ actions excepted), so a new step can't skip the pin.
+      - name: Check actions are pinned to commit SHAs
+        run: |
+          if grep -rnP '^\s*-?\s*uses:\s*(?!\./)[^@\s]+@(?![0-9a-f]{40}\b)' .github/workflows; then
+            echo "::error::pin every uses: above to a full 40-character commit SHA with a # vX.Y.Z comment"
+            exit 1
+          fi
       # Toolchain versions are pinned in .prototools; CI runs the same
       # `made lint` task as local development and no-mistakes.
-      - uses: moonrepo/setup-toolchain@v0
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
       - name: Install go, golangci-lint and made
         run: proto install
       - name: Run golangci-lint
@@ -43,9 +58,11 @@ jobs:
     env:
       MADE_TEST_REQUIRE: ${{ matrix.require }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # Toolchain versions are pinned in .prototools.
-      - uses: moonrepo/setup-toolchain@v0
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
       - name: Install Go
         run: proto install go
       - name: Install made
@@ -145,9 +162,11 @@ jobs:
           - { goos: darwin,  goarch: arm64 }
           - { goos: windows, goarch: amd64 }
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       # Toolchain versions are pinned in .prototools.
-      - uses: moonrepo/setup-toolchain@v0
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
       - name: Install Go and made
         run: |
           proto install go
@@ -157,7 +176,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: made dist
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: made-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/
@@ -180,11 +199,12 @@ jobs:
       HYPERFINE_SHA256: ae2beda2ac99c098427e4f755244552daf20e514422889cca6d44421e2d93c87
       BENCHSTAT_VERSION: v0.0.0-20261009192801-be2c69fb417e
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # the base commit must be available
+          persist-credentials: false
       # Toolchain versions are pinned in .prototools.
-      - uses: moonrepo/setup-toolchain@v0
+      - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
       - name: Install Go
         # setup-go used to put GOPATH/bin on PATH; benchstat is go-installed there.
         run: |
