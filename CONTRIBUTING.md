@@ -19,7 +19,9 @@ To bump a tool, edit its version in `.prototools`.
 This repository's own tasks live in [`Madefile.md`](./Madefile.md): run `made` in
 the repo to list them, and `made check` to build, vet, and test.
 
-`made format` runs `gofmt -w .` and `made lint` runs golangci-lint.
+`made format` runs `gofmt -w .` and `made lint` runs golangci-lint. `made dist` builds a
+release-style binary into `dist/` for `GOOS`/`GOARCH` (default: this machine), as the CI
+build job does: `GOOS=windows GOARCH=amd64 made dist`.
 
 ## Pushing through no-mistakes (optional)
 
@@ -54,7 +56,7 @@ produce the same report locally, install [`hyperfine`](https://github.com/sharkd
 and `benchstat` (`go install golang.org/x/perf/cmd/benchstat@latest`), then run:
 
 ```bash
-made bench              # or: scripts/bench.sh [base-ref] [out-dir], base defaults to origin/main
+made bench [base-ref] [out-dir]   # defaults: origin/main, bench-out (same as scripts/bench.sh)
 go test -run '^$' -bench . -count 10 ./...   # just the Go benchmarks
 ```
 

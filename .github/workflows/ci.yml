@@ -138,16 +138,15 @@ jobs:
       - uses: actions/checkout@v7
       # Toolchain versions are pinned in .prototools.
       - uses: moonrepo/setup-toolchain@v0
-      - name: Install Go
-        run: proto install go
+      - name: Install Go and made
+        run: |
+          proto install go
+          proto install made
       - name: Build binary
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
-        run: |
-          ext=${{ matrix.goos == 'windows' && '.exe' || '' }}
-          go build -trimpath -ldflags="-s -w" -o "dist/made-${{ matrix.goos }}-${{ matrix.goarch }}${ext}" .
+        run: made dist
       - uses: actions/upload-artifact@v7
         with:
           name: made-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -155,7 +154,7 @@ jobs:
           if-no-files-found: error
 
   # Compares the PR against its base on this one runner. Warn only: nothing here
-  # fails the job. Run it locally with scripts/bench.sh (see CONTRIBUTING.md).
+  # fails the job. Run it locally with made bench (see CONTRIBUTING.md).
   bench:
     name: Bench (base vs head)
     if: github.event_name == 'pull_request'
@@ -181,6 +180,9 @@ jobs:
         run: |
           proto install go
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Install made
+        continue-on-error: true # warn only
+        run: proto install made
       - name: Install hyperfine and benchstat (pinned)
         continue-on-error: true # warn only
         run: |
@@ -193,7 +195,7 @@ jobs:
           go install "golang.org/x/perf/cmd/benchstat@${BENCHSTAT_VERSION}"
       - name: Run benchmarks
         continue-on-error: true # warn only
-        run: scripts/bench.sh "${{ github.event.pull_request.base.sha }}" "$RUNNER_TEMP/bench"
+        run: made bench "${{ github.event.pull_request.base.sha }}" "$RUNNER_TEMP/bench"
       - name: Publish report
         if: always()
         env:

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tarektouati/made/internal/parser"
 	"github.com/Tarektouati/made/internal/testenv"
 )
 
@@ -228,7 +229,7 @@ func TestRepoMadefileList(t *testing.T) {
 	}
 	const want = "  bench      Benchmarks the working tree against a base ref (default origin/main): " +
 		"Go benchmarks (benchstat), CLI timings (hyperfine) and binary size. " +
-		"Needs hyperfine and benchstat on PATH. Usage: made bench [base-ref].\n"
+		"Needs hyperfine and benchstat on PATH. Usage: made bench [base-ref] [out-dir].\n"
 	if !strings.Contains(stdout, want) {
 		t.Errorf("list output missing %q; got:\n%s", want, stdout)
 	}
@@ -239,6 +240,42 @@ func TestRepoMadefileList(t *testing.T) {
 	// Git may check README.md out with CRLF line endings (Windows runners).
 	if !strings.Contains(strings.ReplaceAll(string(readme), "\r\n", "\n"), stdout) {
 		t.Errorf("README example output is stale; made -l prints:\n%s", stdout)
+	}
+}
+
+// TestRepoMadefileCITasks pins the bodies of the repo Madefile tasks that CI runs, so
+// an edit such as appending `|| true` cannot quietly weaken CI.
+func TestRepoMadefileCITasks(t *testing.T) {
+	src, err := os.ReadFile("../Madefile.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tasks, err := parser.Parse([]byte(strings.ReplaceAll(string(src), "\r\n", "\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"dist": "os=$(go env GOOS)\n" +
+			"arch=$(go env GOARCH)\n" +
+			"ext=\"\"\n" +
+			"if [ \"$os\" = windows ]; then ext=.exe; fi\n" +
+			"CGO_ENABLED=0 go build -trimpath -ldflags=\"-s -w\" -o \"dist/made-$os-$arch$ext\" .",
+	}
+	for _, tk := range tasks {
+		script, ok := want[tk.Name]
+		if !ok {
+			continue
+		}
+		delete(want, tk.Name)
+		if tk.Lang != "bash" {
+			t.Errorf("task %q: lang = %q, want bash", tk.Name, tk.Lang)
+		}
+		if got := strings.TrimRight(tk.Script, "\n"); got != script {
+			t.Errorf("task %q script changed; CI depends on it:\ngot:\n%s\nwant:\n%s", tk.Name, got, script)
+		}
+	}
+	for name := range want {
+		t.Errorf("task %q is missing from Madefile.md; CI runs it", name)
 	}
 }
 
