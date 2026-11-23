@@ -261,6 +261,18 @@ func TestRepoMadefileCITasks(t *testing.T) {
 			"ext=\"\"\n" +
 			"if [ \"$os\" = windows ]; then ext=.exe; fi\n" +
 			"CGO_ENABLED=0 go build -trimpath -ldflags=\"-s -w\" -o \"dist/made-$os-$arch$ext\" .",
+		"vulncheck": "version=v1.10.0\n" +
+			"tmp=$(mktemp -d)\n" +
+			"trap 'rm -rf \"$tmp\"' EXIT\n" +
+			"# Build govulncheck for this machine even if GOOS/GOARCH are exported: the scan\n" +
+			"# below sets GOOS/GOARCH per target, which must not cross-compile the scanner itself.\n" +
+			"env -u GOOS -u GOARCH GOBIN=\"$tmp\" go install \"golang.org/x/vuln/cmd/govulncheck@$version\"\n" +
+			"status=0\n" +
+			"for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do\n" +
+			"  echo \"== $target\"\n" +
+			"  GOOS=${target%/*} GOARCH=${target#*/} \"$tmp/govulncheck\" ./... || status=1\n" +
+			"done\n" +
+			"exit \"$status\"",
 	}
 	for _, tk := range tasks {
 		script, ok := want[tk.Name]

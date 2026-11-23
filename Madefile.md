@@ -47,6 +47,23 @@ Runs golangci-lint with the repo's `.golangci.yml`.
 golangci-lint run ./...
 ```
 
+### vulncheck
+Scans for known vulnerabilities with the pinned govulncheck, for each CI build target (linux/amd64, linux/arm64, darwin/amd64, darwin/arm64 and windows/amd64). The CI vulncheck job runs this task, so keep its body as is.
+```bash
+version=v1.10.0
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+# Build govulncheck for this machine even if GOOS/GOARCH are exported: the scan
+# below sets GOOS/GOARCH per target, which must not cross-compile the scanner itself.
+env -u GOOS -u GOARCH GOBIN="$tmp" go install "golang.org/x/vuln/cmd/govulncheck@$version"
+status=0
+for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+  echo "== $target"
+  GOOS=${target%/*} GOARCH=${target#*/} "$tmp/govulncheck" ./... || status=1
+done
+exit "$status"
+```
+
 ### dist
 Builds a release-style binary into `dist/` for `GOOS`/`GOARCH` (default: this machine). The CI build job runs this task, so keep its body as is.
 ```bash

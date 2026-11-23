@@ -25,9 +25,12 @@ given (`made test-pkg -v -count=1 ./internal/runner`), as each CI test step does
 
 `made format` runs `gofmt -w .` and `made lint` runs golangci-lint. `made dist` builds a
 release-style binary into `dist/` for `GOOS`/`GOARCH` (default: this machine), as the CI
-build job does: `GOOS=windows GOARCH=amd64 made dist`.
+build job does: `GOOS=windows GOARCH=amd64 made dist`. `made vulncheck` runs the
+pinned [govulncheck](https://go.dev/doc/security/vuln/) for each target the CI build job
+builds (linux/amd64, linux/arm64, darwin/amd64, darwin/arm64 and windows/amd64),
+as the CI vulncheck job does on every push and pull request and once a week.
 
-CI runs the lint, test (macOS and Linux), build and bench jobs through these tasks
+CI runs the lint, test (macOS and Linux), vulncheck, build and bench jobs through these tasks
 with the released `made` pinned in `.prototools`, not the one being changed. Bump
 that pin when the Madefile starts using a newer `made` feature.
 
