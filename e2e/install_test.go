@@ -24,16 +24,24 @@ import (
 // installVersion is the release served by the fake curl.
 const installVersion = "1.2.3"
 
-// curlStub stands in for curl: it logs each call and each -o path, optionally sends
-// @SIGNAL@ to the calling shell, answers the latest-release redirect with
-// installVersion, and serves release files from @RELEASE@.
+// curlStub stands in for curl: it answers install.sh's -V probe (unlogged, so the
+// log holds downloads only), rejects --tlsv1.2 as a curl older than 7.34 does when
+// @OLD@ is set, logs each call and each -o path, optionally sends @SIGNAL@ to the
+// calling shell, answers the latest-release redirect with installVersion, and serves
+// release files from @RELEASE@.
 const curlStub = `#!/bin/sh
+case " $* " in
+*" --tlsv1.2 "*) [ -z '@OLD@' ] || { echo 'curl: option --tlsv1.2: is unknown' >&2; exit 2; } ;;
+esac
+case " $* " in
+*" -V "*) exit 0 ;;
+esac
 echo "$*" >>'@LOG@'
 out= url=
 while [ $# -gt 0 ]; do
 	case $1 in
 	-o) out=$2; shift ;;
-	-w) shift ;;
+	-w | --proto) shift ;;
 	-*) ;;
 	*) url=$1 ;;
 	esac
@@ -75,6 +83,8 @@ type installOpts struct {
 	shell string
 	// signal, when set (e.g. INT), is sent by curl to the shell running install.sh.
 	signal string
+	// oldCurl makes the curl stub reject --tlsv1.2, as curl before 7.34 does.
+	oldCurl bool
 	// path is prepended to PATH.
 	path string
 	// noexecTmp wraps tar to strip the exec bit from the extracted made, so running it
@@ -108,6 +118,8 @@ type installResult struct {
 	code            int
 	home, work, tmp string
 	curlCalls       int
+	// curlLog holds the arguments of each curl call, one line per call.
+	curlLog string
 	// curlOuts holds one out=PATH line per curl -o call.
 	curlOuts string
 	// sudoLog holds one line per call to the workingSudo stub.
@@ -263,7 +275,7 @@ func runInstall(t *testing.T, release string, opts installOpts, env ...string) i
 	default:
 		t.Fatalf("sha256Tool = %q, want \"\", \"shasum\" or \"none\"", opts.sha256Tool)
 	}
-	log, outLog := writeCurlStub(t, bin, release, opts.signal)
+	log, outLog := writeCurlStub(t, bin, release, opts.signal, opts.oldCurl)
 	if opts.failingSudo {
 		writeExec(t, filepath.Join(bin, "sudo"), "#!/bin/sh\nexit 1\n")
 	}
@@ -306,7 +318,8 @@ func runInstall(t *testing.T, release string, opts installOpts, env ...string) i
 	}
 	res.stdout, res.stderr = out.String(), errb.String()
 	if data, err := os.ReadFile(log); err == nil {
-		res.curlCalls = strings.Count(string(data), "\n")
+		res.curlLog = string(data)
+		res.curlCalls = strings.Count(res.curlLog, "\n")
 	}
 	if data, err := os.ReadFile(outLog); err == nil {
 		res.curlOuts = string(data)
@@ -317,14 +330,16 @@ func runInstall(t *testing.T, release string, opts installOpts, env ...string) i
 	return res
 }
 
-// writeCurlStub writes curlStub as bin/curl, serving release and sending signal
-// (if set), and returns the files it logs its calls and its -o paths to.
-func writeCurlStub(t *testing.T, bin, release, signal string) (log, outLog string) {
+// writeCurlStub writes curlStub as bin/curl, serving release, sending signal (if set)
+// and rejecting --tlsv1.2 when old is set, and returns the files it logs its calls and
+// its -o paths to.
+func writeCurlStub(t *testing.T, bin, release, signal string, old bool) (log, outLog string) {
 	t.Helper()
 	dir := t.TempDir()
 	log, outLog = filepath.Join(dir, "curl.log"), filepath.Join(dir, "curl-out.log")
 	writeExec(t, filepath.Join(bin, "curl"), strings.NewReplacer(
 		"@LOG@", log, "@OUTLOG@", outLog, "@RELEASE@", release, "@VERSION@", installVersion, "@SIGNAL@", signal,
+		"@OLD@", map[bool]string{true: "1"}[old],
 	).Replace(curlStub))
 	return log, outLog
 }
@@ -355,7 +370,7 @@ func lookPath(name string) bool {
 
 func TestScriptTmpWithSpace(t *testing.T) {
 	bin := t.TempDir()
-	_, outLog := writeCurlStub(t, bin, t.TempDir(), "")
+	_, outLog := writeCurlStub(t, bin, t.TempDir(), "", false)
 	tmp := filepath.Join(t.TempDir(), "tmp dir")
 	archive := "made_" + installVersion + "_linux_amd64.tar.gz"
 	url := "https://github.com/Tarektouati/made/releases/download/v" + installVersion + "/" + archive
@@ -379,6 +394,18 @@ func requireInstalled(t *testing.T, path string) {
 	}
 	if fi.Mode().Perm()&0o111 == 0 {
 		t.Errorf("%s mode = %v, want executable", path, fi.Mode())
+	}
+}
+
+// requireHTTPSOnly fails the test unless every logged curl call skips ~/.curlrc and
+// restricts itself to HTTPS with TLS 1.2 or later.
+func requireHTTPSOnly(t *testing.T, curlLog string) {
+	t.Helper()
+	const want = "-q --proto =https --tlsv1.2 -fsSL "
+	for line := range strings.Lines(curlLog) {
+		if !strings.HasPrefix(line, want) {
+			t.Errorf("curl called with %q, want it to start with %q", strings.TrimSuffix(line, "\n"), want)
+		}
 	}
 }
 
@@ -508,6 +535,14 @@ func TestInstallScript(t *testing.T) {
 			wantStderr: []string{"made-install: required command not found: sha256sum or shasum"},
 			noCurl:     true,
 		},
+		{
+			name:       "curl older than 7.34",
+			env:        func(_ *testing.T, dir string) []string { return []string{"MADE_INSTALL_DIR=" + dir} },
+			opts:       installOpts{oldCurl: true},
+			wantCode:   1,
+			wantStderr: []string{"made-install: curl 7.34 or later is required (needs --tlsv1.2 and --proto)"},
+			noCurl:     true,
+		},
 	}
 	for _, tool := range []string{"gzip", "awk", "cut", "mktemp", "install"} {
 		cases = append(cases, installCase{
@@ -540,6 +575,7 @@ func TestInstallScript(t *testing.T) {
 			if tc.noCurl && res.curlCalls != 0 {
 				t.Errorf("curl called %d times, want 0", res.curlCalls)
 			}
+			requireHTTPSOnly(t, res.curlLog)
 			if tc.wantCode == 0 {
 				requireInstalled(t, filepath.Join(dir, "made"))
 			} else {
