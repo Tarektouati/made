@@ -7,14 +7,20 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
+	"crypto/tls"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 
@@ -655,14 +661,7 @@ func TestInstallScriptSudo(t *testing.T) {
 
 func TestInstallScriptTruncated(t *testing.T) {
 	release := releaseDir(t)
-	script, err := os.ReadFile(filepath.Join("..", "install.sh"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	afterMain := script[:bytes.LastIndex(script, []byte("\n}\n"))+3]
-	if rest := bytes.TrimSpace(script[len(afterMain):]); string(rest) != `main "$@"` {
-		t.Fatalf("cut after the last closing brace drops %q, want only the main call", rest)
-	}
+	script, afterMain := readInstallScript(t)
 	cuts := []struct {
 		name string
 		data []byte
@@ -951,4 +950,169 @@ func TestInstallScriptTrailingSlash(t *testing.T) {
 		t.Errorf("stdout = %q, want no PATH note", res.stdout)
 	}
 	requireInstalled(t, filepath.Join(dir, "made"))
+}
+
+// readInstallScript returns install.sh and its prefix up to the closing brace of
+// main, which defines the functions without calling main.
+func readInstallScript(t *testing.T) (script, withoutMain []byte) {
+	t.Helper()
+	script, err := os.ReadFile(filepath.Join("..", "install.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	withoutMain = script[:bytes.LastIndex(script, []byte("\n}\n"))+3]
+	if rest := bytes.TrimSpace(script[len(withoutMain):]); string(rest) != `main "$@"` {
+		t.Fatalf("cut after the last closing brace drops %q, want only the main call", rest)
+	}
+	return script, withoutMain
+}
+
+// TestInstallScriptFetchHTTPSOnly runs install.sh's fetch under the real curl against
+// local servers and checks it refuses plain HTTP, both as the URL and as a redirect
+// from HTTPS, and TLS below 1.2, and that it ignores ~/.curlrc but honours
+// CURL_CA_BUNDLE. Bare curl runs alongside as a control, so a failure is known to come
+// from fetch's flags rather than from the test setup.
+func TestInstallScriptFetchHTTPSOnly(t *testing.T) {
+	curl, err := exec.LookPath("curl")
+	if err != nil {
+		t.Skip("curl not found on PATH; skipping")
+	}
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("sh not found on PATH; skipping")
+	}
+	_, withoutMain := readInstallScript(t)
+	fetch := filepath.Join(t.TempDir(), "fetch.sh")
+	writeFile(t, fetch, string(withoutMain)+"fetch \"$@\"\n")
+
+	var plainHits atomic.Int32
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		plainHits.Add(1)
+		_, _ = io.WriteString(w, "ok")
+	}))
+	t.Cleanup(plain.Close)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/to-http" {
+			http.Redirect(w, r, plain.URL+"/ok", http.StatusFound)
+			return
+		}
+		_, _ = io.WriteString(w, "ok")
+	})
+	secure := httptest.NewTLSServer(handler)
+	t.Cleanup(secure.Close)
+	old := httptest.NewUnstartedServer(handler)
+	old.TLS = &tls.Config{MinVersion: tls.VersionTLS10, MaxVersion: tls.VersionTLS11}
+	old.StartTLS()
+	t.Cleanup(old.Close)
+
+	certs := t.TempDir()
+	cacert := func(name string, s *httptest.Server) string {
+		path := filepath.Join(certs, name)
+		writeFile(t, path, string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: s.Certificate().Raw})))
+		return path
+	}
+	secureCA, oldCA := cacert("secure.pem", secure), cacert("old.pem", old)
+
+	// HOME is a fresh dir so no ~/.curlrc applies, and no proxy variables are passed.
+	home := t.TempDir()
+	type result struct {
+		code      int
+		body      string
+		plainHits int32
+		stderr    string
+	}
+	// runEnv runs fetch (or bare curl -fsSL) with args and -o, env appended.
+	runEnv := func(t *testing.T, viaFetch bool, env []string, args ...string) result {
+		t.Helper()
+		out := filepath.Join(t.TempDir(), "out")
+		args = append(args, "-o", out)
+		name := curl
+		if viaFetch {
+			name, args = sh, append([]string{fetch}, args...)
+		} else {
+			args = append([]string{"-fsSL"}, args...)
+		}
+		before := plainHits.Load()
+		cmd := exec.CommandContext(t.Context(), name, args...)
+		cmd.Env = append([]string{"PATH=" + os.Getenv("PATH"), "HOME=" + home}, env...)
+		var errb bytes.Buffer
+		cmd.Stderr = &errb
+		var res result
+		if runErr := cmd.Run(); runErr != nil {
+			var ee *exec.ExitError
+			if !errors.As(runErr, &ee) {
+				t.Fatalf("running %s: %v", name, runErr)
+			}
+			res.code = ee.ExitCode()
+		}
+		res.stderr = errb.String()
+		res.plainHits = plainHits.Load() - before
+		if data, readErr := os.ReadFile(out); readErr == nil {
+			res.body = string(data)
+		}
+		return res
+	}
+	run := func(t *testing.T, viaFetch bool, args ...string) result {
+		t.Helper()
+		return runEnv(t, viaFetch, nil, args...)
+	}
+	// refused checks a fetch failed with CURLE_UNSUPPORTED_PROTOCOL (1) and never
+	// reached the plain HTTP server.
+	refused := func(t *testing.T, res result) {
+		t.Helper()
+		if res.code != 1 {
+			t.Errorf("exit = %d, want 1 (protocol refused)\nstderr: %s", res.code, res.stderr)
+		}
+		if res.plainHits != 0 {
+			t.Errorf("plain HTTP server got %d requests, want 0", res.plainHits)
+		}
+		if res.body != "" {
+			t.Errorf("downloaded %q, want nothing", res.body)
+		}
+	}
+
+	t.Run("https", func(t *testing.T) {
+		if res := run(t, true, "--cacert", secureCA, secure.URL+"/ok"); res.code != 0 || res.body != "ok" {
+			t.Fatalf("exit = %d, body %q, want 0 and %q\nstderr: %s", res.code, res.body, "ok", res.stderr)
+		}
+	})
+	t.Run("plain http", func(t *testing.T) {
+		if res := run(t, false, plain.URL+"/ok"); res.code != 0 || res.plainHits != 1 {
+			t.Fatalf("control: bare curl exit = %d after %d requests, want 0 after 1\nstderr: %s", res.code, res.plainHits, res.stderr)
+		}
+		refused(t, run(t, true, plain.URL+"/ok"))
+	})
+	// --proto covers every redirect hop, so fetch needs no --proto-redir.
+	t.Run("redirect to http", func(t *testing.T) {
+		if res := run(t, false, "--cacert", secureCA, secure.URL+"/to-http"); res.code != 0 || res.plainHits != 1 {
+			t.Fatalf("control: bare curl exit = %d after %d plain requests, want 0 after 1\nstderr: %s", res.code, res.plainHits, res.stderr)
+		}
+		refused(t, run(t, true, "--cacert", secureCA, secure.URL+"/to-http"))
+	})
+	t.Run("curlrc insecure", func(t *testing.T) {
+		rcHome := t.TempDir()
+		writeFile(t, filepath.Join(rcHome, ".curlrc"), "insecure\n")
+		env := []string{"HOME=" + rcHome}
+		if res := runEnv(t, false, env, secure.URL+"/ok"); res.code != 0 {
+			t.Fatalf("control: bare curl with the curlrc exit = %d, want 0 (untrusted cert accepted)\nstderr: %s", res.code, res.stderr)
+		}
+		// 60 is CURLE_PEER_FAILED_VERIFICATION: the untrusted cert is still refused.
+		if res := runEnv(t, true, env, secure.URL+"/ok"); res.code != 60 || res.body != "" {
+			t.Errorf("exit = %d, body %q, want 60 and nothing downloaded\nstderr: %s", res.code, res.body, res.stderr)
+		}
+	})
+	t.Run("CURL_CA_BUNDLE", func(t *testing.T) {
+		if res := runEnv(t, true, []string{"CURL_CA_BUNDLE=" + secureCA}, secure.URL+"/ok"); res.code != 0 || res.body != "ok" {
+			t.Errorf("exit = %d, body %q, want 0 and %q\nstderr: %s", res.code, res.body, "ok", res.stderr)
+		}
+	})
+	t.Run("tls 1.1", func(t *testing.T) {
+		if res := run(t, false, "--tlsv1.0", "--cacert", oldCA, old.URL+"/ok"); res.code != 0 {
+			t.Skipf("this curl refuses TLS 1.1 on its own (exit %d), so fetch's --tlsv1.2 cannot be told apart: %s", res.code, strings.TrimSpace(res.stderr))
+		}
+		// 35 is CURLE_SSL_CONNECT_ERROR: the handshake fails on the version.
+		if res := run(t, true, "--cacert", oldCA, old.URL+"/ok"); res.code != 35 || res.body != "" {
+			t.Errorf("exit = %d, body %q, want 35 and nothing downloaded\nstderr: %s", res.code, res.body, res.stderr)
+		}
+	})
 }
