@@ -124,7 +124,8 @@ $ made
 Tasks in Madefile.md:
   say-hello  Prints a friendly greeting.
   build      Compiles all packages.
-  test       Runs the test suite.
+  test       Runs the test suite on every package; arguments are go test flags, e.g. made test -race -count=1.
+  test-pkg   Runs go test with exactly the flags and packages given. Usage: made test-pkg [flags] [packages]. The CI test steps run this task, so keep its body as is.
   check      Builds, vets, and tests in one go.
   format     Formats all Go sources in place.
   lint       Runs golangci-lint with the repo's .golangci.yml.
@@ -141,7 +142,8 @@ made: unknown task "deploy"
 Tasks in Madefile.md:
   say-hello  Prints a friendly greeting.
   build      Compiles all packages.
-  test       Runs the test suite.
+  test       Runs the test suite on every package; arguments are go test flags, e.g. made test -race -count=1.
+  test-pkg   Runs go test with exactly the flags and packages given. Usage: made test-pkg [flags] [packages]. The CI test steps run this task, so keep its body as is.
   check      Builds, vets, and tests in one go.
   format     Formats all Go sources in place.
   lint       Runs golangci-lint with the repo's .golangci.yml.

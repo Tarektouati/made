@@ -48,6 +48,9 @@ jobs:
       - uses: moonrepo/setup-toolchain@v0
       - name: Install Go
         run: proto install go
+      - name: Install made
+        if: runner.os != 'Windows'
+        run: proto install made
       - name: Install fish and zsh
         if: runner.os != 'Windows'
         run: |
@@ -58,18 +61,19 @@ jobs:
         run: go test -v ${{ matrix.race }} -count=1 ./...
       # On unix, run one step per package. When the macOS runner dies, its log
       # is lost, but the jobs API still records step names and status, so we
-      # can see which package killed it. Each step runs in its own session
-      # (setsid), so a signal sent to a session or process group can't reach
+      # can see which package killed it. Each step runs the Madefile's test-pkg
+      # task with the made pinned in .prototools, in its own session (setsid),
+      # so a signal sent to a session or process group can't reach
       # Runner.Worker. !cancelled() runs every package step even after one
       # fails, so a failure in one package does not hide the others' results.
       - name: Test ./internal/runner
         if: ${{ !cancelled() && runner.os != 'Windows' }}
         timeout-minutes: 8
-        run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' go test -v ${{ matrix.race }} -count=1 -timeout 5m ./internal/runner
+        run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' made test-pkg -v ${{ matrix.race }} -count=1 -timeout 5m ./internal/runner
       - name: Test ./e2e
         if: ${{ !cancelled() && runner.os != 'Windows' }}
         timeout-minutes: 8
-        run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' go test -v ${{ matrix.race }} -count=1 -timeout 5m ./e2e
+        run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' made test-pkg -v ${{ matrix.race }} -count=1 -timeout 5m ./e2e
       # The runner image makes /usr/local/bin world-writable (chmod -R 777 in
       # actions/runner-images install-nodejs.sh), so the install.sh default-dir tests
       # skip in the step above. Clear its group and other write bits for this step
@@ -116,11 +120,11 @@ jobs:
       - name: Test . (root)
         if: ${{ !cancelled() && runner.os != 'Windows' }}
         timeout-minutes: 8
-        run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' go test -v ${{ matrix.race }} -count=1 -timeout 5m .
+        run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' made test-pkg -v ${{ matrix.race }} -count=1 -timeout 5m .
       - name: Test ./internal/parser ./internal/completion ./internal/lint ./internal/testenv
         if: ${{ !cancelled() && runner.os != 'Windows' }}
         timeout-minutes: 8
-        run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' go test -v ${{ matrix.race }} -count=1 -timeout 5m ./internal/parser ./internal/completion ./internal/lint ./internal/testenv
+        run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' made test-pkg -v ${{ matrix.race }} -count=1 -timeout 5m ./internal/parser ./internal/completion ./internal/lint ./internal/testenv
 
   build:
     name: Build (${{ matrix.goos }}/${{ matrix.goarch }})

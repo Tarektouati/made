@@ -18,9 +18,15 @@ go build ./...
 ```
 
 ### test
-Runs the test suite.
+Runs the test suite on every package; arguments are `go test` flags, e.g. `made test -race -count=1`.
 ```bash
-go test ./...
+go test "$@" ./...
+```
+
+### test-pkg
+Runs `go test` with exactly the flags and packages given. Usage: `made test-pkg [flags] [packages]`. The CI test steps run this task, so keep its body as is.
+```bash
+go test "$@"
 ```
 
 ### check

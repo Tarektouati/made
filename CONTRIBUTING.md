@@ -19,9 +19,17 @@ To bump a tool, edit its version in `.prototools`.
 This repository's own tasks live in [`Madefile.md`](./Madefile.md): run `made` in
 the repo to list them, and `made check` to build, vet, and test.
 
+`made test` runs every package and passes its arguments to `go test`
+(`made test -race -count=1`). `made test-pkg` passes flags and packages exactly as
+given (`made test-pkg -v -count=1 ./internal/runner`), as each CI test step does.
+
 `made format` runs `gofmt -w .` and `made lint` runs golangci-lint. `made dist` builds a
 release-style binary into `dist/` for `GOOS`/`GOARCH` (default: this machine), as the CI
 build job does: `GOOS=windows GOARCH=amd64 made dist`.
+
+CI runs the lint, test (macOS and Linux), build and bench jobs through these tasks
+with the released `made` pinned in `.prototools`, not the one being changed. Bump
+that pin when the Madefile starts using a newer `made` feature.
 
 ## Pushing through no-mistakes (optional)
 
