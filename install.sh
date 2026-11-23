@@ -8,6 +8,8 @@
 #   MADE_INSTALL_DIR  target directory (default: /usr/local/bin, using sudo when it is
 #                     not writable, falling back to ~/.local/bin)
 #
+# Downloads use HTTPS with TLS 1.2 or later only, redirects included (curl 7.34+).
+#
 # Everything runs from main, called on the last line, so a truncated download
 # executes nothing.
 
@@ -22,6 +24,14 @@ err() {
 
 need() {
 	command -v "$1" >/dev/null 2>&1 || err "required command not found: $1"
+}
+
+# fetch runs curl over HTTPS only, on every redirect too (--proto covers redirects,
+# so --proto-redir is not needed), with TLS 1.2 or later. -q, which only works as the
+# first argument, skips ~/.curlrc so a setting there (such as insecure) cannot weaken
+# the download.
+fetch() {
+	curl -q --proto '=https' --tlsv1.2 -fsSL "$@"
 }
 
 # install_to copies the extracted binary into dir, creating dir if needed. An optional
@@ -51,6 +61,10 @@ main() {
 	for cmd in curl tar gzip uname awk cut mktemp install; do
 		need "$cmd"
 	done
+	# Without this, a curl too old for fetch's flags fails every download with a
+	# misleading "could not resolve the latest release".
+	curl -q --proto =https --tlsv1.2 -V >/dev/null 2>&1 ||
+		err "curl 7.34 or later is required (needs --tlsv1.2 and --proto)"
 
 	case "$(uname -s)" in
 		Darwin) os=darwin ;;
@@ -77,7 +91,7 @@ main() {
 		tag=""
 	fi
 	if [ -z "$tag" ]; then
-		latest_url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest") ||
+		latest_url=$(fetch -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest") ||
 			err "could not resolve the latest release"
 		tag="${latest_url##*/}"
 	fi
@@ -106,8 +120,8 @@ main() {
 	trap 'exit 129' HUP
 
 	echo "Downloading made $tag ($os/$arch)..."
-	curl -fsSL -o "$tmp/$archive" "$base_url/$archive" || err "download failed: $base_url/$archive"
-	curl -fsSL -o "$tmp/checksums.txt" "$base_url/checksums.txt" || err "download failed: $base_url/checksums.txt"
+	fetch -o "$tmp/$archive" "$base_url/$archive" || err "download failed: $base_url/$archive"
+	fetch -o "$tmp/checksums.txt" "$base_url/checksums.txt" || err "download failed: $base_url/checksums.txt"
 
 	expected=$(awk -v f="$archive" '{ sub(/\r$/, "") } $2 == f { print tolower($1) }' "$tmp/checksums.txt")
 	[ -n "$expected" ] || err "no checksum found for $archive"
