@@ -255,6 +255,7 @@ func TestRepoMadefileCITasks(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{
+		"test-pkg": `go test "$@"`,
 		"dist": "os=$(go env GOOS)\n" +
 			"arch=$(go env GOARCH)\n" +
 			"ext=\"\"\n" +
