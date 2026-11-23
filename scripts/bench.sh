@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Benchmark the working tree (head) against a base git ref and write a markdown
-# report. Used by the CI "bench" job and runnable locally:
+# report. Run by the CI "bench" job (through `made bench`) and runnable locally:
 #
-#   scripts/bench.sh [base-ref] [out-dir]     # defaults: origin/main, bench-out
+#   made bench [base-ref] [out-dir]           # or scripts/bench.sh; defaults: origin/main, bench-out
 #
 # Needs go, hyperfine, benchstat and python3 on PATH. The report is printed and
 # saved as <out-dir>/report.md. Both sides run on this machine (Go benchmarks

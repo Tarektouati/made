@@ -128,7 +128,8 @@ Tasks in Madefile.md:
   check      Builds, vets, and tests in one go.
   format     Formats all Go sources in place.
   lint       Runs golangci-lint with the repo's .golangci.yml.
-  bench      Benchmarks the working tree against a base ref (default origin/main): Go benchmarks (benchstat), CLI timings (hyperfine) and binary size. Needs hyperfine and benchstat on PATH. Usage: made bench [base-ref].
+  dist       Builds a release-style binary into dist/ for GOOS/GOARCH (default: this machine). The CI build job runs this task, so keep its body as is.
+  bench      Benchmarks the working tree against a base ref (default origin/main): Go benchmarks (benchstat), CLI timings (hyperfine) and binary size. Needs hyperfine and benchstat on PATH. Usage: made bench [base-ref] [out-dir].
 ```
 
 Running an unknown task:
@@ -144,7 +145,8 @@ Tasks in Madefile.md:
   check      Builds, vets, and tests in one go.
   format     Formats all Go sources in place.
   lint       Runs golangci-lint with the repo's .golangci.yml.
-  bench      Benchmarks the working tree against a base ref (default origin/main): Go benchmarks (benchstat), CLI timings (hyperfine) and binary size. Needs hyperfine and benchstat on PATH. Usage: made bench [base-ref].
+  dist       Builds a release-style binary into dist/ for GOOS/GOARCH (default: this machine). The CI build job runs this task, so keep its body as is.
+  bench      Benchmarks the working tree against a base ref (default origin/main): Go benchmarks (benchstat), CLI timings (hyperfine) and binary size. Needs hyperfine and benchstat on PATH. Usage: made bench [base-ref] [out-dir].
 ```
 
 ## Documentation
