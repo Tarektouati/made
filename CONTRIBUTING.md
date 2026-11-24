@@ -25,6 +25,10 @@ the repo to list them, and `made check` to build, vet, and test.
 `made test` runs every package and passes its arguments to `go test`
 (`made test -race -count=1`). `made test-pkg` passes flags and packages exactly as
 given (`made test-pkg -v -count=1 ./internal/runner`), as each CI test step does.
+On Linux and macOS, CI runs one such step per package group and only Windows runs
+`./...`, so when you add a package, add it to one of the unix test steps in
+`.github/workflows/ci.yml` (and to that step's name). The e2e test
+`TestCIUnixStepsCoverAllPackages` fails when a package from `go list ./...` is in no step.
 
 `made format` runs `gofmt -w .` and `made lint` runs golangci-lint. `made dist` builds a
 release-style binary into `dist/` for `GOOS`/`GOARCH` (default: this machine), as the CI

@@ -97,6 +97,9 @@ jobs:
       # so a signal sent to a session or process group can't reach
       # Runner.Worker. !cancelled() runs every package step even after one
       # fails, so a failure in one package does not hide the others' results.
+      # Every package from `go list ./...` must be in exactly one step below, and
+      # each step's name must list its packages: e2e TestCIUnixStepsCoverAllPackages
+      # fails otherwise.
       - name: Test ./internal/runner
         if: ${{ !cancelled() && runner.os != 'Windows' }}
         timeout-minutes: 8
