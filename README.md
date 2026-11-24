@@ -14,6 +14,10 @@ fenced code block, so your `Madefile.md` documents your tasks and runs them too.
 
 - **Not a build system.** There are no task dependencies, file targets, or
   up-to-date checks — every run executes the script. Use `make` if you need those.
+- **Not a sandbox.** `made` runs the code blocks of the task file as they are, like
+  `make` or `just` run their recipes. Only run tasks from files you trust. A
+  Madefile found in a parent directory is refused if another user could have
+  written it; see the [trust model](SECURITY.md#trust-model).
 - **Not a cross-platform shell layer.** Scripts run as written under the fence's
   interpreter; nothing is translated for Windows. See
   [Platform compatibility](docs/installation.md#platform-compatibility).
@@ -79,7 +83,7 @@ made self-update [vX.Y.Z] [--dry-run]
 
 | Flag | Default | Description |
 |---|---|---|
-| `-f`, `--file` | nearest `Madefile.md` | Markdown file to read tasks from: any readable file but a directory, including a pipe (`-f <(…)`, `-f /dev/stdin`), whose tasks run in the current directory. Without `-f`, `made` uses the `Madefile.md` in the current directory or the closest parent directory, up to the repository root (or the filesystem root outside a repository; see [How it works](docs/how-it-works.md)) |
+| `-f`, `--file` | nearest `Madefile.md` | Markdown file to read tasks from: any readable file but a directory, including a pipe (`-f <(…)`, `-f /dev/stdin`), whose tasks run in the current directory. Without `-f`, `made` uses the `Madefile.md` in the current directory or the closest parent directory, up to the repository root (or `$HOME` or the filesystem root outside a repository; a parent directory's Madefile must be yours and not writable by others; see [How it works](docs/how-it-works.md)) |
 | `--no-chdir` | | Run the task in the current directory instead of the task file's directory |
 | `--check` | | Check the task file for problems instead of running a task; see [Checking a Madefile](docs/checking.md) |
 | `--strict` | | With `--check`, fail on warnings too |
@@ -164,7 +168,7 @@ Tasks in Madefile.md:
 - [Pre-commit and prek](docs/pre-commit.md) — run a task or `made --check` as a git hook
 - [Migrating from 0.2](docs/migrating.md) — moving tasks out of `README.md`
 - [Contributing](CONTRIBUTING.md) — development tasks and benchmarks
-- [Security policy](SECURITY.md) — supported versions and how to report a vulnerability
+- [Security policy](SECURITY.md) — the trust model, supported versions and how to report a vulnerability
 
 ## License
 
