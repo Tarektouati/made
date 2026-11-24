@@ -15,7 +15,7 @@ made self-update [vX.Y.Z] [--dry-run]
 
 | Flag | Default | Description |
 |---|---|---|
-| `-f`, `--file` | nearest `Madefile.md` | Markdown file to read tasks from: any readable file but a directory, including a pipe (`-f <(…)`, `-f /dev/stdin`), whose tasks run in the current directory. Without `-f`, `made` uses the `Madefile.md` in the current directory or the closest parent directory, up to the repository root (or the filesystem root outside a repository; see [How it works](how-it-works.md)) |
+| `-f`, `--file` | nearest `Madefile.md` | Markdown file to read tasks from: any readable file but a directory, including a pipe (`-f <(…)`, `-f /dev/stdin`), whose tasks run in the current directory. Without `-f`, `made` uses the `Madefile.md` in the current directory or the closest parent directory, up to the repository root (or `$HOME` or the filesystem root outside a repository; a parent directory's Madefile must be yours and not writable by others; see [How it works](how-it-works.md)) |
 | `--no-chdir` | | Run the task in the current directory instead of the task file's directory |
 | `--check` | | Check the task file for problems instead of running a task; see [Checking a Madefile](checking.md) |
 | `--strict` | | With `--check`, fail on warnings too |
@@ -90,7 +90,7 @@ Running `made` with no task lists the tasks, same as `--list`. When a task runs,
 `made` exits with the script's exit code, so it composes with `&&`, CI steps, and
 git hooks (see [Pre-commit and prek](pre-commit.md)). A task killed by signal
 n makes `made` exit with `128+n`, as shells report it: `137` for `kill -9`, `141` for
-`SIGPIPE` (e.g. `made task | head -1`). An unknown task prints an error and the task list, and exits with `1`. A task whose code block is empty or blank exits with `1` without running anything. If the task's interpreter can't be started, `made` exits with `127` (not on `PATH`) or `126` (found but not executable); see [Supported languages](languages.md). It also exits with `126` when the OS refuses to start the task because the script, or the task's arguments plus environment, are too large; see [How it works](how-it-works.md).
+`SIGPIPE` (e.g. `made task | head -1`). An unknown task prints an error and the task list, and exits with `1`. A Madefile found in a parent directory that someone else owns or could change is refused with `1` (see [How it works](how-it-works.md)). A task whose code block is empty or blank exits with `1` without running anything. If the task's interpreter can't be started, `made` exits with `127` (not on `PATH`) or `126` (found but not executable); see [Supported languages](languages.md). It also exits with `126` when the OS refuses to start the task because the script, or the task's arguments plus environment, are too large; see [How it works](how-it-works.md).
 `-l`/`--list` always lists and ignores any task name after it, even an unknown one:
 `made -l build` lists the tasks without running `build`.
 

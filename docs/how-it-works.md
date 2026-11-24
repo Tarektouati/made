@@ -86,7 +86,9 @@ therefore walks the parents of the link's target, not of the link, and both
 
 The search stops after the first directory containing a `.git` entry (a
 directory, or a file in worktrees and submodules), so it never leaves the
-repository; outside a repository it goes up to the filesystem root. You can
+repository; outside a repository it goes up to the filesystem root, and on Linux
+and macOS it also stops after your home directory (`$HOME`, with symlinks
+resolved; `$HOME` itself is still searched) when you are below it. You can
 therefore run a repository's tasks from any subdirectory; when the file comes from
 a parent directory, `made` prints `made: using <path>` on stderr before running the
 task. The nearest Madefile wins and is never merged with one higher up: in a
@@ -94,6 +96,54 @@ monorepo, each package can have its own `Madefile.md`, and the root tasks stay
 reachable with `made -f ../../Madefile.md`. If no Madefile is found, `made` exits
 with an error that suggests `-f` or `made init`; `README.md` is never read unless
 you pass `-f README.md`.
+
+**A Madefile from a parent directory must be yours.** On Linux and macOS, a
+Madefile found in a parent directory is only used if nobody else could have put it
+there or changed it, the same rule `git` applies to repositories since
+CVE-2022-24765. Otherwise another user who can write to a directory above yours (a
+world-writable `/tmp/x`, a shared mount) could have their tasks run by you, or by
+root. `made` checks:
+
+- the Madefile, which must be owned by you or root and must not be group- or
+  world-writable;
+- the directory it was found in, which must be owned by you or root and must not be
+  group- or world-writable, unless it has the sticky bit (like `/tmp`): there,
+  others cannot rename or remove your file, and a file they put there fails the
+  first check;
+- when the Madefile is a symlink, every link on the way to the file (each owned by
+  you or root, in a directory that passes the rule above), and the final file and
+  its directory, by the same two rules. A chain of more than 32 links is refused.
+
+"You" is the effective user. When `made` runs as root through `sudo`, files owned by
+the user who ran `sudo` (`SUDO_UID`) count as yours too, so `sudo made install` from
+a subdirectory of your project still works. `made` then reads the very file it
+checked: if the Madefile was replaced in between (say a directory above it was
+renamed and another tree put in its place), it stops with `made: cannot read
+<path>: it was replaced after its owner and mode were checked`. A Madefile that fails
+the check is not skipped: every command that reads it (running a task, `--list`,
+`--check`, `--list-names`) stops with exit `1` and says why, for example
+
+```
+made: refusing /srv/shared/Madefile.md found in a parent directory: it is group-writable (mode 0664)
+made: hint: if you trust it, make it yours and not writable by others (chmod go-w), or run it deliberately with made -f /srv/shared/Madefile.md
+```
+
+Tab completion shows no tasks in that case. A Madefile in the current directory
+and a file given with `-f` are never checked, so `-f` is the way to run a parent
+Madefile you trust as it is. If your umask is `002` (group-writable files by
+default), run `chmod g-w` on the Madefile and its directory, or use `-f`. Windows
+has no such check.
+
+The check has known limits:
+
+- Only the owner and the mode bits are read; ACLs are ignored. On macOS, an ACL
+  entry (`chmod +a "user:alice allow write" Madefile.md`) can let another user
+  change a file whose mode looks safe, and `made` does not see it.
+- The directories passed on the way up from the current directory, and the ones
+  above each checked directory, are not checked. Someone who can rename one of them
+  cannot swap the file while `made` reads it, but can, before you run `made`, put
+  another tree in its place whose Madefile is yours and passes the check, such as
+  one of your other projects.
 
 An explicit `-f` path is relative to the current directory, read exactly as given,
 and never looked up in parent directories. An empty value (for example
