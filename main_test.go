@@ -528,7 +528,7 @@ func TestFindMadefile(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
 			mkTree(t, root, tt.paths...)
-			dir, name, others, skipped, ok := findMadefile(filepath.Join(root, filepath.FromSlash(tt.start)))
+			dir, name, others, skipped, ok := findMadefile(filepath.Join(root, filepath.FromSlash(tt.start)), "")
 			wantDir := ""
 			if tt.wantOK {
 				wantDir = filepath.Join(root, filepath.FromSlash(tt.wantDir))
@@ -592,7 +592,7 @@ func TestFindMadefileSkipsUnusable(t *testing.T) {
 			}
 			a := filepath.Join(root, "a")
 			tt.bad(t, a)
-			dir, name, _, skipped, ok := findMadefile(a)
+			dir, name, _, skipped, ok := findMadefile(a, "")
 			if tt.rootFile && (!ok || dir != root || name != "Madefile.md") {
 				t.Errorf("findMadefile = (%q, %q, %v), want (%q, %q, true)", dir, name, ok, root, "Madefile.md")
 			}
@@ -633,7 +633,7 @@ func mkSymlink(t *testing.T, target, link string) {
 func TestFindMadefileWalksToRoot(t *testing.T) {
 	root := t.TempDir()
 	mkTree(t, root, "Madefile.md", "a/b/c/")
-	dir, name, _, _, ok := findMadefile(filepath.Join(root, "a", "b", "c"))
+	dir, name, _, _, ok := findMadefile(filepath.Join(root, "a", "b", "c"), "")
 	if !ok || dir != root || name != "Madefile.md" {
 		t.Errorf("findMadefile = (%q, %q, %v), want (%q, %q, true)", dir, name, ok, root, "Madefile.md")
 	}
@@ -654,7 +654,7 @@ func TestFindMadefilePriority(t *testing.T) {
 			root := t.TempDir()
 			requireCaseSensitiveFS(t, root)
 			mkTree(t, root, append([]string{".git/"}, tt.paths...)...)
-			_, name, others, _, ok := findMadefile(root)
+			_, name, others, _, ok := findMadefile(root, "")
 			if !ok || name != tt.wantName || strings.Join(others, ",") != strings.Join(tt.wantOthers, ",") {
 				t.Errorf("findMadefile = (%q, %q, %v), want (%q, %q, true)", name, others, ok, tt.wantName, tt.wantOthers)
 			}
@@ -897,16 +897,16 @@ func TestReadMadefileDiscoveryRejectsFIFO(t *testing.T) {
 	mkFIFO(t, fifo)
 	done := make(chan error, 1)
 	go func() {
-		_, _, err := readMadefile(fifo, false)
+		_, _, err := readMadefile(fifo, false, nil)
 		done <- err
 	}()
 	select {
 	case err := <-done:
 		if err == nil || !strings.Contains(err.Error(), "not a regular file") {
-			t.Errorf("readMadefile(fifo, false) error = %v, want not a regular file", err)
+			t.Errorf("readMadefile(fifo, false, nil) error = %v, want not a regular file", err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("readMadefile(fifo, false) blocked on a FIFO")
+		t.Fatal("readMadefile(fifo, false, nil) blocked on a FIFO")
 	}
 }
 
@@ -923,7 +923,7 @@ func TestReadMadefileRejectsOversize(t *testing.T) {
 	if err = f.Close(); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = readMadefile(path, false)
+	_, _, err = readMadefile(path, false, nil)
 	if err == nil {
 		t.Fatal("readMadefile(oversize) = nil, want error")
 	}

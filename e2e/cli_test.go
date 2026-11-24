@@ -46,6 +46,7 @@ const tasksMD = "### greet\n" +
 const proseMD = "# made\n\nJust prose. No tasks defined here.\n"
 
 func TestMain(m *testing.M) {
+	setTestUmask()
 	// The PTY tests run made on a real terminal, where it would check github.com for
 	// a new release and write to the user's cache directory.
 	if err := os.Setenv("MADE_NO_UPDATE_CHECK", "1"); err != nil {

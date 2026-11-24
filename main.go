@@ -204,7 +204,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var host bool
 	fs := flag.NewFlagSet("made", flag.ContinueOnError)
 	fs.SetOutput(io.Discard) // parse errors are reported by flagError
-	fs.StringVar(&file, "file", "", "Markdown file to read tasks from (default: nearest Madefile.md, searched up to the repository root, or the filesystem root outside a repository)")
+	fs.StringVar(&file, "file", "", "Markdown file to read tasks from (default: nearest Madefile.md, searched up to the repository root, or $HOME or the filesystem root outside a repository)")
 	fs.StringVar(&file, "f", "", "shorthand for --file")
 	fs.BoolVar(&noChdir, "no-chdir", false, "run the task in the current directory instead of the task file's directory")
 	fs.BoolVar(&check, "check", false, "check the task file for problems instead of running a task")
@@ -357,6 +357,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "made: %s\n", escapeErr(err))
+		if ue := (*untrustedError)(nil); errors.As(err, &ue) {
+			fmt.Fprintf(stderr, "made: hint: if you trust it, make it yours and not writable by others (chmod go-w), or run it deliberately with made -f %s\n", shellQuotePath(ue.path))
+		}
 		return 1
 	}
 	if len(res.others) > 0 && !listNames {
@@ -365,12 +368,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	file = res.path
 
 	if check {
-		return runCheck(stdout, stderr, file, res.explicit, strict, lint.Options{Host: host})
+		return runCheck(stdout, stderr, file, res.explicit, res.trusted, strict, lint.Options{Host: host})
 	}
 
 	// Tab completion runs --list-names with the typed -f value, so a pipe there must
 	// fail at once rather than block or read the terminal.
-	source, regular, err := readMadefile(file, res.explicit && !listNames)
+	source, regular, err := readMadefile(file, res.explicit && !listNames, res.trusted)
 	if err != nil {
 		fmt.Fprintf(stderr, "made: cannot read %s: %s\n", displayPath(file), escapeErr(pathOnlyOnce(file, err)))
 		return 1
@@ -762,6 +765,7 @@ type resolved struct {
 	fromParent bool     // discovered in a parent of the current directory
 	others     []string // other Madefile names found in the same directory, by priority
 	skipped    []skippedMadefile
+	trusted    fs.FileInfo // for a parent Madefile, the file checkParentMadefile checked
 }
 
 // skippedMadefile is a Madefile name present in a directory that could not be used.
@@ -773,8 +777,11 @@ type skippedMadefile struct {
 // resolveFile returns the task file to read. A non-empty file (given with -f) is used
 // as is. Otherwise the nearest Madefile in the current directory or one of its parents
 // is used (see findMadefile); if there is none, resolveFile returns an error. The walk
-// starts from the physical current directory, with symlinks resolved. Unusable
-// candidates are reported in skipped, also alongside the not-found error.
+// starts from the physical current directory, with symlinks resolved, and on unix
+// stops after the home directory (see discoveryHome). Unusable candidates are
+// reported in skipped, also alongside the not-found error. A Madefile found in a
+// parent directory must pass checkParentMadefile, or resolveFile returns its
+// *untrustedError; the file it checked is returned in trusted, for readMadefile.
 func resolveFile(file string) (resolved, error) {
 	if file != "" {
 		return resolved{path: file, explicit: true}, nil
@@ -787,7 +794,7 @@ func resolveFile(file string) (resolved, error) {
 	if physical, err := filepath.EvalSymlinks(cwd); err == nil {
 		start = physical
 	}
-	dir, name, others, skipped, ok := findMadefile(start)
+	dir, name, others, skipped, ok := findMadefile(start, discoveryHome())
 	if !ok {
 		return resolved{skipped: skipped}, fmt.Errorf("no %s found in %s or its parents (use -f to choose a file, or made init to create one)", madefileNames[0], start)
 	}
@@ -795,6 +802,11 @@ func resolveFile(file string) (resolved, error) {
 	if dir != start {
 		res.path = filepath.Join(dir, name)
 		res.fromParent = true
+		trusted, err := checkParentMadefile(res.path)
+		if err != nil {
+			return res, err
+		}
+		res.trusted = trusted
 	}
 	return res, nil
 }
@@ -803,13 +815,14 @@ func resolveFile(file string) (resolved, error) {
 // regular file named exactly like one of madefileNames, with the highest-priority
 // name found and any other matching names in that directory. The walk stops after
 // the first directory containing a .git entry (a directory, or a file for worktrees
-// and submodules), otherwise at the filesystem root. Names that are present but
+// and submodules), or after stop when it is not empty, otherwise at the filesystem
+// root. Names that are present but
 // unusable (broken or looping symlinks, non-regular files, names that cannot be
 // looked up because a directory cannot be searched), and directories that exist
 // but cannot be listed, are returned in skipped, nearest first, and the walk goes
 // on. A regular file that cannot be read is still returned, so the caller fails on
 // it rather than running a parent's Madefile.
-func findMadefile(start string) (dir, name string, others []string, skipped []skippedMadefile, ok bool) {
+func findMadefile(start, stop string) (dir, name string, others []string, skipped []skippedMadefile, ok bool) {
 	for dir = start; ; {
 		entries, err := os.ReadDir(dir)
 		boundary := false
@@ -841,7 +854,7 @@ func findMadefile(start string) (dir, name string, others []string, skipped []sk
 			}
 		}
 		parent := filepath.Dir(dir)
-		if boundary || parent == dir {
+		if boundary || dir == stop || parent == dir {
 			return "", "", nil, skipped, false
 		}
 		dir = parent
@@ -853,8 +866,10 @@ func findMadefile(start string) (dir, name string, others []string, skipped []sk
 // explicit (-f) file may be anything readable but a directory, such as a pipe or
 // /dev/stdin; a FIFO with no writer then blocks, like cat. The size check is repeated
 // while reading, because some files report a wrong size (0 for /proc files) or grow
-// after the stat. regular reports whether the file read was a regular file.
-func readMadefile(path string, explicit bool) (source []byte, regular bool, err error) {
+// after the stat. regular reports whether the file read was a regular file. When
+// trusted is not nil (a parent Madefile that passed checkParentMadefile), the file
+// opened must be that same file, or readMadefile fails with errChangedAfterCheck.
+func readMadefile(path string, explicit bool, trusted fs.FileInfo) (source []byte, regular bool, err error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, false, err
@@ -876,6 +891,9 @@ func readMadefile(path string, explicit bool) (source []byte, regular bool, err 
 	if info, err = f.Stat(); err != nil {
 		return nil, false, err
 	}
+	if trusted != nil && !os.SameFile(trusted, info) {
+		return nil, false, errChangedAfterCheck
+	}
 	regular = info.Mode().IsRegular()
 	if !explicit && !regular {
 		return nil, false, fmt.Errorf("%s is not a regular file", path)
@@ -883,6 +901,10 @@ func readMadefile(path string, explicit bool) (source []byte, regular bool, err 
 	source, err = readLimited(f, path)
 	return source, regular, err
 }
+
+// errChangedAfterCheck is readMadefile's reason for a parent Madefile that is no
+// longer the file checkParentMadefile checked.
+var errChangedAfterCheck = errors.New("it was replaced after its owner and mode were checked")
 
 // errIsDir is readMadefile's reason for an explicit path that is a directory.
 var errIsDir = errors.New("is a directory")
@@ -906,10 +928,10 @@ var errTooLarge = errors.New("exceeds maximum size")
 // runCheck lints the task file at path for made --check, prints the findings to
 // stdout, and returns the exit code: 1 if there is an error (or, with strict, a
 // warning), otherwise 0. A file that cannot be read is reported on stderr, exit 1.
-// explicit is as for readMadefile; opts selects the optional checks.
-func runCheck(stdout, stderr io.Writer, path string, explicit, strict bool, opts lint.Options) int {
+// explicit and trusted are as for readMadefile; opts selects the optional checks.
+func runCheck(stdout, stderr io.Writer, path string, explicit bool, trusted fs.FileInfo, strict bool, opts lint.Options) int {
 	var diags []lint.Diagnostic
-	source, _, err := readMadefile(path, explicit)
+	source, _, err := readMadefile(path, explicit, trusted)
 	switch {
 	case errors.Is(err, errTooLarge):
 		diags = []lint.Diagnostic{{Severity: lint.Error, Rule: "file-too-large",
