@@ -160,6 +160,10 @@ func (u Updater) Run(ctx context.Context) error {
 	if !writable(dir) {
 		return notWritable(dir, fs.ErrPermission)
 	}
+	info, err := os.Stat(exe)
+	if err != nil {
+		return failure("cannot read the running binary's permissions: %w", err)
+	}
 	sumsURL := ReleaseURL(base, target, ChecksumsName)
 	sums, err := u.Client.get(ctx, sumsURL, maxChecksumsBytes)
 	if err != nil {
@@ -181,7 +185,7 @@ func (u Updater) Run(ctx context.Context) error {
 		return failure("cannot extract made from %s: %w", asset, err)
 	}
 
-	tmp, err := writeTemp(dir, bin)
+	tmp, err := writeTemp(dir, bin, info.Mode().Perm())
 	if err != nil {
 		if isPermission(err) {
 			return notWritable(dir, err)
@@ -290,18 +294,18 @@ func extractMade(archive []byte) ([]byte, error) {
 	}
 }
 
-// writeTemp writes bin to a new executable file in dir and returns its path. The
-// file is in the same directory as the binary it replaces, so the rename is atomic.
-// It is flushed to disk before it is closed, so a crash after the rename cannot
-// leave an empty or partly written made.
-func writeTemp(dir string, bin []byte) (string, error) {
+// writeTemp writes bin to a new file in dir with the given permissions and returns
+// its path. The file is in the same directory as the binary it replaces, so the
+// rename is atomic. It is flushed to disk before it is closed, so a crash after the
+// rename cannot leave an empty or partly written made.
+func writeTemp(dir string, bin []byte, perm fs.FileMode) (string, error) {
 	f, err := os.CreateTemp(dir, tempPrefix+"*")
 	if err != nil {
 		return "", err
 	}
 	_, err = f.Write(bin)
 	if err == nil {
-		err = f.Chmod(0o755)
+		err = f.Chmod(perm)
 	}
 	if err == nil {
 		err = f.Sync()
