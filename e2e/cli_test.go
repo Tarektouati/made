@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -289,6 +290,310 @@ func TestRepoMadefileCITasks(t *testing.T) {
 	}
 	for name := range want {
 		t.Errorf("task %q is missing from Madefile.md; CI runs it", name)
+	}
+}
+
+// TestCIUnixStepsCoverAllPackages fails when a package from `go list ./...` is in no
+// unix test step of ci.yml. On Linux and macOS CI runs one made test-pkg step per
+// package group (only Windows runs ./...), so a package left out of every step never
+// runs there, nor under -race (issue #182).
+func TestCIUnixStepsCoverAllPackages(t *testing.T) {
+	yml, err := os.ReadFile("../.github/workflows/ci.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps, err := unixTestPkgSteps(string(yml))
+	if err != nil {
+		t.Fatalf("ci.yml: %v", err)
+	}
+	cmd := exec.CommandContext(t.Context(), "go", "list", "-f", "{{.Module.Path}} {{.ImportPath}}", "./...")
+	cmd.Dir = ".."
+	out, err := cmd.Output()
+	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			t.Fatalf("go list ./...: %v\n%s", err, ee.Stderr)
+		}
+		t.Fatalf("go list ./...: %v", err)
+	}
+	var pkgs []string
+	for line := range strings.Lines(string(out)) {
+		mod, path, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if !ok {
+			t.Fatalf("go list: unexpected line %q", line)
+		}
+		if path == mod {
+			pkgs = append(pkgs, ".")
+		} else {
+			pkgs = append(pkgs, "./"+strings.TrimPrefix(path, mod+"/"))
+		}
+	}
+	if len(pkgs) == 0 {
+		t.Fatal("go list ./... listed no packages")
+	}
+	if err := ciPackageCoverage(steps, pkgs); err != nil {
+		t.Errorf("ci.yml unix test steps:\n%v", err)
+	}
+}
+
+// ciStep is one step of ci.yml's test job that runs made test-pkg.
+type ciStep struct {
+	name string
+	pkgs []string // the package arguments of made test-pkg
+}
+
+// unixTestPkgSteps returns the steps of the test job in a GitHub Actions workflow
+// that run made test-pkg. It reads the file line by line rather than as YAML, so it
+// errors out, rather than finding nothing, when the job or steps are not laid out as
+// ci.yml lays them out (2-space job keys, steps at 6, step keys at 8). It also
+// errors when such a step does not run on Linux and macOS after an earlier step
+// failed, names no package, or has a name that does not list its packages.
+func unixTestPkgSteps(yml string) ([]ciStep, error) {
+	lines := strings.Split(strings.ReplaceAll(yml, "\r\n", "\n"), "\n")
+	start := slices.Index(lines, "  test:")
+	if start < 0 {
+		return nil, errors.New(`no "  test:" job`)
+	}
+	type rawStep struct{ name, cond, run string }
+	var raw []rawStep
+	inRun := false // inside a `run: |` block
+	for _, line := range lines[start+1:] {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " "))
+		if indent <= 2 && !strings.HasPrefix(trimmed, "#") {
+			break // the next job, or the end of jobs:
+		}
+		if indent == 6 && strings.HasPrefix(trimmed, "- ") {
+			raw = append(raw, rawStep{})
+			trimmed, indent = strings.TrimSpace(trimmed[2:]), 8
+		}
+		if len(raw) == 0 {
+			continue
+		}
+		cur := &raw[len(raw)-1]
+		if inRun && indent > 8 {
+			cur.run += "\n" + trimmed
+			continue
+		}
+		inRun = false
+		if indent != 8 {
+			continue
+		}
+		key, value, _ := strings.Cut(trimmed, ":")
+		value = strings.TrimSpace(value)
+		switch key {
+		case "name":
+			cur.name = value
+		case "if":
+			cur.cond = value
+		case "run":
+			// A block scalar: |, >, or either with a chomping or indent indicator
+			// (|-, |+, >-, |2, …). Its lines follow, indented deeper.
+			if strings.HasPrefix(value, "|") || strings.HasPrefix(value, ">") {
+				inRun = true
+			} else {
+				cur.run = value
+			}
+		}
+	}
+
+	var steps []ciStep
+	var errs []error
+	for _, r := range raw {
+		// Every made test-pkg line counts; a commented-out one does not run, so it
+		// must not count as covering its packages.
+		step := ciStep{name: r.name}
+		found := false
+		for line := range strings.Lines(r.run) {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "#") {
+				continue
+			}
+			_, args, ok := strings.Cut(line, "made test-pkg")
+			if !ok {
+				continue
+			}
+			found = true
+			for _, f := range strings.Fields(args) {
+				if f == "." || strings.HasPrefix(f, "./") {
+					step.pkgs = append(step.pkgs, f)
+				}
+			}
+		}
+		if !found {
+			continue
+		}
+		if !strings.Contains(r.cond, "!cancelled()") || !strings.Contains(r.cond, "runner.os != 'Windows'") {
+			errs = append(errs, fmt.Errorf("step %q: if: %q, want it to contain !cancelled() and runner.os != 'Windows'", r.name, r.cond))
+		}
+		if len(step.pkgs) == 0 {
+			errs = append(errs, fmt.Errorf("step %q: made test-pkg names no package (. or ./dir)", r.name))
+		}
+		for _, p := range step.pkgs {
+			if !slices.Contains(strings.Fields(r.name), p) {
+				errs = append(errs, fmt.Errorf("step %q: name does not list its package %s", r.name, p))
+			}
+		}
+		steps = append(steps, step)
+	}
+	if len(steps) == 0 {
+		errs = append(errs, errors.New("the test job has no made test-pkg step"))
+	}
+	return steps, errors.Join(errs...)
+}
+
+// ciPackageCoverage reports each package of pkgs that no step tests, each package a
+// step tests that is not in pkgs, and each package that more than one step tests.
+func ciPackageCoverage(steps []ciStep, pkgs []string) error {
+	var errs []error
+	in := map[string]string{} // package -> the step that tests it
+	for _, s := range steps {
+		for _, p := range s.pkgs {
+			if prev, dup := in[p]; dup {
+				errs = append(errs, fmt.Errorf("%s is in two steps: %q and %q", p, prev, s.name))
+				continue
+			}
+			in[p] = s.name
+			if !slices.Contains(pkgs, p) {
+				errs = append(errs, fmt.Errorf("step %q tests %s, which go list ./... does not list", s.name, p))
+			}
+		}
+	}
+	for _, p := range pkgs {
+		if _, ok := in[p]; !ok {
+			errs = append(errs, fmt.Errorf("%s is in no unix test step: add it to one", p))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// TestUnixTestPkgSteps checks the ci.yml reader and the coverage check on small
+// workflows, so TestCIUnixStepsCoverAllPackages cannot pass because the reader
+// stopped seeing steps.
+func TestUnixTestPkgSteps(t *testing.T) {
+	const unixIf = "        if: ${{ !cancelled() && runner.os != 'Windows' }}\n"
+	const head = "jobs:\n  lint:\n    steps:\n      - name: Test ./lint\n" + unixIf +
+		"        run: made test-pkg ./lint\n" +
+		"  test:\n    runs-on: x\n    steps:\n" +
+		"      - uses: actions/checkout@0000000000000000000000000000000000000000 # v1\n" +
+		"      - name: Run tests\n        if: runner.os == 'Windows'\n        run: go test ./...\n" +
+		"      # a comment between steps\n"
+	const tail = "  # a comment between jobs\n  build:\n    steps:\n      - name: Test ./build\n" + unixIf +
+		"        run: made test-pkg ./build\n"
+	tests := []struct {
+		name    string
+		steps   string // the test job's steps after head
+		want    []ciStep
+		wantErr string
+	}{
+		{
+			name: "single-line and block run",
+			steps: "      - name: Test ./a .\n" + unixIf + "        timeout-minutes: 8\n" +
+				"        run: perl -e 'exec @ARGV' made test-pkg -v ${{ matrix.race }} -count=1 -timeout 5m ./a .\n" +
+				"      - name: Test ./b\n" + unixIf + "        run: |\n" +
+				"          set -e\n          made test-pkg -race ./b\n          echo ./not-a-pkg-arg\n",
+			want: []ciStep{{"Test ./a .", []string{"./a", "."}}, {"Test ./b", []string{"./b"}}},
+		},
+		{
+			name: "two invocations in one step",
+			steps: "      - name: Test ./a ./b\n" + unixIf + "        run: |\n" +
+				"          made test-pkg -v ./a\n          made test-pkg -race ./b\n",
+			want: []ciStep{{"Test ./a ./b", []string{"./a", "./b"}}},
+		},
+		{
+			name: "block scalar indicators",
+			steps: "      - name: Test ./a\n" + unixIf + "        run: |-\n          made test-pkg ./a\n" +
+				"      - name: Test ./b\n" + unixIf + "        run: |+\n          made test-pkg ./b\n" +
+				"      - name: Test ./c\n" + unixIf + "        run: >\n          made test-pkg ./c\n" +
+				"      - name: Test ./d\n" + unixIf + "        run: >-\n          made test-pkg ./d\n",
+			want: []ciStep{
+				{"Test ./a", []string{"./a"}}, {"Test ./b", []string{"./b"}},
+				{"Test ./c", []string{"./c"}}, {"Test ./d", []string{"./d"}},
+			},
+		},
+		{
+			name: "commented-out invocation",
+			steps: "      - name: Test ./a\n" + unixIf + "        run: |\n" +
+				"          # made test-pkg ./b\n          made test-pkg ./a\n",
+			want: []ciStep{{"Test ./a", []string{"./a"}}},
+		},
+		{
+			name: "only a commented-out invocation",
+			steps: "      - name: Test ./a\n" + unixIf + "        run: |\n" +
+				"            # made test-pkg ./a\n          echo skipped\n",
+			wantErr: "has no made test-pkg step",
+		},
+		{
+			name:    "windows-only step",
+			steps:   "      - name: Test ./a\n        if: runner.os == 'Windows'\n        run: made test-pkg ./a\n",
+			wantErr: "want it to contain !cancelled()",
+		},
+		{
+			name:    "step without !cancelled()",
+			steps:   "      - name: Test ./a\n        if: runner.os != 'Windows'\n        run: made test-pkg ./a\n",
+			wantErr: "want it to contain !cancelled()",
+		},
+		{
+			name:    "name does not list a package",
+			steps:   "      - name: Test ./a\n" + unixIf + "        run: made test-pkg ./a ./b\n",
+			wantErr: "name does not list its package ./b",
+		},
+		{
+			name:    "no package",
+			steps:   "      - name: Test\n" + unixIf + "        run: made test-pkg -v\n",
+			wantErr: "names no package",
+		},
+		{
+			name:    "no test-pkg step",
+			wantErr: "has no made test-pkg step",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, eol := range []string{"\n", "\r\n"} {
+				yml := strings.ReplaceAll(head+tt.steps+tail, "\n", eol)
+				got, err := unixTestPkgSteps(yml)
+				if tt.wantErr != "" {
+					if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+						t.Errorf("eol %q: err = %v, want it to contain %q", eol, err, tt.wantErr)
+					}
+					continue
+				}
+				if err != nil {
+					t.Fatalf("eol %q: %v", eol, err)
+				}
+				if !slices.EqualFunc(got, tt.want, func(a, b ciStep) bool {
+					return a.name == b.name && slices.Equal(a.pkgs, b.pkgs)
+				}) {
+					t.Errorf("eol %q: steps = %+v, want %+v", eol, got, tt.want)
+				}
+			}
+		})
+	}
+	if _, err := unixTestPkgSteps("jobs:\n  build:\n"); err == nil {
+		t.Error("a workflow without a test job: err = nil, want an error")
+	}
+
+	steps := []ciStep{{"Test ./a .", []string{"./a", "."}}, {"Test ./b", []string{"./b"}}}
+	if err := ciPackageCoverage(steps, []string{".", "./a", "./b"}); err != nil {
+		t.Errorf("full coverage: %v", err)
+	}
+	for _, tt := range []struct {
+		name    string
+		steps   []ciStep
+		pkgs    []string
+		wantErr string
+	}{
+		{"missing package", steps, []string{".", "./a", "./b", "./c"}, "./c is in no unix test step"},
+		{"stale package", steps, []string{".", "./a"}, `step "Test ./b" tests ./b, which go list`},
+		{"duplicate package", append(slices.Clone(steps), ciStep{"Test ./a", []string{"./a"}}), []string{".", "./a", "./b"}, "./a is in two steps"},
+	} {
+		if err := ciPackageCoverage(tt.steps, tt.pkgs); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+			t.Errorf("%s: err = %v, want it to contain %q", tt.name, err, tt.wantErr)
+		}
 	}
 }
 
