@@ -71,6 +71,37 @@ made deploy staging  # pass "staging" to the task as $1
 made --version       # print the version
 ```
 
+## GitHub Actions
+
+The composite action installs a checked release on Linux or macOS without a Go
+toolchain. Choose a made version independently of the action's compatibility tag:
+
+```yaml
+steps:
+  - uses: actions/checkout@v7
+  - uses: Tarektouati/made@v1
+    with:
+      version: "0.7.0" # or latest
+  - run: made ci
+```
+
+Keep the checks in a `ci` task in your `Madefile.md`, so `made ci` runs the same
+commands locally and in CI. For a project with `lint` and `test` tasks:
+
+````markdown
+### ci
+Run all project checks.
+```sh
+made lint
+made test
+```
+````
+
+Install the tools those tasks need in earlier workflow steps. The `v1` action tag
+needs to be created by a maintainer after the action is merged; until then, pin a
+reviewed commit containing `action.yml`. Inputs, outputs, runner requirements and
+tag maintenance are documented in [GitHub Actions](docs/action.md).
+
 ## CLI reference
 
 ```

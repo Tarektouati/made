@@ -1,0 +1,32 @@
+name: Install made
+description: Install a verified made release and add it to PATH.
+author: Tarektouati
+branding:
+  icon: terminal
+  color: blue
+
+inputs:
+  version:
+    description: Release version to install, with or without v, or latest.
+    default: latest
+  github-token:
+    description: GitHub token used only to resolve the latest release.
+    default: ${{ github.token }}
+
+outputs:
+  version:
+    description: Installed release version, without the leading v.
+    value: ${{ steps.install.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install made
+      id: install
+      shell: bash
+      env:
+        MADE_ACTION_VERSION: ${{ inputs.version }}
+        MADE_ACTION_TOKEN: ${{ inputs.github-token }}
+        MADE_ACTION_OS: ${{ runner.os }}
+        MADE_ACTION_ARCH: ${{ runner.arch }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/setup-action.sh"
