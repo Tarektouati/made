@@ -126,7 +126,6 @@ Listing the tasks in this repository:
 ```
 $ made
 Tasks in Madefile.md:
-  say-hello  Prints a friendly greeting.
   build      Compiles all packages.
   test       Runs the test suite on every package; arguments are go test flags, e.g. made test -race -count=1.
   test-pkg   Runs go test with exactly the flags and packages given. Usage: made test-pkg [flags] [packages]. The CI test steps run this task, so keep its body as is.
@@ -145,7 +144,6 @@ $ made deploy
 made: unknown task "deploy"
 
 Tasks in Madefile.md:
-  say-hello  Prints a friendly greeting.
   build      Compiles all packages.
   test       Runs the test suite on every package; arguments are go test flags, e.g. made test -race -count=1.
   test-pkg   Runs go test with exactly the flags and packages given. Usage: made test-pkg [flags] [packages]. The CI test steps run this task, so keep its body as is.
@@ -168,6 +166,7 @@ Tasks in Madefile.md:
 - [Pre-commit and prek](docs/pre-commit.md) — run a task or `made --check` as a git hook
 - [Migrating from 0.2](docs/migrating.md) — moving tasks out of `README.md`
 - [Contributing](CONTRIBUTING.md) — development tasks and benchmarks
+- [Changelog](CHANGELOG.md) — release highlights and links to the full notes
 - [Security policy](SECURITY.md) — the trust model, supported versions and how to report a vulnerability
 
 ## License
