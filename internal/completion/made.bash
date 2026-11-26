@@ -196,6 +196,7 @@ _made() {
                 __made_i=$((__made_i + 1))
                 ;;
             -f=* | -file=* | --file=*) __made_fileargs=(-f "$(__made_file_value "${__made_w#*=}")") ;;
+            -timeout | --timeout) __made_i=$((__made_i + 1)) ;;
             -*) ;;
             *)
                 __made_first=$__made_w
@@ -242,6 +243,10 @@ _made() {
 
     case $__made_prev in
         -f | -file | --file) return 0 ;; # file names, via complete -o default
+        -timeout | --timeout)
+            compopt +o default 2>/dev/null || :
+            return 0
+            ;;
     esac
 
     # --check takes no task, and --strict and --host need --check: offer only the
@@ -255,7 +260,7 @@ _made() {
     fi
 
     if [[ $__made_cur == -* ]]; then
-        COMPREPLY=($(compgen -W "-f --file --no-chdir --check --strict --host -l --list -V --version -h --help" -- "$__made_cur")) || :
+        COMPREPLY=($(compgen -W "-f --file --no-chdir --timeout --check --strict --host -l --list -V --version -h --help" -- "$__made_cur")) || :
         return 0
     fi
 

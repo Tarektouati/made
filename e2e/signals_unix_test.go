@@ -45,7 +45,7 @@ func TestSignalsKillGrandchild(t *testing.T) {
 			defer func() { _ = outFile.Close() }()
 
 			var stderr bytes.Buffer
-			cmd := exec.CommandContext(t.Context(), madeBin, "long")
+			cmd := exec.CommandContext(t.Context(), madeBin, "--timeout", "1m", "long")
 			cmd.Dir = dir
 			cmd.Stdout = outFile
 			cmd.Stderr = &stderr

@@ -149,6 +149,11 @@ COMP_WORDS=("$@"); COMP_CWORD=$(($# - 1)); _made
 printf '%s\n' "${COMPREPLY[@]}"`
 
 	for _, tc := range []completionCase{
+		{line: []string{"made", "--timeout", "1m", "b"}, want: []string{"build"}},
+		{line: []string{"made", "-timeout", "1m", "-f", "other.md", ""}, want: []string{"ns:task"}, not: []string{"build"}},
+		{line: []string{"made", "--timeout=1m", "b"}, want: []string{"build"}},
+		{line: []string{"made", "--timeout", ""}, not: []string{"build", "init", "--file"}},
+		{line: []string{"made", "--time"}, want: []string{"--timeout"}},
 		{line: []string{"made", ""}, want: []string{"say-hello", "build", "init", "completion", "self-update"}},
 		{line: []string{"made", "b"}, want: []string{"build"}, not: []string{"say-hello"}},
 		{line: []string{"made", "se"}, want: []string{"self-update"}, not: []string{"say-hello"}},

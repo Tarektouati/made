@@ -176,7 +176,7 @@ func TestFlagErrors(t *testing.T) {
 func TestUsage(t *testing.T) {
 	f := writeRunTasks(t)
 	wantHelp := []string{
-		"Usage: made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]",
+		"Usage: made [-f file] [--no-chdir] [--timeout duration] [-l] [-V] [task [--] [args...]]",
 		"made [-f file] --check [--strict] [--host]",
 		"made init [--force]",
 		"made completion <bash|zsh|fish>",

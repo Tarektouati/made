@@ -202,11 +202,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var check bool
 	var strict bool
 	var host bool
+	var timeoutValue string
 	fs := flag.NewFlagSet("made", flag.ContinueOnError)
 	fs.SetOutput(io.Discard) // parse errors are reported by flagError
 	fs.StringVar(&file, "file", "", "Markdown file to read tasks from (default: nearest Madefile.md, searched up to the repository root, or $HOME or the filesystem root outside a repository)")
 	fs.StringVar(&file, "f", "", "shorthand for --file")
 	fs.BoolVar(&noChdir, "no-chdir", false, "run the task in the current directory instead of the task file's directory")
+	fs.StringVar(&timeoutValue, "timeout", "", "stop the task after a duration such as 5m (0 disables the limit)")
 	fs.BoolVar(&check, "check", false, "check the task file for problems instead of running a task")
 	fs.BoolVar(&strict, "strict", false, "with --check, fail on warnings too")
 	fs.BoolVar(&host, "host", false, "with --check, also check that each task's interpreter is on PATH")
@@ -217,7 +219,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// list-names is for the completion scripts and stays out of the usage text.
 	fs.BoolVar(&listNames, "list-names", false, "print task names and descriptions, tab-separated, one per line")
 	printUsage := func(w io.Writer) {
-		fmt.Fprintf(w, "Usage: made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]\n")
+		fmt.Fprintf(w, "Usage: made [-f file] [--no-chdir] [--timeout duration] [-l] [-V] [task [--] [args...]]\n")
 		fmt.Fprintf(w, "       made [-f file] --check [--strict] [--host]\n")
 		fmt.Fprintf(w, "       made init [--force]\n")
 		fmt.Fprintf(w, "       made completion <%s>\n", strings.Join(completion.Shells, "|"))
@@ -242,6 +244,25 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
+	var timeout time.Duration
+	timeoutSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "timeout" {
+			timeoutSet = true
+		}
+	})
+	if timeoutSet {
+		var err error
+		if timeout, err = time.ParseDuration(timeoutValue); err != nil {
+			fmt.Fprintln(stderr, "made: invalid timeout (use a duration such as 5m)")
+			return 2
+		}
+		if timeout < 0 {
+			fmt.Fprintln(stderr, "made: timeout must not be negative")
+			return 2
+		}
+	}
+
 	if strict && !check {
 		fmt.Fprintln(stderr, "made: --strict requires --check")
 		return 2
@@ -259,6 +280,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "made: --check does not take %s\n", f)
 			return 2
 		}
+	}
+
+	if timeoutSet && (list || listNames || showVersion || fs.NArg() == 0) {
+		fmt.Fprintln(stderr, "made: --timeout requires a task")
+		return 2
 	}
 
 	if showVersion {
@@ -474,7 +500,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 		taskArgs = taskArgs[1:]
 	}
 
+	// Start the timer only when the task is ready to run. The child context retains
+	// the first cancellation cause, so a later signal during teardown cannot turn a
+	// timeout into a signal exit (or a prior signal into a timeout).
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
 	runErr := runner.Run(ctx, force, task, dir, taskArgs)
+	if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+		fmt.Fprintf(stderr, "made: task %q timed out after %s\n", task.Name, timeout)
+		return 124
+	}
 	// A task that handled Ctrl-C or Ctrl-\ itself and exited reports its own status, as
 	// when run from a shell. Otherwise made was interrupted like a shell would be: 128+n
 	// for the signal it received, whatever status the torn-down task ended with.
@@ -1243,6 +1281,7 @@ type usageOption struct{ short, long, arg string }
 var mainOptions = []usageOption{
 	{short: "f", long: "file", arg: "file"},
 	{long: "no-chdir"},
+	{long: "timeout", arg: "duration"},
 	{long: "check"},
 	{long: "strict"},
 	{long: "host"},

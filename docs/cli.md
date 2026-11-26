@@ -6,7 +6,7 @@ reach a task, the new-version notice, and environment variables. [← Back to RE
 ## Synopsis
 
 ```
-made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]
+made [-f file] [--no-chdir] [--timeout duration] [-l] [-V] [task [--] [args...]]
 made [-f file] --check [--strict] [--host]
 made init [--force]
 made completion <bash|zsh|fish>
@@ -17,6 +17,7 @@ made self-update [vX.Y.Z] [--dry-run]
 |---|---|---|
 | `-f`, `--file` | nearest `Madefile.md` | Markdown file to read tasks from: any readable file but a directory, including a pipe (`-f <(…)`, `-f /dev/stdin`), whose tasks run in the current directory. Without `-f`, `made` uses the `Madefile.md` in the current directory or the closest parent directory, up to the repository root (or `$HOME` or the filesystem root outside a repository; a parent directory's Madefile must be yours and not writable by others; see [How it works](how-it-works.md)) |
 | `--no-chdir` | | Run the task in the current directory instead of the task file's directory |
+| `--timeout` | `0` (disabled) | Stop the task after a duration, for example `made --timeout 5m test`; requires a task |
 | `--check` | | Check the task file for problems instead of running a task; see [Checking a Madefile](checking.md) |
 | `--strict` | | With `--check`, fail on warnings too |
 | `--host` | | With `--check`, also check that each task's interpreter is on PATH; see [Checking against this machine](checking.md#checking-against-this-machine) |
@@ -110,6 +111,24 @@ names line up. An emoji sequence (a ZWJ sequence such as 👨‍👩‍👧, a s
 flag) counts as one two-cell emoji, the way terminals that cluster graphemes draw it
 (iTerm2, Terminal.app, Ghostty, WezTerm, kitty). Terminals that draw each code point
 separately, and ambiguous-width characters, may still be off.
+
+## Task timeouts
+
+`made --timeout 5m test` cancels `test` after five minutes. Durations use Go's
+duration syntax, such as `500ms`, `30s` or `1h30m`; `0` disables the limit. A negative
+or invalid duration is a usage error (exit `2`). The flag goes before the task
+name and cannot be combined with listing, checking or a subcommand.
+
+The timer starts when the task is ready to run, after reading and parsing its
+Madefile. On Unix, expiry uses the normal task teardown: send SIGTERM to the task's
+process group (or its descendants when sharing a terminal), allow the existing
+three-second grace period, then SIGKILL any survivors. Cleanup may therefore take
+up to three seconds beyond the limit. Windows stops the interpreter only.
+
+A timeout prints `made: task "test" timed out after 5m0s` on stderr and exits with
+`124`, even if the task catches SIGTERM and exits successfully. A task that finishes
+before the deadline keeps its own exit code. A signal received before the deadline
+keeps the usual signal handling and exit status.
 
 ## Passing arguments
 
