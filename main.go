@@ -202,6 +202,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var check bool
 	var strict bool
 	var host bool
+	var listJSON bool
+	var checkFormat string
 	fs := flag.NewFlagSet("made", flag.ContinueOnError)
 	fs.SetOutput(io.Discard) // parse errors are reported by flagError
 	fs.StringVar(&file, "file", "", "Markdown file to read tasks from (default: nearest Madefile.md, searched up to the repository root, or $HOME or the filesystem root outside a repository)")
@@ -210,15 +212,18 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.BoolVar(&check, "check", false, "check the task file for problems instead of running a task")
 	fs.BoolVar(&strict, "strict", false, "with --check, fail on warnings too")
 	fs.BoolVar(&host, "host", false, "with --check, also check that each task's interpreter is on PATH")
+	fs.StringVar(&checkFormat, "format", "text", "with --check, output format: text, json, github")
 	fs.BoolVar(&list, "list", false, "list available tasks")
 	fs.BoolVar(&list, "l", false, "shorthand for --list")
+	fs.BoolVar(&listJSON, "json", false, "with --list, print tasks as a JSON array")
 	fs.BoolVar(&showVersion, "version", false, "print version and exit")
 	fs.BoolVar(&showVersion, "V", false, "shorthand for --version")
 	// list-names is for the completion scripts and stays out of the usage text.
 	fs.BoolVar(&listNames, "list-names", false, "print task names and descriptions, tab-separated, one per line")
 	printUsage := func(w io.Writer) {
 		fmt.Fprintf(w, "Usage: made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]\n")
-		fmt.Fprintf(w, "       made [-f file] --check [--strict] [--host]\n")
+		fmt.Fprintf(w, "       made [-f file] --list [--json]\n")
+		fmt.Fprintf(w, "       made [-f file] --check [--strict] [--host] [--format text|json|github]\n")
 		fmt.Fprintf(w, "       made init [--force]\n")
 		fmt.Fprintf(w, "       made completion <%s>\n", strings.Join(completion.Shells, "|"))
 		fmt.Fprintf(w, "       made self-update [vX.Y.Z] [--dry-run]\n\n")
@@ -250,13 +255,37 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "made: --host requires --check")
 		return 2
 	}
+	if listJSON && !list {
+		fmt.Fprintln(stderr, "made: --json requires --list")
+		return 2
+	}
+	formatSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "format" {
+			formatSet = true
+		}
+	})
+	if formatSet && !check {
+		fmt.Fprintln(stderr, "made: --format requires --check")
+		return 2
+	}
+	if checkFormat != "text" && checkFormat != "json" && checkFormat != "github" {
+		fmt.Fprintf(stderr, "made: invalid format %q: choose text, json, github\n", checkFormat)
+		return 2
+	}
 	if check {
 		if fs.NArg() > 0 {
 			fmt.Fprintln(stderr, "made: --check takes no task name")
 			return 2
 		}
-		if f := firstSetFlag(fs, "f", "file", "no-chdir", "check", "strict", "host"); f != "" {
+		if f := firstSetFlag(fs, "f", "file", "no-chdir", "check", "strict", "host", "format"); f != "" {
 			fmt.Fprintf(stderr, "made: --check does not take %s\n", f)
+			return 2
+		}
+	}
+	if listJSON {
+		if f := firstSetFlag(fs, "f", "file", "no-chdir", "list", "l", "json"); f != "" {
+			fmt.Fprintf(stderr, "made: --json does not take %s\n", f)
 			return 2
 		}
 	}
@@ -368,7 +397,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	file = res.path
 
 	if check {
-		return runCheck(stdout, stderr, file, res.explicit, res.trusted, strict, lint.Options{Host: host})
+		return runCheck(stdout, stderr, file, res.explicit, res.trusted, strict, lint.Options{Host: host}, checkFormat)
 	}
 
 	// Tab completion runs --list-names with the typed -f value, so a pipe there must
@@ -403,6 +432,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	if listNames {
 		printNames(stdout, tasks)
+		return 0
+	}
+	if listJSON {
+		if err := printTasksJSON(stdout, runnableTasks(stderr, tasks)); err != nil {
+			fmt.Fprintf(stderr, "made: cannot write JSON: %s\n", escapeErr(err))
+			return 1
+		}
 		return 0
 	}
 
@@ -928,8 +964,9 @@ var errTooLarge = errors.New("exceeds maximum size")
 // runCheck lints the task file at path for made --check, prints the findings to
 // stdout, and returns the exit code: 1 if there is an error (or, with strict, a
 // warning), otherwise 0. A file that cannot be read is reported on stderr, exit 1.
-// explicit and trusted are as for readMadefile; opts selects the optional checks.
-func runCheck(stdout, stderr io.Writer, path string, explicit bool, trusted fs.FileInfo, strict bool, opts lint.Options) int {
+// explicit and trusted are as for readMadefile; opts selects the optional checks,
+// and format selects text, JSON, or GitHub workflow annotations.
+func runCheck(stdout, stderr io.Writer, path string, explicit bool, trusted fs.FileInfo, strict bool, opts lint.Options, format string) int {
 	var diags []lint.Diagnostic
 	source, _, err := readMadefile(path, explicit, trusted)
 	switch {
@@ -945,7 +982,11 @@ func runCheck(stdout, stderr io.Writer, path string, explicit bool, trusted fs.F
 			diags = []lint.Diagnostic{{Severity: lint.Error, Rule: "parse-timeout", Msg: err.Error()}}
 		}
 	}
-	errs, warns := printDiagnostics(stdout, path, diags)
+	errs, warns, err := printCheckDiagnostics(stdout, path, diags, format)
+	if err != nil {
+		fmt.Fprintf(stderr, "made: cannot write diagnostics: %s\n", escapeErr(err))
+		return 1
+	}
 	if errs > 0 || (strict && warns > 0) {
 		return 1
 	}
@@ -1213,9 +1254,24 @@ func printTasks(stdout, stderr io.Writer, file string, tasks []task.Task) {
 		widths[i] = displayWidth(names[i])
 		maxW = max(maxW, widths[i])
 	}
+	var previousGroup string
+	var previousLine int
 	for i, t := range tasks {
+		group := sanitizeDisplay(t.Group)
+		if i == 0 || group != previousGroup || t.GroupLine != previousLine {
+			if group != "" {
+				fmt.Fprintf(stdout, "\n  %s:\n", group)
+			} else if previousGroup != "" {
+				fmt.Fprintln(stdout)
+			}
+		}
+		indent := "  "
+		if group != "" {
+			indent = "    "
+		}
 		desc := sanitizeDisplay(strings.ReplaceAll(t.Description, "\n", " "))
-		fmt.Fprintf(stdout, "  %s%s%s\n", names[i], strings.Repeat(" ", maxW-widths[i]+2), desc)
+		fmt.Fprintf(stdout, "%s%s%s%s\n", indent, names[i], strings.Repeat(" ", maxW-widths[i]+2), desc)
+		previousGroup, previousLine = group, t.GroupLine
 	}
 }
 
@@ -1246,7 +1302,9 @@ var mainOptions = []usageOption{
 	{long: "check"},
 	{long: "strict"},
 	{long: "host"},
+	{long: "format", arg: "format"},
 	{short: "l", long: "list"},
+	{long: "json"},
 	{short: "V", long: "version"},
 	{short: "h", long: "help"},
 }

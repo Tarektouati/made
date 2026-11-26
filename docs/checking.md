@@ -13,11 +13,44 @@ Madefile.md:20: warning: extra-code-block: ignored: task "test" runs only its fi
 2 problems (1 error, 1 warning)
 ```
 
-A clean file prints nothing. `made --check` exits with `1` if there is any error,
+With the default text format, a clean file prints nothing. `made --check` exits with `1` if there is any error,
 or with `--strict` any warning, and `0` otherwise. A file that can't be read is
 reported on stderr like any other run (exit `1`). `--check` takes no task name and
 can't be combined with `-l` or `-V`, and `--strict` and `--host` need `--check`;
 these exit with `2`.
+
+## Output formats
+
+`--format text` selects the default output above. Editors and CI can use
+`made --check --format json` or `made --check --format github` instead. The format
+does not change the findings or the exit code, including `--strict` and `--host`.
+`--format` requires `--check`; an unsupported format is a usage error (exit `2`).
+
+**JSON** writes an array of diagnostics, in source order, without a text summary:
+
+```json
+[{"file":"Madefile.md","line":12,"severity":"error","rule":"duplicate-task","message":"\"build\" already defined at line 4"}]
+```
+
+Each object has `file`, `line`, `severity`, `rule` and `message`. `file` is the
+selected task-file path; `line` is one-based, or `0` for a whole-file finding such
+as `file-too-large`. `severity` is `error` or `warning`. Strings retain their data,
+with JSON escaping for special characters. A clean file writes `[]`, never `null`.
+
+**GitHub** writes one [workflow annotation](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands#setting-an-error-message)
+per diagnostic:
+
+```text
+::error file=Madefile.md,line=12,title=duplicate-task::"build" already defined at line 4
+```
+
+Warnings use `::warning`; the rule becomes the annotation's title. Whole-file
+findings omit the line property. Filenames and messages are escaped for GitHub's
+command syntax. A clean file prints nothing, and there is no text summary.
+Run this format in a GitHub Actions step to attach the findings to the file.
+
+All formats keep file-read errors on stderr (exit `1`, with no diagnostics on
+stdout), and none starts the new-version check.
 
 ## Rules
 

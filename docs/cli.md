@@ -7,7 +7,8 @@ reach a task, the new-version notice, and environment variables. [← Back to RE
 
 ```
 made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]
-made [-f file] --check [--strict] [--host]
+made [-f file] --list [--json]
+made [-f file] --check [--strict] [--host] [--format text|json|github]
 made init [--force]
 made completion <bash|zsh|fish>
 made self-update [vX.Y.Z] [--dry-run]
@@ -20,7 +21,9 @@ made self-update [vX.Y.Z] [--dry-run]
 | `--check` | | Check the task file for problems instead of running a task; see [Checking a Madefile](checking.md) |
 | `--strict` | | With `--check`, fail on warnings too |
 | `--host` | | With `--check`, also check that each task's interpreter is on PATH; see [Checking against this machine](checking.md#checking-against-this-machine) |
+| `--format` | `text` | With `--check`, choose `text`, `json`, or `github` output |
 | `-l`, `--list` | | List available tasks and exit |
+| `--json` | | With `--list`, print task metadata as a JSON array |
 | `-V`, `--version` | | Print the version and exit |
 | `-h`, `--help` | | Print usage to stdout and exit |
 | `task` | | Name of the task to run (the H3 heading text) |
@@ -111,6 +114,52 @@ flag) counts as one two-cell emoji, the way terminals that cluster graphemes dra
 (iTerm2, Terminal.app, Ghostty, WezTerm, kitty). Terminals that draw each code point
 separately, and ambiguous-width characters, may still be off.
 
+### Task groups
+
+An H2 heading (`## Development`) labels the tasks that follow it in the text list.
+Tasks keep their source order; separate H2 sections with the same title are still
+shown separately. An H1 ends the group, and tasks before any H2 are ungrouped.
+H4 and deeper headings end a task's code-block scope but do not end its H2 group.
+A file with no H2 headings keeps the usual flat listing.
+
+```text
+Tasks in Madefile.md:
+  clean  Remove generated files.
+
+  Development:
+    test   Run tests.
+    serve  Start the development server.
+```
+
+Group headings use the same inline Markdown text and whitespace normalization as
+task names. Groups are only a presentation aid: `made test` still runs `test`, and
+duplicate names in different groups still refer to the first task. The
+`--list-names` output consumed by shell completion stays flat and unchanged.
+
+### JSON task lists
+
+Use `made --list --json` for editors and scripts. It writes one JSON array to
+stdout, with one object per runnable task in source order:
+
+```json
+[{"name":"test","description":"Run tests.","language":"bash","line":4,"group":"Development"}]
+```
+
+| Field | Meaning |
+|---|---|
+| `name` | Normalized task name, as accepted by `made` |
+| `description` | Description text; paragraph breaks remain newlines in the string |
+| `language` | First word of the code fence's info string; an empty string selects the default shell |
+| `line` | One-based source line of the H3 task heading |
+| `group` | Normalized enclosing H2 text; omitted for an ungrouped task |
+
+Scripts are not included. An empty list is `[]`, never `null`. The same duplicate
+and empty-name filtering as the text list applies, with any warnings on stderr.
+There is no update notice or background release check. `--json` requires an
+explicit `-l`/`--list` and cannot be combined with `--check`, `--list-names` or
+`--version`. As with a text list, an ordinary task name after the flags is ignored.
+Read errors still go to stderr and exit with `1`; usage errors exit with `2`.
+
 ## Passing arguments
 
 Everything after the task name is passed to the script: `$1`, `"$@"` in shell tasks,
@@ -162,7 +211,7 @@ gets an answer, even an error, is not repeated for a day; one cut short because
 long enough for the request to finish (typically well under a second); a task
 usually does. Being offline, DNS or proxy failures and rate limits are silent.
 
-There is no notice, and no request, for `--list-names`, `completion`, `init`,
+There is no notice, and no request, for `--list --json`, `--list-names`, `completion`, `init`,
 `--check`, `-V`/`--version`, `self-update` or `--help`; when stdout or stderr is
 not a terminal (piped or redirected); when `CI` is set; for development builds
 and pseudo-versions; and when the latest release is a pre-release. See

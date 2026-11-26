@@ -183,6 +183,18 @@ printf '%s\n' "${COMPREPLY[@]}"`
 		{line: []string{"made", "-host", ""}, not: []string{"build", "init", "completion"}},
 		{line: []string{"made", "-f", "other.md", "--check", ""}, not: []string{"ns:task"}},
 		{line: []string{"made", "--check", "--"}, want: []string{"--strict", "--host", "--file", "--no-chdir"}, not: []string{"--list", "--version"}},
+		{line: []string{"made", "--"}, want: []string{"--json", "--format"}},
+		{line: []string{"made", "--check", "--"}, want: []string{"--format"}, not: []string{"--json"}},
+		{line: []string{"made", "--check", "--format", ""}, want: []string{"text", "json", "github"}, not: []string{"build", "--file"}},
+		{line: []string{"made", "--format", "j"}, want: []string{"json"}, not: []string{"text", "github"}},
+		{line: []string{"made", "-format", "g"}, want: []string{"github"}},
+		{line: []string{"made", "--format", "=", "j"}, compLine: "made --format=j", want: []string{"json"}},
+		{line: []string{"made", "--format=j"}, want: []string{"json"}},
+		{line: []string{"made", "--format", "json", "--"}, want: []string{"--check", "--host", "--format"}, not: []string{"--list", "--json", "--version"}},
+		{line: []string{"made", "--format", "json", "-f", "other.md", "--"}, want: []string{"--check", "--file"}, not: []string{"ns:task", "--json"}},
+		{line: []string{"made", "--format=json", "--"}, want: []string{"--check", "--format"}, not: []string{"--list", "--json"}},
+		{line: []string{"made", "build", "--format", ""}, not: []string{"json", "github", "text"}},
+
 		// A leading $NAME or ${NAME} is expanded, outside single quotes only, and
 		// nothing else on the line is evaluated. The test runs in $PWD.
 		{line: []string{"made", "-f", "$PWD/other.md", ""}, want: []string{"ns:task"}, not: []string{"build"}},
@@ -321,6 +333,11 @@ echo survived`
 		{dir, false, completionCase{line: []string{"made", "self-update", ""}, want: []string{"--dry-run"}}},
 		{dir, false, completionCase{line: []string{"made", "self-update", "--dry-run", ""}}},
 		{dir, false, completionCase{line: []string{"made", "--check", "--"}, want: []string{"--strict"}}},
+		{dir, false, completionCase{line: []string{"made", "--format", "j"}, want: []string{"json"}}},
+		{dir, false, completionCase{line: []string{"made", "--format=g"}, want: []string{"github"}}},
+		{dir, false, completionCase{line: []string{"made", "--format", "unknown"}, not: []string{"json", "text", "github"}}},
+		{dir, false, completionCase{line: []string{"made", "--format", "json", "--"}, want: []string{"--check", "--format"}}},
+
 		{dir, false, completionCase{line: []string{"made", "-f", "$PWD/other.md", ""}, want: []string{"ns:task"}}},
 		{dir, false, completionCase{line: []string{"made", "--file=other.md", ""}, want: []string{"ns:task"}}},
 		{dir, true, completionCase{line: []string{"made", "-f", "other.md", ""}, want: []string{"ns:task"}}},
@@ -425,6 +442,10 @@ func TestCompletionFish(t *testing.T) {
 		{line: []string{"made --strict "}, not: []string{"build\tCompiles all packages.", "init\tCreate a starter Madefile.md"}},
 		{line: []string{"made -host "}, not: []string{"build\tCompiles all packages.", "init\tCreate a starter Madefile.md"}},
 		{line: []string{"made --check -"}, want: []string{"--strict\tWith --check, fail on warnings too", "--file\tMarkdown file to read tasks from"}, not: []string{"--list\tList available tasks", "--version\tPrint version and exit"}},
+		{line: []string{"made --"}, want: []string{"--json\tWith --list, print tasks as JSON", "--format\tWith --check, output format"}},
+		{line: []string{"made --format json --"}, want: []string{"--check\tCheck the task file for problems", "--format\tWith --check, output format"}, not: []string{"--json\tWith --list, print tasks as JSON", "--list\tList available tasks"}},
+		{line: []string{"made --format json -f other.md --"}, want: []string{"--host\tWith --check, also check that interpreters are on PATH"}, not: []string{"ns:task\tHas a colon: here."}},
+
 		{line: []string{"made -f " + noRun + " "}, not: []string{"ns:task\tHas a colon: here."}},
 		{line: []string{"made -f (touch PWNED)/other.md "}, not: []string{"ns:task\tHas a colon: here."}},
 	}
@@ -440,6 +461,19 @@ func TestCompletionFish(t *testing.T) {
 	}
 	for _, tc := range cases {
 		got := lines(runShell(t, dir, "fish", "-N", "-c", `made completion fish | source; complete -C "$argv[1]"`, tc.line[0]))
+		checkCompletions(t, got, tc)
+	}
+	// Fish versions may attach the option's description or retain --format= in
+	// value candidates. Compare the values, which must not fall back to files.
+	for _, tc := range []completionCase{
+		{line: []string{"made --check --format "}, want: []string{"text", "json", "github"}, not: []string{"Madefile.md", "build"}},
+		{line: []string{"made --format=j"}, want: []string{"json"}, not: []string{"text", "github", "Madefile.md"}},
+	} {
+		got := lines(runShell(t, dir, "fish", "-N", "-c", `made completion fish | source; complete -C "$argv[1]"`, tc.line[0]))
+		for i, entry := range got {
+			value, _, _ := strings.Cut(entry, "\t")
+			got[i] = strings.TrimPrefix(value, "--format=")
+		}
 		checkCompletions(t, got, tc)
 	}
 	checkNoRun(t, dir)

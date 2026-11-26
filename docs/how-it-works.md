@@ -20,6 +20,11 @@ Only top-level blocks count: code inside lists or blockquotes is never a task.
 Files with LF, CRLF or CR-only (classic Mac OS) line endings all work; in a file
 with any LF, a lone CR stays part of its line, so a script can contain one.
 
+H2 headings label task groups in the text list. The enclosing H2's text and line
+are retained with each task; a new H2 starts a new group, even with the same title,
+and an H1 ends the group. This does not namespace task names or change completion.
+See [Task groups](cli.md#task-groups) and [JSON task lists](cli.md#json-task-lists).
+
 To keep a hostile or broken Madefile from stalling `made` (or tab completion in a
 cloned repository), `made` refuses a file larger than 10 MiB, nesting of lists or
 blockquotes deeper than 256 levels, and a file that takes longer than 1.5 s to parse.

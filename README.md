@@ -75,7 +75,8 @@ made --version       # print the version
 
 ```
 made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]
-made [-f file] --check [--strict] [--host]
+made [-f file] --list [--json]
+made [-f file] --check [--strict] [--host] [--format text|json|github]
 made init [--force]
 made completion <bash|zsh|fish>
 made self-update [vX.Y.Z] [--dry-run]
@@ -88,7 +89,9 @@ made self-update [vX.Y.Z] [--dry-run]
 | `--check` | | Check the task file for problems instead of running a task; see [Checking a Madefile](docs/checking.md) |
 | `--strict` | | With `--check`, fail on warnings too |
 | `--host` | | With `--check`, also check that each task's interpreter is on PATH; see [Checking against this machine](docs/checking.md#checking-against-this-machine) |
+| `--format` | `text` | With `--check`, choose `text`, `json`, or `github` output |
 | `-l`, `--list` | | List available tasks and exit |
+| `--json` | | With `--list`, print task metadata as a JSON array |
 | `-V`, `--version` | | Print the version and exit |
 | `-h`, `--help` | | Print usage to stdout and exit |
 | `task` | | Name of the task to run (the H3 heading text) |
