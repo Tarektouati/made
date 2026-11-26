@@ -48,6 +48,8 @@ func normalizeLoneCR(source []byte) []byte {
 // that code block becomes the description. Headings of any other level end the
 // current task's scope. A heading with no following code block is skipped. A leading
 // UTF-8 byte order mark is ignored, and a file with only CR line endings reads as LF.
+// Tasks keep the enclosing H2's text and line for listing. An H1 ends that section;
+// task names and lookup remain flat.
 func Parse(source []byte) ([]task.Task, error) {
 	source = normalizeLoneCR(bytes.TrimPrefix(source, utf8BOM))
 	if err := validateNesting(source); err != nil {
@@ -60,12 +62,20 @@ func Parse(source []byte) ([]task.Task, error) {
 	var tasks []task.Task
 	var cur *task.Task // task currently being assembled
 	var desc []string  // description paragraphs collected so far
+	var group string
+	var groupLine int
 	hasScript := false
 	for n := doc.FirstChild(); n != nil; n = n.NextSibling() {
 		switch node := n.(type) {
 		case *ast.Heading:
+			switch node.Level {
+			case 1:
+				group, groupLine = "", 0
+			case 2:
+				group, groupLine = NormalizeSpace(headingText(node, source)), lineOf(node)
+			}
 			if node.Level == taskHeadingLevel {
-				cur = &task.Task{Name: NormalizeSpace(headingText(node, source)), Line: lineOf(node)}
+				cur = &task.Task{Name: NormalizeSpace(headingText(node, source)), Line: lineOf(node), Group: group, GroupLine: groupLine}
 			} else {
 				cur = nil
 			}

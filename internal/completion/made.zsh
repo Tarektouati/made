@@ -54,6 +54,7 @@ _made_tasks() {
         _made_file_value "${words[__made_i]#*=}"
         __made_fileargs=(-f "$__made_reply")
         ;;
+      (-format|--format) (( __made_i++ )) ;;
     esac
   done
 
@@ -82,10 +83,12 @@ _made() {
   _arguments -C -S -A '-*' \
     '(-f -file --file)'{-f+,-file=,--file=}'[Markdown file to read tasks from]:file:_files' \
     '--no-chdir[run the task in the current directory]' \
-    '(-l --list -V --version 1 *)--check[check the task file for problems]' \
-    '(-l --list -V --version 1 *)--strict[with --check, fail on warnings too]' \
-    '(-l --list -V --version 1 *)--host[with --check, also check that interpreters are on PATH]' \
+    '(-l --list --json -V --version 1 *)--check[check the task file for problems]' \
+    '(-l --list --json -V --version 1 *)--strict[with --check, fail on warnings too]' \
+    '(-l --list --json -V --version 1 *)--host[with --check, also check that interpreters are on PATH]' \
+    '(-format --format -l --list --json -V --version 1 *)'{-format=,--format=}'[with --check, output format]:format:(text json github)' \
     '(-l --list)'{-l,--list}'[list available tasks]' \
+    '(--check --strict --host -format --format -V --version)--json[with --list, print tasks as JSON]' \
     '(- *)'{-V,--version}'[print version and exit]' \
     '(- *)'{-h,--help}'[show help]' \
     '1: :->first' \

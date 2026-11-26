@@ -175,6 +175,7 @@ _made() {
     local -a __made_words=() __made_fileargs=()
     local __made_cword __made_cur __made_prev
     local __made_i __made_w __made_first="" __made_firstidx=0 __made_checkmode=0
+    local __made_format_value=0 __made_format_prefix=""
     COMPREPLY=()
     __made_split_words
 
@@ -186,8 +187,16 @@ _made() {
         __made_w=${__made_words[__made_i]}
         case $__made_w in
             -check | --check | -strict | --strict | -host | --host | \
-                -check=* | --check=* | -strict=* | --strict=* | -host=* | --host=*)
+                -check=* | --check=* | -strict=* | --strict=* | -host=* | --host=* | \
+                -format=* | --format=*)
                 __made_checkmode=1
+                ;;
+            -format | --format)
+                __made_checkmode=1
+                if ((__made_i + 1 == __made_cword)); then
+                    __made_format_value=1
+                fi
+                __made_i=$((__made_i + 1))
                 ;;
             -f | -file | --file)
                 if ((__made_i + 1 < __made_cword)); then
@@ -244,18 +253,40 @@ _made() {
         -f | -file | --file) return 0 ;; # file names, via complete -o default
     esac
 
-    # --check takes no task, and --strict and --host need --check: offer only the
-    # flags --check accepts, and no file names.
+    case $__made_cur in
+        -format=* | --format=*)
+            __made_format_value=1
+            __made_format_prefix=${__made_cur%%=*}=
+            ;;
+    esac
+    if ((__made_format_value)); then
+        compopt +o default 2>/dev/null || :
+        local __made_full __made_kept __made_ctx __made_keep __made_q
+        __made_comp_word "$__made_cur"
+        __made_full=$(__made_dequote "$__made_cur")
+        __made_kept=$(__made_dequote "$__made_keep")
+        for __made_w in text json github; do
+            __made_w=$__made_format_prefix$__made_w
+            if [[ $__made_w == "$__made_full"* ]]; then
+                __made_quote "$__made_ctx" "${__made_w#"$__made_kept"}"
+                COMPREPLY+=("$__made_q")
+            fi
+        done
+        return 0
+    fi
+
+    # --check takes no task; --strict, --host and --format need --check. Offer only
+    # the flags --check accepts, and no file names.
     if ((__made_checkmode)); then
         compopt +o default 2>/dev/null || :
         if [[ $__made_cur == -* ]]; then
-            COMPREPLY=($(compgen -W "-f --file --no-chdir --check --strict --host -h --help" -- "$__made_cur")) || :
+            COMPREPLY=($(compgen -W "-f --file --no-chdir --check --strict --host --format -h --help" -- "$__made_cur")) || :
         fi
         return 0
     fi
 
     if [[ $__made_cur == -* ]]; then
-        COMPREPLY=($(compgen -W "-f --file --no-chdir --check --strict --host -l --list -V --version -h --help" -- "$__made_cur")) || :
+        COMPREPLY=($(compgen -W "-f --file --no-chdir --check --strict --host --format -l --list --json -V --version -h --help" -- "$__made_cur")) || :
         return 0
     fi
 

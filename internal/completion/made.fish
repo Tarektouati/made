@@ -23,6 +23,8 @@ function __made_file_args
                 set -e tokens[1]
             case '-f=*' '-file=*' '--file=*'
                 set value (string replace -r '^[^=]*=' '' -- $tokens[1])
+            case -format --format
+                set -e tokens[1]
             case '-*'
             case '*'
                 break
@@ -43,7 +45,7 @@ function __made_positional
     set -e tokens[1]
     while set -q tokens[1]
         switch $tokens[1]
-            case -f -file --file
+            case -f -file --file -format --format
                 set -e tokens[1]
             case '-*'
             case '*'
@@ -58,8 +60,8 @@ function __made_no_positional
     test (count (__made_positional)) -eq 0
 end
 
-# __made_check_mode succeeds when --check, --strict or --host is on the line before
-# the first positional word: --check takes no task, and the other two need --check.
+# __made_check_mode succeeds when --check, --strict, --host or --format is on the line
+# before the first positional word: --check takes no task; the others need --check.
 function __made_check_mode
     set -l tokens (commandline -opc)
     set -e tokens[1]
@@ -67,7 +69,7 @@ function __made_check_mode
         switch $tokens[1]
             case -f -file --file
                 set -e tokens[1]
-            case -check --check -strict --strict -host --host '-check=*' '--check=*' '-strict=*' '--strict=*' '-host=*' '--host=*'
+            case -check --check -strict --strict -host --host -format --format '-check=*' '--check=*' '-strict=*' '--strict=*' '-host=*' '--host=*' '-format=*' '--format=*'
                 return 0
             case '-*'
             case '*'
@@ -127,7 +129,9 @@ complete -c made -n __made_no_positional -l no-chdir -d 'Run the task in the cur
 complete -c made -n __made_no_positional -l check -d 'Check the task file for problems'
 complete -c made -n __made_no_positional -l strict -d 'With --check, fail on warnings too'
 complete -c made -n __made_no_positional -l host -d 'With --check, also check that interpreters are on PATH'
+complete -c made -n __made_no_positional -l format -r -a 'text json github' -d 'With --check, output format'
 complete -c made -n __made_task_start -s l -l list -d 'List available tasks'
+complete -c made -n __made_task_start -l json -d 'With --list, print tasks as JSON'
 complete -c made -n __made_task_start -s V -l version -d 'Print version and exit'
 complete -c made -n __made_no_positional -s h -l help -d 'Show help'
 complete -c made -n __made_task_start -a '(__made_tasks)'

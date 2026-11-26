@@ -232,6 +232,9 @@ func TestUpdateNoticeExcludedCommands(t *testing.T) {
 		requests bool
 	}{
 		{name: "list-names", args: []string{"-f", f, "--list-names"}},
+		{name: "list JSON", args: []string{"-f", f, "--list", "--json"}},
+		{name: "check JSON", args: []string{"-f", f, "--check", "--format", "json"}},
+		{name: "check GitHub", args: []string{"-f", f, "--check", "--format", "github"}},
 		{name: "completion", args: []string{"completion", "bash"}},
 		{name: "init", args: []string{"init"}},
 		{name: "check", args: []string{"-f", f, "--check"}},
