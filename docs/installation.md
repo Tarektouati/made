@@ -14,9 +14,21 @@ completion. [← Back to README](../README.md)
 **macOS and Linux** are fully supported. Release binaries (and the Homebrew cask)
 are built for `darwin` and `linux` on `amd64` and `arm64`.
 
-**Windows** builds and runs via `go install`, but it has no POSIX process groups:
-cancelling a task (Ctrl-C) kills the interpreter only, so processes spawned by the
-script may outlive it.
+**Windows support is best-effort.** CI builds and tests `windows/amd64`, but
+Windows has no release archive, and neither `install.sh` nor the proto plugin
+installs a Windows binary. Install and update from source instead:
+
+```powershell
+go install github.com/Tarektouati/made@latest
+```
+
+`made self-update` does not update Windows installations; it prints the
+`go install` command and exits with code `3`. Each task still needs its fence's
+interpreter on `PATH`; shell scripts are not translated for Windows.
+
+Windows has no POSIX process groups: cancelling a task (Ctrl-C) kills the
+interpreter only, so processes spawned by the script may outlive it. Check for
+and stop any remaining child processes yourself.
 
 ## Installing
 

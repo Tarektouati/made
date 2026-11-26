@@ -24,8 +24,11 @@ fenced code block, so your `Madefile.md` documents your tasks and runs them too.
 
 ## Installation
 
-Release binaries cover macOS and Linux (`amd64`/`arm64`); Windows works via
-`go install`. Each fence language you use needs its interpreter on `PATH`.
+Release binaries cover macOS and Linux (`amd64`/`arm64`). Windows support is
+best-effort via `go install`: there are no Windows release archives or
+`self-update`, and Ctrl-C does not stop child processes spawned by a task.
+See [platform compatibility](docs/installation.md#platform-compatibility).
+Each fence language you use needs its interpreter on `PATH`.
 
 ```sh
 brew install Tarektouati/tap/made                                                   # Homebrew
