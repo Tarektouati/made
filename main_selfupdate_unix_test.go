@@ -44,9 +44,9 @@ func TestSelfUpdateReplaces(t *testing.T) {
 	f := newFakeReleases(t, "v0.7.0")
 	f.addRelease(t, "v0.7.0")
 	in := manualInstall(t)
-	useFakeInstall(t, f, in)
+	a := useFakeInstall(t, f, in)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"self-update"}, &stdout, &stderr); code != 0 {
+	if code := a.run([]string{"self-update"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("run(self-update) = %d, want 0 (stderr: %s)", code, &stderr)
 	}
 	if want := "made: updated v0.6.0 -> v0.7.0\n"; stdout.String() != want {
@@ -72,9 +72,9 @@ func TestSelfUpdateUnwritableDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
-	useFakeInstall(t, f, in)
+	a := useFakeInstall(t, f, in)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"self-update"}, &stdout, &stderr); code != selfupdate.ExitNotWritable {
+	if code := a.run([]string{"self-update"}, &stdout, &stderr); code != selfupdate.ExitNotWritable {
 		t.Fatalf("run(self-update) = %d, want %d (stderr: %s)", code, selfupdate.ExitNotWritable, &stderr)
 	}
 	checkContains(t, "stderr", stderr.String(), []string{

@@ -95,7 +95,7 @@ func TestRunEscapesControlCharsInPaths(t *testing.T) {
 				t.Setenv("PATH", tt.path)
 			}
 			var stdout, stderr bytes.Buffer
-			run(tt.args, &stdout, &stderr)
+			newTestApp().run(tt.args, &stdout, &stderr)
 			out := stdout.String() + stderr.String()
 			for _, w := range tt.want {
 				if !strings.Contains(out, w) {

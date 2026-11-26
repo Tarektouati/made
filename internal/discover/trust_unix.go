@@ -1,6 +1,6 @@
 //go:build unix
 
-package main
+package discover
 
 import (
 	"fmt"
@@ -17,7 +17,7 @@ import (
 // Madefile to its file, as many as macOS resolves in one path.
 const maxSymlinkHops = 32
 
-// checkParentMadefile returns an *untrustedError if the Madefile at path, found in a
+// checkParentMadefile returns an *UntrustedError if the Madefile at path, found in a
 // parent directory, fails checkTrust: the file and the directory it was found in,
 // and, when the name is a symlink, every link of the chain to the final file, the
 // directory each link is in, and the final file and its directory. Each hop is
@@ -28,7 +28,7 @@ const maxSymlinkHops = 32
 //
 // It returns the FileInfo of the final file it checked. The check works on paths,
 // and so does the later open, so the owner of an unchecked ancestor directory (or a
-// link's) could swap the file between the two; readMadefile therefore refuses to
+// link's) could swap the file between the two; ReadMadefile therefore refuses to
 // read anything but that same file (os.SameFile).
 func checkParentMadefile(path string) (fs.FileInfo, error) {
 	trusted := trustedUIDs()
@@ -39,7 +39,7 @@ func checkParentMadefile(path string) (fs.FileInfo, error) {
 		}
 		isLink := info.Mode()&fs.ModeSymlink != 0
 		if problem := checkTrust(st.Uid, info.Mode(), info.IsDir(), isLink, trusted); problem != trustOK {
-			return &untrustedError{path: path, subject: subject, problem: problem, owner: ownerName(st.Uid), mode: info.Mode()}
+			return &UntrustedError{Path: path, subject: subject, problem: problem, owner: ownerName(st.Uid), mode: info.Mode()}
 		}
 		return nil
 	}

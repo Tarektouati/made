@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/Tarektouati/made/internal/discover"
 )
 
 // BenchmarkFindUp measures findMadefile walking up a deep tree: the Madefile sits at
@@ -21,7 +23,7 @@ func BenchmarkFindUp(b *testing.B) {
 		b.Fatal(err)
 	}
 	for b.Loop() {
-		if _, _, _, _, ok := findMadefile(deep, ""); !ok {
+		if _, _, _, _, ok := discover.FindMadefile(deep, ""); !ok {
 			b.Fatal("Madefile not found")
 		}
 	}

@@ -1,11 +1,11 @@
 //go:build !unix
 
-package main
+package discover
 
 import "io/fs"
 
 // checkParentMadefile checks nothing outside unix: there is no owner uid or mode bits
-// to check a parent Madefile against. It returns no FileInfo, so readMadefile does
+// to check a parent Madefile against. It returns no FileInfo, so ReadMadefile does
 // not compare files either.
 func checkParentMadefile(string) (fs.FileInfo, error) { return nil, nil }
 

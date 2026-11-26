@@ -13,10 +13,6 @@ import (
 	"github.com/Tarektouati/made/internal/selfupdate"
 )
 
-// Tests must never reach github.com: a test that forgets useFakeInstall gets a
-// connection error.
-func init() { selfUpdateBaseURL = "http://127.0.0.1:0" }
-
 // fakeReleases stands in for github.com in the made self-update tests: it redirects
 // releases/latest to latest (404 when latest is "") and serves files, keyed by
 // "<tag>/<asset>".
@@ -47,14 +43,13 @@ func newFakeReleases(t *testing.T, latest string) *fakeReleases {
 	return f
 }
 
-// useFakeInstall points made self-update at f and makes it see the running binary as
-// in, for the rest of the test.
-func useFakeInstall(t *testing.T, f *fakeReleases, in selfupdate.Install) {
+// useFakeInstall returns an app that sees install in and reads releases from f.
+func useFakeInstall(t *testing.T, f *fakeReleases, in selfupdate.Install) *app {
 	t.Helper()
-	oldURL, oldDetect := selfUpdateBaseURL, detectInstall
-	t.Cleanup(func() { selfUpdateBaseURL, detectInstall = oldURL, oldDetect })
-	selfUpdateBaseURL = f.srv.URL
-	detectInstall = func(string, bool) selfupdate.Install { return in }
+	a := newTestApp()
+	a.selfUpdateBaseURL = f.srv.URL
+	a.detectInstall = func(string, bool) selfupdate.Install { return in }
+	return a
 }
 
 // oldBinary is the content of the made binary manualInstall writes.
@@ -73,13 +68,13 @@ func manualInstall(t *testing.T) selfupdate.Install {
 
 func TestSelfUpdateUsage(t *testing.T) {
 	f := newFakeReleases(t, "v0.7.0")
-	useFakeInstall(t, f, manualInstall(t))
+	a := useFakeInstall(t, f, manualInstall(t))
 	defer func() {
 		if n := f.requests.Load(); n != 0 {
 			t.Errorf("%d requests to the release server, want none", n)
 		}
 	}()
-	checkRunCases(t, []runCase{
+	a.checkRunCases(t, []runCase{
 		{name: "with -f", args: []string{"-f", "tasks.md", "self-update"}, wantCode: 2, wantStderr: []string{"made: self-update does not take -f"}},
 		{name: "with empty -f", args: []string{"-f", "", "self-update"}, wantCode: 2, wantStderr: []string{"-f requires a file path"}},
 		{name: "-l before", args: []string{"-l", "self-update"}, wantCode: 2, wantStderr: []string{"made: self-update does not take -l"}},
@@ -111,9 +106,9 @@ func TestSelfUpdateIsReserved(t *testing.T) {
 	}
 	t.Chdir(dir)
 	f := newFakeReleases(t, "v0.7.0")
-	useFakeInstall(t, f, manualInstall(t))
+	a := useFakeInstall(t, f, manualInstall(t))
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"self-update", "--dry-run"}, &stdout, &stderr); code != 0 {
+	if code := a.run([]string{"self-update", "--dry-run"}, &stdout, &stderr); code != 0 {
 		t.Errorf("run(self-update --dry-run) = %d, want 0 (stderr: %s)", code, &stderr)
 	}
 	if !strings.Contains(stdout.String(), "made: would update v0.6.0 -> v0.7.0") {
@@ -136,7 +131,7 @@ func TestUpdateTaskStillRuns(t *testing.T) {
 	}
 	t.Chdir(dir)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"update"}, &stdout, &stderr); code != 0 {
+	if code := newTestApp().run([]string{"update"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("run(update) = %d, want 0 (stderr: %s)", code, &stderr)
 	}
 	if _, err := os.Stat(marker); err != nil {
@@ -159,9 +154,9 @@ func TestSelfUpdateDryRunArguments(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFakeReleases(t, "v0.8.0")
 			in := manualInstall(t)
-			useFakeInstall(t, f, in)
+			a := useFakeInstall(t, f, in)
 			var stdout, stderr bytes.Buffer
-			if code := run(tc.args, &stdout, &stderr); code != 0 {
+			if code := a.run(tc.args, &stdout, &stderr); code != 0 {
 				t.Fatalf("run(%q) = %d, want 0 (stderr: %s)", tc.args, code, &stderr)
 			}
 			if !strings.HasPrefix(stdout.String(), tc.want) {
@@ -193,10 +188,10 @@ func TestSelfUpdateInstallMethods(t *testing.T) {
 			tc.in.Exe = filepath.FromSlash(tc.in.Exe)
 			tc.in.GOPATH = filepath.FromSlash(tc.in.GOPATH)
 			f := newFakeReleases(t, "v0.7.0")
-			useFakeInstall(t, f, tc.in)
+			a := useFakeInstall(t, f, tc.in)
 			for _, args := range [][]string{{"self-update"}, {"self-update", "--dry-run"}, {"self-update", "v0.7.0"}} {
 				var stdout, stderr bytes.Buffer
-				if code := run(args, &stdout, &stderr); code != selfupdate.ExitNotSelfUpdatable {
+				if code := a.run(args, &stdout, &stderr); code != selfupdate.ExitNotSelfUpdatable {
 					t.Errorf("run(%q) = %d, want %d (stderr: %s)", args, code, selfupdate.ExitNotSelfUpdatable, &stderr)
 				}
 				checkContains(t, "stderr", stderr.String(), tc.want, true)
@@ -213,9 +208,9 @@ func TestSelfUpdateInstallMethods(t *testing.T) {
 
 func TestSelfUpdateLatestUnresolved(t *testing.T) {
 	f := newFakeReleases(t, "")
-	useFakeInstall(t, f, manualInstall(t))
+	a := useFakeInstall(t, f, manualInstall(t))
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"self-update"}, &stdout, &stderr); code != selfupdate.ExitFailure {
+	if code := a.run([]string{"self-update"}, &stdout, &stderr); code != selfupdate.ExitFailure {
 		t.Errorf("run(self-update) = %d, want %d", code, selfupdate.ExitFailure)
 	}
 	if !strings.HasPrefix(stderr.String(), "made: cannot resolve the latest release: ") {

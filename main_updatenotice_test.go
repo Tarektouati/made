@@ -16,12 +16,6 @@ import (
 	"github.com/Tarektouati/made/internal/selfupdate"
 )
 
-// Tests must never write to the user's cache directory: a test that forgets
-// useUpdateNotice gets no update check at all.
-func init() {
-	updateCacheDir = func() (string, error) { return "", errors.New("no cache directory in tests") }
-}
-
 // noticeLine is the notice for a v0.6.0 manual install when v0.7.0 is out.
 const noticeLine = "made: v0.7.0 is available (you have v0.6.0); run made self-update\n"
 
@@ -32,6 +26,7 @@ const noticeTasksMD = "### ok\n```sh\nexit 0\n```\n\n### fail\n```sh\nexit 3\n``
 // installed by install.sh, on a terminal, outside CI and with no opt-out, checking
 // srv for releases with its cache in cacheDir.
 type noticeEnv struct {
+	app      *app
 	srv      *fakeReleases
 	cacheDir string
 }
@@ -62,22 +57,17 @@ func (e noticeEnv) readCache(t *testing.T) string {
 	return string(b)
 }
 
-// useUpdateNotice enables the update check for the rest of the test, with releases
-// served by a fake GitHub whose latest release is latest.
+// useUpdateNotice returns an app with releases served by the fake GitHub.
 func useUpdateNotice(t *testing.T, latest string) noticeEnv {
 	t.Helper()
-	e := noticeEnv{srv: newFakeReleases(t, latest), cacheDir: filepath.Join(t.TempDir(), "made")}
-	oldVersion, oldURL, oldDetect, oldDir, oldTTY := version, selfUpdateBaseURL, detectInstall, updateCacheDir, isTerminal
-	t.Cleanup(func() {
-		version, selfUpdateBaseURL, detectInstall, updateCacheDir, isTerminal = oldVersion, oldURL, oldDetect, oldDir, oldTTY
-	})
-	version = "0.6.0"
-	selfUpdateBaseURL = e.srv.srv.URL
-	detectInstall = func(v string, stamped bool) selfupdate.Install {
+	e := noticeEnv{app: newTestApp(), srv: newFakeReleases(t, latest), cacheDir: filepath.Join(t.TempDir(), "made")}
+	e.app.version = "0.6.0"
+	e.app.selfUpdateBaseURL = e.srv.srv.URL
+	e.app.detectInstall = func(v string, stamped bool) selfupdate.Install {
 		return selfupdate.Install{Exe: "/usr/local/bin/made", Version: v, Stamped: stamped, GOOS: "linux", GOARCH: "amd64"}
 	}
-	updateCacheDir = func() (string, error) { return e.cacheDir, nil }
-	isTerminal = func(io.Writer) bool { return true }
+	e.app.updateCacheDir = func() (string, error) { return e.cacheDir, nil }
+	e.app.isTerminal = func(io.Writer) bool { return true }
 	for _, k := range []string{"MADE_NO_UPDATE_CHECK", "NO_UPDATE_NOTIFIER", "CI"} {
 		unsetenv(t, k)
 	}
@@ -127,11 +117,11 @@ func TestUpdateNoticeShown(t *testing.T) {
 
 			t.Setenv("MADE_NO_UPDATE_CHECK", "1")
 			var baseOut, baseErr bytes.Buffer
-			baseCode := run(tt.args, &baseOut, &baseErr)
+			baseCode := e.app.run(tt.args, &baseOut, &baseErr)
 			unsetenv(t, "MADE_NO_UPDATE_CHECK")
 
 			var stdout, stderr bytes.Buffer
-			code := run(tt.args, &stdout, &stderr)
+			code := e.app.run(tt.args, &stdout, &stderr)
 			if code != tt.wantCode || code != baseCode {
 				t.Errorf("exit code = %d, want %d (opted out: %d)", code, tt.wantCode, baseCode)
 			}
@@ -155,7 +145,7 @@ func TestUpdateNoticeOnceADay(t *testing.T) {
 	e.writeCache(t, "v0.7.0", time.Hour)
 	for i, want := range []string{noticeLine, ""} {
 		var stdout, stderr bytes.Buffer
-		run([]string{"-f", f}, &stdout, &stderr)
+		e.app.run([]string{"-f", f}, &stdout, &stderr)
 		if stderr.String() != want {
 			t.Errorf("run %d: stderr = %q, want %q", i+1, &stderr, want)
 		}
@@ -190,10 +180,10 @@ func TestUpdateNoticeDisabled(t *testing.T) {
 				t.Setenv(k, v)
 			}
 			if tt.version != "" {
-				version = tt.version
+				e.app.version = tt.version
 			}
 			var stdout, stderr bytes.Buffer
-			isTerminal = func(w io.Writer) bool {
+			e.app.isTerminal = func(w io.Writer) bool {
 				if w == io.Writer(&stdout) {
 					return tt.ttyStdout
 				}
@@ -201,11 +191,11 @@ func TestUpdateNoticeDisabled(t *testing.T) {
 			}
 			// The background refresh could still be on its way when run returns, so
 			// check that none starts rather than counting requests alone.
-			if c := startUpdateCheck(&stdout, &stderr); c != nil {
+			if c := e.app.startUpdateCheck(&stdout, &stderr); c != nil {
 				t.Error("startUpdateCheck started a check, want none")
 				<-c.Done()
 			}
-			if code := run([]string{"-f", f}, &stdout, &stderr); code != 0 {
+			if code := e.app.run([]string{"-f", f}, &stdout, &stderr); code != 0 {
 				t.Errorf("exit code = %d, want 0", code)
 			}
 			if strings.Contains(stderr.String(), "is available") {
@@ -248,7 +238,7 @@ func TestUpdateNoticeExcludedCommands(t *testing.T) {
 			e.writeCache(t, "v0.7.0", 48*time.Hour) // a notice and a refresh are due
 			before := e.readCache(t)
 			var stdout, stderr bytes.Buffer
-			run(tt.args, &stdout, &stderr)
+			e.app.run(tt.args, &stdout, &stderr)
 			if strings.Contains(stderr.String(), "is available") {
 				t.Errorf("stderr = %q, want no notice", &stderr)
 			}
@@ -277,14 +267,12 @@ func TestUpdateNoticeNoLatency(t *testing.T) {
 		}
 	}))
 	t.Cleanup(func() { unblock(); hang.Close() })
-	selfUpdateBaseURL = hang.URL
-	oldTimeout := updateTimeout
-	t.Cleanup(func() { updateTimeout = oldTimeout })
-	updateTimeout = time.Minute
+	e.app.selfUpdateBaseURL = hang.URL
+	e.app.updateTimeout = time.Minute
 
 	begin := time.Now()
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-f", f}, &stdout, &stderr)
+	code := e.app.run([]string{"-f", f}, &stdout, &stderr)
 	if elapsed := time.Since(begin); elapsed > time.Second {
 		t.Errorf("run took %v with a hanging release server, want no wait", elapsed)
 	}
