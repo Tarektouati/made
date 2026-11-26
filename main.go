@@ -405,6 +405,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		printNames(stdout, tasks)
 		return 0
 	}
+	warnMadefileVersion(stderr, file, source, resolveVersion())
 
 	// Every command that must stay quiet (completion, scripts, init, --check, -V,
 	// self-update) has returned by now. The notice comes from the cache and is printed
