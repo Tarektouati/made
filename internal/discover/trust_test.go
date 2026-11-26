@@ -1,4 +1,4 @@
-package main
+package discover
 
 import (
 	"errors"
@@ -115,24 +115,24 @@ func TestTrustedUIDsFor(t *testing.T) {
 
 func TestUntrustedErrorMessage(t *testing.T) {
 	tests := []struct {
-		err  untrustedError
+		err  UntrustedError
 		want string
 	}{
 		{
-			untrustedError{path: "/p/Madefile.md", subject: "it", problem: untrustedOwner, owner: "nobody (uid 65534)"},
+			UntrustedError{Path: "/p/Madefile.md", subject: "it", problem: untrustedOwner, owner: "nobody (uid 65534)"},
 			"refusing /p/Madefile.md found in a parent directory: it is owned by nobody (uid 65534), not by you or root",
 		},
 		{
-			untrustedError{path: "/p/Madefile.md", subject: "it", problem: groupWritable, mode: 0o664},
+			UntrustedError{Path: "/p/Madefile.md", subject: "it", problem: groupWritable, mode: 0o664},
 			"refusing /p/Madefile.md found in a parent directory: it is group-writable (mode 0664)",
 		},
 		{
-			untrustedError{path: "/p/Madefile.md", subject: "directory /p", problem: worldWritable, mode: fs.ModeDir | 0o777},
+			UntrustedError{Path: "/p/Madefile.md", subject: "directory /p", problem: worldWritable, mode: fs.ModeDir | 0o777},
 			"refusing /p/Madefile.md found in a parent directory: directory /p is world-writable (mode 0777)",
 		},
 		{
 			// A problem without a message of its own must not read as another one.
-			untrustedError{path: "/p/Madefile.md", subject: "it", problem: trustOK, mode: 0o664},
+			UntrustedError{Path: "/p/Madefile.md", subject: "it", problem: trustOK, mode: 0o664},
 			"refusing /p/Madefile.md found in a parent directory: it failed the trust check (problem 0)",
 		},
 	}
@@ -143,7 +143,7 @@ func TestUntrustedErrorMessage(t *testing.T) {
 	}
 }
 
-// TestReadMadefileRefusesAnotherFile checks that readMadefile reads a parent Madefile
+// TestReadMadefileRefusesAnotherFile checks that ReadMadefile reads a parent Madefile
 // only if it is still the file checkParentMadefile checked.
 func TestReadMadefileRefusesAnotherFile(t *testing.T) {
 	dir := t.TempDir()
@@ -157,11 +157,11 @@ func TestReadMadefileRefusesAnotherFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = readMadefile(path, false, other); !errors.Is(err, errChangedAfterCheck) {
-		t.Errorf("readMadefile with another file's FileInfo: err = %v, want %v", err, errChangedAfterCheck)
+	if _, _, err = ReadMadefile(path, false, other); !errors.Is(err, ErrChangedAfterCheck) {
+		t.Errorf("readMadefile with another file's FileInfo: err = %v, want %v", err, ErrChangedAfterCheck)
 	}
 	for _, trusted := range []fs.FileInfo{self, nil} {
-		if _, _, err = readMadefile(path, false, trusted); err != nil {
+		if _, _, err = ReadMadefile(path, false, trusted); err != nil {
 			t.Errorf("readMadefile(trusted %v) = %v, want nil", trusted, err)
 		}
 	}

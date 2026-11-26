@@ -1,4 +1,4 @@
-package main
+package discover
 
 import (
 	"fmt"
@@ -73,16 +73,16 @@ func parseSudoUID(s string) (uint32, bool) {
 	return uint32(n), true
 }
 
-// untrustedError is the error for a parent Madefile that failed checkTrust.
-type untrustedError struct {
-	path    string // the Madefile as discovered
+// UntrustedError is the error for a parent Madefile that failed checkTrust.
+type UntrustedError struct {
+	Path    string // the Madefile as discovered
 	subject string // what failed: "it", or a kind and path such as "directory /tmp/x"
 	problem trustProblem
 	owner   string // the owner, as a name and uid when known, for untrustedOwner
 	mode    fs.FileMode
 }
 
-func (e *untrustedError) Error() string {
+func (e *UntrustedError) Error() string {
 	var why string
 	switch e.problem {
 	case untrustedOwner:
@@ -94,5 +94,5 @@ func (e *untrustedError) Error() string {
 	default:
 		why = fmt.Sprintf("failed the trust check (problem %d)", e.problem)
 	}
-	return fmt.Sprintf("refusing %s found in a parent directory: %s %s", e.path, e.subject, why)
+	return fmt.Sprintf("refusing %s found in a parent directory: %s %s", e.Path, e.subject, why)
 }

@@ -155,10 +155,10 @@ jobs:
         if: ${{ !cancelled() && runner.os != 'Windows' }}
         timeout-minutes: 8
         run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' made test-pkg -v ${{ matrix.race }} -count=1 -timeout 5m .
-      - name: Test ./internal/parser ./internal/completion ./internal/lint ./internal/testenv ./internal/selfupdate ./internal/updatecheck ./internal/task
+      - name: Test ./internal/parser ./internal/completion ./internal/lint ./internal/testenv ./internal/selfupdate ./internal/updatecheck ./internal/task ./internal/discover ./internal/display
         if: ${{ !cancelled() && runner.os != 'Windows' }}
         timeout-minutes: 8
-        run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' made test-pkg -v ${{ matrix.race }} -count=1 -timeout 5m ./internal/parser ./internal/completion ./internal/lint ./internal/testenv ./internal/selfupdate ./internal/updatecheck ./internal/task
+        run: perl -MPOSIX -e 'POSIX::setsid() or die "setsid failed " . $!; exec @ARGV' made test-pkg -v ${{ matrix.race }} -count=1 -timeout 5m ./internal/parser ./internal/completion ./internal/lint ./internal/testenv ./internal/selfupdate ./internal/updatecheck ./internal/task ./internal/discover ./internal/display
 
   # govulncheck for each build-matrix target through the Madefile's vulncheck
   # task, with the Go pinned in .prototools. Also runs on the weekly schedule.

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tarektouati/made/internal/discover"
+	"github.com/Tarektouati/made/internal/display"
 	"github.com/Tarektouati/made/internal/lint"
 	"github.com/Tarektouati/made/internal/parser"
 	"github.com/Tarektouati/made/internal/task"
@@ -50,10 +51,15 @@ type runCase struct {
 
 func checkRunCases(t *testing.T, cases []runCase) {
 	t.Helper()
+	newTestApp().checkRunCases(t, cases)
+}
+
+func (a *app) checkRunCases(t *testing.T, cases []runCase) {
+	t.Helper()
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			code := run(tt.args, &stdout, &stderr)
+			code := a.run(tt.args, &stdout, &stderr)
 			if code != tt.wantCode {
 				t.Errorf("run(%q) = %d, want %d\nstdout: %s\nstderr: %s", tt.args, code, tt.wantCode, &stdout, &stderr)
 			}
@@ -123,10 +129,10 @@ func TestReadErrorPath(t *testing.T) {
 		if statErr == nil {
 			t.Fatalf("%q exists", tc.path)
 		}
-		want := "made: cannot read " + tc.shown + ": " + pathErrReason(statErr).Error() + "\n"
+		want := "made: cannot read " + tc.shown + ": " + display.PathOnlyOnce(tc.path, statErr).Error() + "\n"
 		for _, args := range [][]string{{"-f", tc.path}, {"--check", "-f", tc.path}} {
 			var stdout, stderr bytes.Buffer
-			if code := run(args, &stdout, &stderr); code != 1 {
+			if code := newTestApp().run(args, &stdout, &stderr); code != 1 {
 				t.Errorf("run(%q) = %d, want 1", args, code)
 			}
 			if got := stderr.String(); got != want {
@@ -158,7 +164,7 @@ func TestFlagErrors(t *testing.T) {
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			if code := run(tc.args, &stdout, &stderr); code != 2 {
+			if code := newTestApp().run(tc.args, &stdout, &stderr); code != 2 {
 				t.Errorf("run(%q) = %d, want 2", tc.args, code)
 			}
 			if got := stderr.String(); got != tc.want {
@@ -204,7 +210,7 @@ func TestUsage(t *testing.T) {
 	checkRunCases(t, cases)
 
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"--help"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
+	if code := newTestApp().run([]string{"--help"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
 		t.Fatalf("run(--help) = %d, stderr %q; want 0 and empty", code, &stderr)
 	}
 	_, opts, ok := strings.Cut(stdout.String(), "Options:")
@@ -257,29 +263,13 @@ func TestRunDeepNestingHintQuotesPath(t *testing.T) {
 				t.Fatal(err)
 			}
 			var stdout, stderr bytes.Buffer
-			if code := run([]string{"-f", tc.file, "-l"}, &stdout, &stderr); code != 1 {
+			if code := newTestApp().run([]string{"-f", tc.file, "-l"}, &stdout, &stderr); code != 1 {
 				t.Errorf("run = %d, want 1", code)
 			}
 			if got := stderr.String(); !strings.HasSuffix(got, tc.want) {
 				t.Errorf("stderr = %q, want it to end with %q", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestShellQuotePath(t *testing.T) {
-	for _, tc := range []struct{ path, want string }{
-		{"Madefile.md", "Madefile.md"},
-		{"docs/tasks-v2.md", "docs/tasks-v2.md"},
-		{"my tasks.md", "'my tasks.md'"},
-		{"it's.md", `'it'\''s.md'`},
-		{"a;b$c.md", "'a;b$c.md'"},
-		{"x\x1b.md", `'x\x1b.md'`},
-		{"", "''"},
-	} {
-		if got := shellQuotePath(tc.path); got != tc.want {
-			t.Errorf("shellQuotePath(%q) = %s, want %s", tc.path, got, tc.want)
-		}
 	}
 }
 
@@ -339,7 +329,7 @@ func TestRunArgsTooLarge(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"-f", f, "s", strings.Repeat("a", 4<<20)}, &stdout, &stderr)
+	code := newTestApp().run([]string{"-f", f, "s", strings.Repeat("a", 4<<20)}, &stdout, &stderr)
 	if code != 126 {
 		t.Errorf("run = %d, want 126\nstderr: %s", code, &stderr)
 	}
@@ -403,10 +393,11 @@ func TestWatchSignals(t *testing.T) {
 // TestRunIsReentrant guards against a return to package-global flag state, which
 // panics with "flag redefined" on the second call.
 func TestRunIsReentrant(t *testing.T) {
+	a := newTestApp()
 	f := writeRunTasks(t)
 	for i := range 2 {
 		var stdout, stderr bytes.Buffer
-		if code := run([]string{"-f", f}, &stdout, &stderr); code != 0 {
+		if code := a.run([]string{"-f", f}, &stdout, &stderr); code != 0 {
 			t.Fatalf("call %d: run = %d, want 0 (stderr: %s)", i+1, code, &stderr)
 		}
 		if !strings.Contains(stdout.String(), "hello") {
@@ -415,9 +406,8 @@ func TestRunIsReentrant(t *testing.T) {
 	}
 }
 
-func TestResolveVersionUsesLdflagsVar(t *testing.T) {
-	saved := version
-	t.Cleanup(func() { version = saved })
+func TestResolveVersionUsesBuildVersion(t *testing.T) {
+	t.Parallel()
 
 	tests := []struct {
 		name    string
@@ -430,16 +420,15 @@ func TestResolveVersionUsesLdflagsVar(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			version = tt.ldflags
-			if got := resolveVersion(); got != tt.want {
+			t.Parallel()
+			if got := resolveVersion(tt.ldflags); got != tt.want {
 				t.Errorf("resolveVersion() = %q, want %q", got, tt.want)
 			}
 		})
 	}
 
 	// With no injected version, the resolver still returns a non-empty fallback.
-	version = ""
-	if got := resolveVersion(); got == "" {
+	if got := resolveVersion(""); got == "" {
 		t.Error("resolveVersion() = empty, want a non-empty fallback")
 	}
 }
@@ -528,7 +517,7 @@ func TestFindMadefile(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
 			mkTree(t, root, tt.paths...)
-			dir, name, others, skipped, ok := findMadefile(filepath.Join(root, filepath.FromSlash(tt.start)), "")
+			dir, name, others, skipped, ok := discover.FindMadefile(filepath.Join(root, filepath.FromSlash(tt.start)), "")
 			wantDir := ""
 			if tt.wantOK {
 				wantDir = filepath.Join(root, filepath.FromSlash(tt.wantDir))
@@ -539,7 +528,7 @@ func TestFindMadefile(t *testing.T) {
 			}
 			var gotSkipped, wantSkipped []string
 			for _, s := range skipped {
-				gotSkipped = append(gotSkipped, s.path)
+				gotSkipped = append(gotSkipped, s.Path)
 			}
 			for _, p := range tt.wantSkipped {
 				wantSkipped = append(wantSkipped, filepath.Join(root, filepath.FromSlash(p)))
@@ -592,7 +581,7 @@ func TestFindMadefileSkipsUnusable(t *testing.T) {
 			}
 			a := filepath.Join(root, "a")
 			tt.bad(t, a)
-			dir, name, _, skipped, ok := findMadefile(a, "")
+			dir, name, _, skipped, ok := discover.FindMadefile(a, "")
 			if tt.rootFile && (!ok || dir != root || name != "Madefile.md") {
 				t.Errorf("findMadefile = (%q, %q, %v), want (%q, %q, true)", dir, name, ok, root, "Madefile.md")
 			}
@@ -600,7 +589,7 @@ func TestFindMadefileSkipsUnusable(t *testing.T) {
 				t.Errorf("findMadefile = (%q, %q, true), want not found", dir, name)
 			}
 			wantPath := filepath.Join(a, tt.wantPath)
-			if len(skipped) != 1 || skipped[0].path != wantPath || !strings.Contains(skipped[0].err.Error(), tt.wantReason) {
+			if len(skipped) != 1 || skipped[0].Path != wantPath || !strings.Contains(skipped[0].Err.Error(), tt.wantReason) {
 				t.Errorf("findMadefile skipped = %+v, want one entry for %q containing %q", skipped, wantPath, tt.wantReason)
 			}
 		})
@@ -633,7 +622,7 @@ func mkSymlink(t *testing.T, target, link string) {
 func TestFindMadefileWalksToRoot(t *testing.T) {
 	root := t.TempDir()
 	mkTree(t, root, "Madefile.md", "a/b/c/")
-	dir, name, _, _, ok := findMadefile(filepath.Join(root, "a", "b", "c"), "")
+	dir, name, _, _, ok := discover.FindMadefile(filepath.Join(root, "a", "b", "c"), "")
 	if !ok || dir != root || name != "Madefile.md" {
 		t.Errorf("findMadefile = (%q, %q, %v), want (%q, %q, true)", dir, name, ok, root, "Madefile.md")
 	}
@@ -654,7 +643,7 @@ func TestFindMadefilePriority(t *testing.T) {
 			root := t.TempDir()
 			requireCaseSensitiveFS(t, root)
 			mkTree(t, root, append([]string{".git/"}, tt.paths...)...)
-			_, name, others, _, ok := findMadefile(root, "")
+			_, name, others, _, ok := discover.FindMadefile(root, "")
 			if !ok || name != tt.wantName || strings.Join(others, ",") != strings.Join(tt.wantOthers, ",") {
 				t.Errorf("findMadefile = (%q, %q, %v), want (%q, %q, true)", name, others, ok, tt.wantName, tt.wantOthers)
 			}
@@ -672,7 +661,7 @@ func TestIsRegularFile(t *testing.T) {
 		t.Error("isRegularFile(regular file) = false, want true")
 	}
 
-	dirPath := filepath.Join(dir, madefileNames[0])
+	dirPath := filepath.Join(dir, discover.Names()[0])
 	if err := os.Mkdir(dirPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -699,7 +688,7 @@ func TestRunSkipsFIFOForDiscovery(t *testing.T) {
 		mkFIFO(t, filepath.Join(dir, "Madefile.md"))
 		t.Chdir(dir)
 		var stdout, stderr bytes.Buffer
-		code := run([]string{"-l"}, &stdout, &stderr)
+		code := newTestApp().run([]string{"-l"}, &stdout, &stderr)
 		if code != 1 {
 			t.Errorf("run(-l) = %d, want 1", code)
 		}
@@ -715,7 +704,7 @@ func TestRunSkipsFIFOForDiscovery(t *testing.T) {
 		mkFIFO(t, filepath.Join(dir, "sub", "Madefile.md"))
 		t.Chdir(filepath.Join(dir, "sub", "nested"))
 		var stdout, stderr bytes.Buffer
-		code := run([]string{"-l"}, &stdout, &stderr)
+		code := newTestApp().run([]string{"-l"}, &stdout, &stderr)
 		if code != 0 {
 			t.Fatalf("run(-l) = %d, want 0 (stderr: %s)", code, stderr.String())
 		}
@@ -750,7 +739,7 @@ func TestRunWarnsOnUnusableMadefile(t *testing.T) {
 			mkSymlink(t, "missing.md", filepath.Join(dir, "sub", "Madefile.md"))
 			t.Chdir(filepath.Join(dir, "sub"))
 			var stdout, stderr bytes.Buffer
-			code := run([]string{"hello"}, &stdout, &stderr)
+			code := newTestApp().run([]string{"hello"}, &stdout, &stderr)
 			if code != tt.wantCode {
 				t.Errorf("run(hello) = %d, want %d (stderr: %s)", code, tt.wantCode, stderr.String())
 			}
@@ -792,7 +781,7 @@ func TestRunFailsOnUnreadableMadefile(t *testing.T) {
 			tt.bad(t, sub)
 			t.Chdir(sub)
 			var stdout, stderr bytes.Buffer
-			code := run([]string{"hello"}, &stdout, &stderr)
+			code := newTestApp().run([]string{"hello"}, &stdout, &stderr)
 			if code != 1 {
 				t.Errorf("run(hello) = %d, want 1 (stderr: %s)", code, stderr.String())
 			}
@@ -825,9 +814,9 @@ func TestRunReadsExplicitFIFO(t *testing.T) {
 		{name: "check clean", check: true, content: clean, runCase: runCase{notStdout: []string{"problem"}}},
 		{name: "check errors", check: true, content: "### a\n```yaml\nk\n```\n",
 			runCase: runCase{wantCode: 1, wantStdout: []string{":2: error: unsupported-language: "}}},
-		{name: "list too large", content: strings.Repeat("x", maxMadefileBytes+1),
+		{name: "list too large", content: strings.Repeat("x", discover.MaxMadefileBytes+1),
 			runCase: runCase{wantCode: 1, wantStderr: []string{"exceeds maximum size"}}},
-		{name: "check too large", check: true, content: strings.Repeat("x", maxMadefileBytes+1),
+		{name: "check too large", check: true, content: strings.Repeat("x", discover.MaxMadefileBytes+1),
 			runCase: runCase{wantCode: 1, wantStdout: []string{": error: file-too-large: "}}},
 	}
 	for _, tt := range tests {
@@ -857,7 +846,7 @@ func TestListNamesRefusesExplicitFIFO(t *testing.T) {
 	done := make(chan result, 1)
 	go func() {
 		var stdout, stderr bytes.Buffer
-		code := run([]string{"-f", fifo, "--list-names"}, &stdout, &stderr)
+		code := newTestApp().run([]string{"-f", fifo, "--list-names"}, &stdout, &stderr)
 		done <- result{code, stderr.String()}
 	}()
 	select {
@@ -875,8 +864,8 @@ func TestRunExplicitDirectory(t *testing.T) {
 	dir := t.TempDir()
 	for _, args := range [][]string{{"-f", dir, "-l"}, {"--check", "-f", dir}} {
 		var stdout, stderr bytes.Buffer
-		code := run(args, &stdout, &stderr)
-		if want := "made: cannot read " + displayPath(dir) + ": is a directory\n"; code != 1 || stderr.String() != want {
+		code := newTestApp().run(args, &stdout, &stderr)
+		if want := "made: cannot read " + display.Path(dir) + ": is a directory\n"; code != 1 || stderr.String() != want {
 			t.Errorf("run(%q) = %d, stderr %q; want 1, %q", args, code, stderr.String(), want)
 		}
 	}
@@ -887,7 +876,7 @@ func TestRunExplicitDevNull(t *testing.T) {
 		t.Skip("/dev/null needs Unix")
 	}
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"-f", os.DevNull, "-l"}, &stdout, &stderr); code != 0 {
+	if code := newTestApp().run([]string{"-f", os.DevNull, "-l"}, &stdout, &stderr); code != 0 {
 		t.Errorf("run(-f /dev/null -l) = %d, want 0 (stderr: %s)", code, &stderr)
 	}
 }
@@ -897,7 +886,7 @@ func TestReadMadefileDiscoveryRejectsFIFO(t *testing.T) {
 	mkFIFO(t, fifo)
 	done := make(chan error, 1)
 	go func() {
-		_, _, err := readMadefile(fifo, false, nil)
+		_, _, err := discover.ReadMadefile(fifo, false, nil)
 		done <- err
 	}()
 	select {
@@ -917,13 +906,13 @@ func TestReadMadefileRejectsOversize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = f.Truncate(maxMadefileBytes + 1); err != nil {
+	if err = f.Truncate(discover.MaxMadefileBytes + 1); err != nil {
 		t.Fatal(err)
 	}
 	if err = f.Close(); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = readMadefile(path, false, nil)
+	_, _, err = discover.ReadMadefile(path, false, nil)
 	if err == nil {
 		t.Fatal("readMadefile(oversize) = nil, want error")
 	}
@@ -1001,7 +990,7 @@ func TestRunEmptyScript(t *testing.T) {
 func TestCheckExactOutput(t *testing.T) {
 	f := writeTemp(t, "tasks.md", "### a\n```bash\nx\n```\n### a\n```bash\n```\n### b\nprose\n")
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"--check", "-f", f}, &stdout, &stderr)
+	code := newTestApp().run([]string{"--check", "-f", f}, &stdout, &stderr)
 	want := f + `:5: error: duplicate-task: "a" already defined at line 1` + "\n" +
 		f + `:6: error: empty-script: task "a" has an empty code block` + "\n" +
 		f + `:8: warning: no-code-block: heading "b" has no code block, so it is not a task` + "\n" +
@@ -1017,7 +1006,7 @@ func TestCheckFileTooLarge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = f.Truncate(maxMadefileBytes + 1); err != nil {
+	if err = f.Truncate(discover.MaxMadefileBytes + 1); err != nil {
 		t.Fatal(err)
 	}
 	if err = f.Close(); err != nil {
@@ -1031,11 +1020,11 @@ func TestCheckFileTooLarge(t *testing.T) {
 
 func TestResolveFileExplicitIsUnchanged(t *testing.T) {
 	t.Chdir(t.TempDir())
-	got, err := resolveFile("some/tasks.md")
+	got, err := discover.ResolveFile("some/tasks.md")
 	if err != nil {
 		t.Fatalf("resolveFile: %v", err)
 	}
-	if got.path != "some/tasks.md" || got.fromParent || len(got.others) != 0 {
+	if got.Path != "some/tasks.md" || got.FromParent || len(got.Others) != 0 {
 		t.Errorf("resolveFile = %+v, want path %q only", got, "some/tasks.md")
 	}
 }
@@ -1044,11 +1033,11 @@ func TestResolveFileInCwdKeepsShortName(t *testing.T) {
 	dir := t.TempDir()
 	mkTree(t, dir, ".git/", "Madefile.md")
 	t.Chdir(dir)
-	got, err := resolveFile("")
+	got, err := discover.ResolveFile("")
 	if err != nil {
 		t.Fatalf("resolveFile: %v", err)
 	}
-	if got.path != "Madefile.md" || got.fromParent {
+	if got.Path != "Madefile.md" || got.FromParent {
 		t.Errorf("resolveFile = %+v, want path %q, fromParent false", got, "Madefile.md")
 	}
 }
@@ -1057,7 +1046,7 @@ func TestResolveFileFromParent(t *testing.T) {
 	dir := t.TempDir()
 	mkTree(t, dir, ".git/", "Madefile.md", "a/")
 	t.Chdir(filepath.Join(dir, "a"))
-	got, err := resolveFile("")
+	got, err := discover.ResolveFile("")
 	if err != nil {
 		t.Fatalf("resolveFile: %v", err)
 	}
@@ -1068,7 +1057,7 @@ func TestResolveFileFromParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := filepath.Join(physical, "Madefile.md")
-	if got.path != want || !got.fromParent {
+	if got.Path != want || !got.FromParent {
 		t.Errorf("resolveFile = %+v, want path %q, fromParent true", got, want)
 	}
 }
@@ -1092,7 +1081,7 @@ func TestResolveFileThroughSymlinkedCwd(t *testing.T) {
 			link := filepath.Join(root, "sd", "link")
 			mkSymlink(t, filepath.FromSlash(tt.target), link)
 			t.Chdir(link) // sets $PWD to the logical path, like a shell's cd
-			got, err := resolveFile("")
+			got, err := discover.ResolveFile("")
 			if err != nil {
 				t.Fatalf("resolveFile: %v", err)
 			}
@@ -1104,7 +1093,7 @@ func TestResolveFileThroughSymlinkedCwd(t *testing.T) {
 				}
 				want = filepath.Join(physical, "Madefile.md")
 			}
-			if got.path != want || got.fromParent != tt.wantFromParent {
+			if got.Path != want || got.FromParent != tt.wantFromParent {
 				t.Errorf("resolveFile = %+v, want path %q, fromParent %v", got, want, tt.wantFromParent)
 			}
 		})
@@ -1116,11 +1105,11 @@ func TestResolveFileDuplicateOthers(t *testing.T) {
 	requireCaseSensitiveFS(t, dir)
 	mkTree(t, dir, ".git/", "Madefile.md", "madefile.md")
 	t.Chdir(dir)
-	got, err := resolveFile("")
+	got, err := discover.ResolveFile("")
 	if err != nil {
 		t.Fatalf("resolveFile: %v", err)
 	}
-	if got.path != "Madefile.md" || strings.Join(got.others, ",") != "madefile.md" {
+	if got.Path != "Madefile.md" || strings.Join(got.Others, ",") != "madefile.md" {
 		t.Errorf("resolveFile = %+v, want path %q, others [madefile.md]", got, "Madefile.md")
 	}
 }
@@ -1129,7 +1118,7 @@ func TestResolveFileNotFound(t *testing.T) {
 	dir := t.TempDir()
 	mkTree(t, dir, ".git/", "README.md")
 	t.Chdir(dir)
-	_, err := resolveFile("")
+	_, err := discover.ResolveFile("")
 	if err == nil {
 		t.Fatal("resolveFile: want error, got nil")
 	}
@@ -1156,7 +1145,7 @@ func TestResolveFileNotFoundThroughSymlinkedCwd(t *testing.T) {
 	link := filepath.Join(root, "sd", "link")
 	mkSymlink(t, filepath.Join("..", "other", "real", "deep"), link)
 	t.Chdir(link)
-	_, err := resolveFile("")
+	_, err := discover.ResolveFile("")
 	if err == nil {
 		t.Fatal("resolveFile: want error, got nil")
 	}
@@ -1171,13 +1160,12 @@ func TestResolveFileNotFoundThroughSymlinkedCwd(t *testing.T) {
 }
 
 func TestInitCreatesMadefile(t *testing.T) {
-	saved := version
-	t.Cleanup(func() { version = saved })
-	version = "1.2.3" // as goreleaser injects it: no leading "v"
+	a := newTestApp()
+	a.version = "1.2.3" // as goreleaser injects it: no leading "v"
 	dir := t.TempDir()
 	t.Chdir(dir)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"init"}, &stdout, &stderr); code != 0 {
+	if code := a.run([]string{"init"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("run(init) = %d, want 0 (stderr: %s)", code, &stderr)
 	}
 	if got := stdout.String(); got != "made: created Madefile.md\n" {
@@ -1224,10 +1212,10 @@ func TestInitTemplateIsValid(t *testing.T) {
 }
 
 func TestInitRefusesExisting(t *testing.T) {
-	for _, name := range madefileNames {
+	for _, name := range discover.Names() {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
-			if name != madefileNames[0] {
+			if name != discover.Names()[0] {
 				// Probe a sibling dir: the probe file would break the entry count below.
 				requireCaseSensitiveFS(t, t.TempDir())
 			}
@@ -1237,16 +1225,16 @@ func TestInitRefusesExisting(t *testing.T) {
 			}
 			t.Chdir(dir)
 			var stdout, stderr bytes.Buffer
-			if code := run([]string{"init"}, &stdout, &stderr); code != 1 {
+			if code := newTestApp().run([]string{"init"}, &stdout, &stderr); code != 1 {
 				t.Errorf("run(init) = %d, want 1", code)
 			}
 			checkContains(t, "stderr", stderr.String(), []string{name + " already exists", "made init --force"}, true)
 			if got, _ := os.ReadFile(path); string(got) != "keep me" {
 				t.Errorf("%s = %q, want it untouched", name, got)
 			}
-			if name != madefileNames[0] {
-				if _, err := os.Stat(filepath.Join(dir, madefileNames[0])); err == nil {
-					t.Errorf("%s was created next to %s", madefileNames[0], name)
+			if name != discover.Names()[0] {
+				if _, err := os.Stat(filepath.Join(dir, discover.Names()[0])); err == nil {
+					t.Errorf("%s was created next to %s", discover.Names()[0], name)
 				}
 			}
 		})
@@ -1260,7 +1248,7 @@ func TestInitIgnoresParentMadefile(t *testing.T) {
 	mkTree(t, dir, ".git/", "Madefile.md", "sub/")
 	t.Chdir(filepath.Join(dir, "sub"))
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"init"}, &stdout, &stderr); code != 0 {
+	if code := newTestApp().run([]string{"init"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("run(init) = %d, want 0 (stderr: %s)", code, &stderr)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "sub", "Madefile.md")); err != nil {
@@ -1300,7 +1288,7 @@ func TestInitIsReserved(t *testing.T) {
 	}
 	t.Chdir(dir)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"init"}, &stdout, &stderr); code != 1 {
+	if code := newTestApp().run([]string{"init"}, &stdout, &stderr); code != 1 {
 		t.Errorf("run(init) = %d, want 1", code)
 	}
 	if _, err := os.Stat(marker); err == nil {
@@ -1309,10 +1297,10 @@ func TestInitIsReserved(t *testing.T) {
 }
 
 func TestInitForceOverwrites(t *testing.T) {
-	for _, name := range madefileNames {
+	for _, name := range discover.Names() {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
-			if name != madefileNames[0] {
+			if name != discover.Names()[0] {
 				// Probe a sibling dir: the probe file would break the entry count below.
 				requireCaseSensitiveFS(t, t.TempDir())
 			}
@@ -1322,13 +1310,13 @@ func TestInitForceOverwrites(t *testing.T) {
 			}
 			t.Chdir(dir)
 			var stdout, stderr bytes.Buffer
-			if code := run([]string{"init", "--force"}, &stdout, &stderr); code != 0 {
+			if code := newTestApp().run([]string{"init", "--force"}, &stdout, &stderr); code != 0 {
 				t.Fatalf("run(init --force) = %d, want 0 (stderr: %s)", code, &stderr)
 			}
 			if want := "made: overwrote " + name + "\n"; stdout.String() != want {
 				t.Errorf("stdout = %q, want %q", stdout.String(), want)
 			}
-			if got, _ := os.ReadFile(path); string(got) != initTemplate(resolveVersion()) {
+			if got, _ := os.ReadFile(path); string(got) != initTemplate(resolveVersion("")) {
 				t.Errorf("%s = %q, want the template", name, got)
 			}
 			if entries, _ := os.ReadDir(dir); len(entries) != 1 {
@@ -1342,13 +1330,13 @@ func TestInitForceWithoutExisting(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"init", "--force"}, &stdout, &stderr); code != 0 {
+	if code := newTestApp().run([]string{"init", "--force"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("run(init --force) = %d, want 0 (stderr: %s)", code, &stderr)
 	}
 	if got := stdout.String(); got != "made: created Madefile.md\n" {
 		t.Errorf("stdout = %q, want %q", got, "made: created Madefile.md\n")
 	}
-	if got, _ := os.ReadFile(filepath.Join(dir, "Madefile.md")); string(got) != initTemplate(resolveVersion()) {
+	if got, _ := os.ReadFile(filepath.Join(dir, "Madefile.md")); string(got) != initTemplate(resolveVersion("")) {
 		t.Errorf("Madefile.md = %q, want the template", got)
 	}
 }
@@ -1365,14 +1353,14 @@ func TestInitForceMultiple(t *testing.T) {
 	}
 	t.Chdir(dir)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"init", "--force"}, &stdout, &stderr); code != 0 {
+	if code := newTestApp().run([]string{"init", "--force"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("run(init --force) = %d, want 0 (stderr: %s)", code, &stderr)
 	}
 	if got := stdout.String(); got != "made: overwrote Madefile.md\n" {
 		t.Errorf("stdout = %q, want %q", got, "made: overwrote Madefile.md\n")
 	}
 	checkContains(t, "stderr", stderr.String(), []string{"also found madefile.md; left unchanged"}, true)
-	if got, _ := os.ReadFile("Madefile.md"); string(got) != initTemplate(resolveVersion()) {
+	if got, _ := os.ReadFile("Madefile.md"); string(got) != initTemplate(resolveVersion("")) {
 		t.Errorf("Madefile.md = %q, want the template", got)
 	}
 	if got, _ := os.ReadFile("madefile.md"); string(got) != "old madefile.md" {
@@ -1391,13 +1379,13 @@ func TestInitForceSkipsDirectory(t *testing.T) {
 	}
 	t.Chdir(dir)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"init", "--force"}, &stdout, &stderr); code != 0 {
+	if code := newTestApp().run([]string{"init", "--force"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("run(init --force) = %d, want 0 (stderr: %s)", code, &stderr)
 	}
 	if got := stdout.String(); got != "made: overwrote madefile.md\n" {
 		t.Errorf("stdout = %q, want %q", got, "made: overwrote madefile.md\n")
 	}
-	if got, _ := os.ReadFile("madefile.md"); string(got) != initTemplate(resolveVersion()) {
+	if got, _ := os.ReadFile("madefile.md"); string(got) != initTemplate(resolveVersion("")) {
 		t.Errorf("madefile.md = %q, want the template", got)
 	}
 	if info, err := os.Stat("Madefile.md"); err != nil || !info.IsDir() {
@@ -1438,7 +1426,7 @@ func TestWriteTemplateNoFollowRefusesSymlink(t *testing.T) {
 	}
 	repo, target := initSymlinkMadefileTree(t)
 	t.Chdir(repo)
-	if err := writeTemplate("Madefile.md", os.O_TRUNC|initForceNoFollow); err == nil {
+	if err := newTestApp().writeTemplate("Madefile.md", os.O_TRUNC|initForceNoFollow); err == nil {
 		t.Fatal("writeTemplate on symlink with O_NOFOLLOW = nil, want error")
 	}
 	if got, _ := os.ReadFile(target); string(got) != "ORIGINAL" {
@@ -1451,7 +1439,7 @@ func TestInitForceRefusesSymlink(t *testing.T) {
 	repo, target := initSymlinkMadefileTree(t)
 	t.Chdir(repo)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"init", "--force"}, &stdout, &stderr); code != 1 {
+	if code := newTestApp().run([]string{"init", "--force"}, &stdout, &stderr); code != 1 {
 		t.Fatalf("run(init --force) = %d, want 1 (stdout: %q, stderr: %q)", code, &stdout, &stderr)
 	}
 	checkContains(t, "stderr", stderr.String(), []string{"Madefile.md", "symlink", "refusing"}, true)
@@ -1471,7 +1459,7 @@ func TestInitRefusesSymlinkWithoutFollowing(t *testing.T) {
 	repo, target := initSymlinkMadefileTree(t)
 	t.Chdir(repo)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"init"}, &stdout, &stderr); code != 1 {
+	if code := newTestApp().run([]string{"init"}, &stdout, &stderr); code != 1 {
 		t.Errorf("run(init) = %d, want 1", code)
 	}
 	checkContains(t, "stderr", stderr.String(), []string{"Madefile.md already exists", "made init --force"}, true)
@@ -1501,7 +1489,7 @@ func checkInitNonRegular(t *testing.T, want string) {
 	t.Helper()
 	for _, args := range [][]string{{"init"}, {"init", "--force"}} {
 		var stdout, stderr bytes.Buffer
-		if code := run(args, &stdout, &stderr); code != 1 {
+		if code := newTestApp().run(args, &stdout, &stderr); code != 1 {
 			t.Errorf("run(%q) = %d, want 1", args, code)
 		}
 		if got := stderr.String(); got != want {
@@ -1521,7 +1509,7 @@ func TestInitForceFIFO(t *testing.T) {
 	t.Chdir(dir)
 	var stdout, stderr bytes.Buffer
 	done := make(chan int, 1)
-	go func() { done <- run([]string{"init", "--force"}, &stdout, &stderr) }()
+	go func() { done <- newTestApp().run([]string{"init", "--force"}, &stdout, &stderr) }()
 	select {
 	case code := <-done:
 		if code != 1 {
@@ -1563,7 +1551,7 @@ func TestCompletionIsReserved(t *testing.T) {
 	}
 	t.Chdir(dir)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"completion", "bash"}, &stdout, &stderr); code != 0 {
+	if code := newTestApp().run([]string{"completion", "bash"}, &stdout, &stderr); code != 0 {
 		t.Errorf("run(completion bash) = %d, want 0 (stderr: %s)", code, &stderr)
 	}
 	if _, err := os.Stat(marker); err == nil {
@@ -1574,7 +1562,7 @@ func TestCompletionIsReserved(t *testing.T) {
 func TestListNames(t *testing.T) {
 	f := writeRunTasks(t)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"-f", f, "--list-names"}, &stdout, &stderr); code != 0 {
+	if code := newTestApp().run([]string{"-f", f, "--list-names"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("run(--list-names) = %d, want 0 (stderr: %s)", code, &stderr)
 	}
 	want := "hello\tSay hello.\ncheck\t\ncheckdash\t\n"
@@ -1597,7 +1585,7 @@ func TestListNamesSkipsEmptyName(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"-f", path, "--list-names"}, &stdout, &stderr); code != 0 {
+	if code := newTestApp().run([]string{"-f", path, "--list-names"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("run(--list-names) = %d, want 0 (stderr: %s)", code, &stderr)
 	}
 	if got, want := stdout.String(), "hello\tSay hello.\n"; got != want {
@@ -1617,7 +1605,7 @@ func TestListNamesSkipsDuplicateNote(t *testing.T) {
 	}
 	t.Chdir(dir)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"--list-names"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
+	if code := newTestApp().run([]string{"--list-names"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
 		t.Errorf("run(--list-names) = %d, stderr %q; want 0 and empty", code, &stderr)
 	}
 }
@@ -1647,7 +1635,7 @@ func TestRunWarnsDuplicateTask(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			code := run(append([]string{"-f", f}, tc.args...), &stdout, &stderr)
+			code := newTestApp().run(append([]string{"-f", f}, tc.args...), &stdout, &stderr)
 			if code != tc.wantCode {
 				t.Errorf("run = %d, want %d (stderr: %s)", code, tc.wantCode, &stderr)
 			}
@@ -1675,7 +1663,7 @@ func TestRunUsingNoteBeforeDuplicateWarning(t *testing.T) {
 	}
 	t.Chdir(sub)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"dup"}, &stdout, &stderr); code != 0 {
+	if code := newTestApp().run([]string{"dup"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("run = %d, want 0 (stderr: %s)", code, &stderr)
 	}
 	got := stderr.String()
@@ -1687,7 +1675,7 @@ func TestRunUsingNoteBeforeDuplicateWarning(t *testing.T) {
 func TestRunWarnsEachRedefinition(t *testing.T) {
 	f := writeTemp(t, "Madefile.md", "### a\n```bash\nexit 0\n```\n### a\n```bash\nexit 3\n```\n### a\n```bash\nexit 4\n```\n")
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"-f", f, "a"}, &stdout, &stderr); code != 0 {
+	if code := newTestApp().run([]string{"-f", f, "a"}, &stdout, &stderr); code != 0 {
 		t.Errorf("run = %d, want 0 (stderr: %s)", code, &stderr)
 	}
 	want := `made: task "a" is defined again at line 5; only the first (line 1) runs` + "\n" +
@@ -1700,7 +1688,7 @@ func TestRunWarnsEachRedefinition(t *testing.T) {
 func TestListNamesQuietOnDuplicates(t *testing.T) {
 	f := writeTemp(t, "Madefile.md", dupTasksMD)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"-f", f, "--list-names"}, &stdout, &stderr); code != 0 {
+	if code := newTestApp().run([]string{"-f", f, "--list-names"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("run(--list-names) = %d, want 0 (stderr: %s)", code, &stderr)
 	}
 	if stderr.Len() != 0 || strings.Contains(stdout.String(), "defined again") {
@@ -1714,7 +1702,7 @@ func TestRunSkipsEmptyNames(t *testing.T) {
 		"made: task at line 11 has an empty name; it is skipped\n"
 
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"-f", f, "-l"}, &stdout, &stderr); code != 0 {
+	if code := newTestApp().run([]string{"-f", f, "-l"}, &stdout, &stderr); code != 0 {
 		t.Errorf("run(-l) = %d, want 0 (stderr: %s)", code, &stderr)
 	}
 	if want := "Tasks in " + f + ":\n  ok  \n"; stdout.String() != want {
@@ -1727,7 +1715,7 @@ func TestRunSkipsEmptyNames(t *testing.T) {
 	for _, name := range []string{"", " "} {
 		stdout.Reset()
 		stderr.Reset()
-		if code := run([]string{"-f", f, name}, &stdout, &stderr); code != 1 {
+		if code := newTestApp().run([]string{"-f", f, name}, &stdout, &stderr); code != 1 {
 			t.Errorf("run(%q) = %d, want 1", name, code)
 		}
 		if want := warnings + fmt.Sprintf("made: unknown task %q\n\n", name); stderr.String() != want {
@@ -1750,7 +1738,7 @@ func TestRunWarningsMatchCheck(t *testing.T) {
 	}
 	f := writeTemp(t, "Madefile.md", src)
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"-f", f, "-l"}, &stdout, &stderr); code != 0 {
+	if code := newTestApp().run([]string{"-f", f, "-l"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("run(-l) = %d, want 0 (stderr: %s)", code, &stderr)
 	}
 	var got []int
@@ -1769,85 +1757,6 @@ func TestRunWarningsMatchCheck(t *testing.T) {
 
 // scotlandFlag is an emoji tag sequence: black flag, tags "gbsct", cancel tag.
 const scotlandFlag = "🏴\U000e0067\U000e0062\U000e0073\U000e0063\U000e0074\U000e007f"
-
-func TestSanitizeDisplay(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{name: "plain", in: "hello", want: "hello"},
-		{name: "csi clear", in: "a\x1b[2Jb", want: "a[2Jb"},
-		{name: "osc title", in: "\x1b]0;evil\x07title", want: "]0;eviltitle"},
-		{name: "tab", in: "a\tb", want: "ab"},
-		{name: "newline", in: "a\nb", want: "ab"},
-		{name: "del", in: "a\x7fb", want: "ab"},
-		{name: "c1 csi", in: "a\u009b2Jb", want: "a2Jb"},
-		{name: "unicode", in: "保留", want: "保留"},
-		{name: "rtl override", in: "bid\u202ei", want: "bidi"},
-		{name: "bidi isolates", in: "a\u2066b\u2067c\u2068d\u2069e", want: "abcde"},
-		{name: "zero width space", in: "a\u200bb", want: "ab"},
-		{name: "bom", in: "\ufeffa", want: "a"},
-		{name: "tag character", in: "a\U000e0041b", want: "ab"},
-		{name: "line separator", in: "a\u2028b", want: "ab"},
-		{name: "paragraph separator", in: "a\u2029b", want: "ab"},
-		{name: "combining mark kept", in: "e\u0301", want: "e\u0301"},
-		{name: "variation selector kept", in: "❤\ufe0f", want: "❤\ufe0f"},
-		{name: "arabic letter mark", in: "a\u061cb", want: "ab"},
-		{name: "lrm and rlm", in: "a\u200eb\u200fc", want: "abc"},
-		{name: "embeddings and overrides", in: "a\u202ab\u202bc\u202cd\u202de", want: "abcde"},
-		{name: "word joiner", in: "a\u2060b", want: "ab"},
-		{name: "zwj emoji kept", in: "🧑\u200d💻 dev", want: "🧑\u200d💻 dev"},
-		{name: "zwj flag kept", in: "🏳\ufe0f\u200d🌈", want: "🏳\ufe0f\u200d🌈"},
-		{name: "zwnj word kept", in: "می\u200cخواهم", want: "می\u200cخواهم"},
-		{name: "soft hyphen kept", in: "co\u00adop", want: "co\u00adop"},
-		{name: "scotland flag kept", in: scotlandFlag, want: scotlandFlag},
-		{name: "hidden tag text after flag", in: "a🏴\U000e0068\U000e0065\U000e006c\U000e006c\U000e006f\U000e007fb", want: "a🏴b"},
-		{name: "unterminated tag sequence", in: "🏴\U000e0067\U000e0062x", want: "🏴x"},
-		{name: "cancel tag alone", in: "a\U000e007fb", want: "ab"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			if got := sanitizeDisplay(tt.in); got != tt.want {
-				t.Errorf("sanitizeDisplay(%q) = %q, want %q", tt.in, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestEscapeDisplay(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{name: "plain", in: "/tmp/dir/Madefile.md", want: "/tmp/dir/Madefile.md"},
-		{name: "backslash kept", in: `C:\work\Madefile.md`, want: `C:\work\Madefile.md`},
-		{name: "osc title", in: "x\x1b]0;PWNED\x07dir", want: `x\x1b]0;PWNED\adir`},
-		{name: "tab and newline", in: "a\tb\nc", want: `a\tb\nc`},
-		{name: "del", in: "a\x7fb", want: `a\x7fb`},
-		{name: "c1 csi", in: "a\u009bb", want: `a\u009bb`},
-		{name: "zero width space", in: "a\u200bb", want: `a\u200bb`},
-		{name: "rtl override", in: "bid\u202ei", want: `bid\u202ei`},
-		{name: "line separator", in: "a\u2028b", want: `a\u2028b`},
-		{name: "stray tag", in: "a\U000e0041b", want: `a\U000e0041b`},
-		{name: "zwj emoji kept", in: "🧑\u200d💻", want: "🧑\u200d💻"},
-		{name: "scotland flag kept", in: scotlandFlag, want: scotlandFlag},
-		{name: "hidden tag text after flag", in: "a🏴\U000e0068\U000e0065\U000e006c\U000e006c\U000e006f\U000e007fb", want: `a🏴\U000e0068\U000e0065\U000e006c\U000e006c\U000e006f\U000e007fb`},
-		{name: "unicode kept", in: "保留", want: "保留"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			if got := escapeDisplay(tt.in); got != tt.want {
-				t.Errorf("escapeDisplay(%q) = %q, want %q", tt.in, got, tt.want)
-			}
-		})
-	}
-}
 
 // controlCharsTasksMD has escape sequences in the task heading and description.
 const controlCharsTasksMD = "### evil\x1b[2J\n\x1b]0;pwned\x07note\n```bash\ntrue\n```\n"
@@ -1868,7 +1777,7 @@ func TestPrintTasksStripsControlChars(t *testing.T) {
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			if code := run(tt.args, &stdout, &stderr); code != 0 {
+			if code := newTestApp().run(tt.args, &stdout, &stderr); code != 0 {
 				t.Fatalf("run(%v) = %d, want 0 (stderr: %s)", tt.args, code, &stderr)
 			}
 			out := stdout.String()
@@ -1892,7 +1801,7 @@ func TestPrintTasksStripsBidiChars(t *testing.T) {
 	path := writeTemp(t, "tasks.md", "### bid\u202ei\nsp\u200boof\u2066x\n```bash\ntrue\n```\n")
 	for _, args := range [][]string{{"-f", path, "-l"}, {"-f", path, "--list-names"}} {
 		var stdout, stderr bytes.Buffer
-		if code := run(args, &stdout, &stderr); code != 0 {
+		if code := newTestApp().run(args, &stdout, &stderr); code != 0 {
 			t.Fatalf("run(%v) = %d, want 0 (stderr: %s)", args, code, &stderr)
 		}
 		out := stdout.String()
@@ -1912,7 +1821,7 @@ func TestListKeepsJoiners(t *testing.T) {
 	}
 	path := writeTemp(t, "tasks.md", md.String())
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"-f", path, "--list-names"}, &stdout, &stderr); code != 0 {
+	if code := newTestApp().run([]string{"-f", path, "--list-names"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("run(--list-names) = %d, want 0 (stderr: %s)", code, &stderr)
 	}
 	want := strings.Join(names, "\t\n") + "\t\n"
@@ -1937,7 +1846,7 @@ func TestListedNameRuns(t *testing.T) {
 		t.Run(tt.listed, func(t *testing.T) {
 			path := writeTemp(t, "tasks.md", "### "+tt.source+"\n```sh\ntrue\n```\n")
 			var stdout, stderr bytes.Buffer
-			if code := run([]string{"-f", path, "--list-names"}, &stdout, &stderr); code != 0 {
+			if code := newTestApp().run([]string{"-f", path, "--list-names"}, &stdout, &stderr); code != 0 {
 				t.Fatalf("run(--list-names) = %d, want 0 (stderr: %s)", code, &stderr)
 			}
 			name, _, _ := strings.Cut(stdout.String(), "\t")
@@ -1946,60 +1855,9 @@ func TestListedNameRuns(t *testing.T) {
 			}
 			for _, arg := range []string{tt.listed, tt.source} {
 				stderr.Reset()
-				if code := run([]string{"-f", path, arg}, &stdout, &stderr); code != 0 {
+				if code := newTestApp().run([]string{"-f", path, arg}, &stdout, &stderr); code != 0 {
 					t.Errorf("run(%q) = %d, want 0 (stderr: %s)", arg, code, &stderr)
 				}
-			}
-		})
-	}
-}
-
-func TestDisplayWidth(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		in   string
-		want int
-	}{
-		{name: "empty", in: "", want: 0},
-		{name: "ascii", in: "build", want: 5},
-		{name: "cjk", in: "日本語", want: 6},
-		{name: "emoji", in: "emoji🚀", want: 7},
-		{name: "fullwidth", in: "ＡＢ", want: 4},
-		{name: "halfwidth katakana", in: "ｱ", want: 1},
-		{name: "combining accent", in: "e\u0301", want: 1},
-		{name: "precomposed accent", in: "é", want: 1},
-		{name: "emoji selector widens narrow symbol", in: "❤\ufe0f", want: 2},
-		{name: "emoji selector on wide rune", in: "🚀\ufe0f", want: 2},
-		{name: "text selector", in: "❤\ufe0e", want: 1},
-		{name: "lone emoji selector", in: "\ufe0f", want: 0},
-		{name: "zwj", in: "\u200d", want: 0},
-		{name: "zwj family", in: "👨\u200d👩\u200d👧", want: 2},
-		{name: "zwj family before text", in: "👨\u200d👩\u200d👧family", want: 8},
-		{name: "skin tone", in: "👍🏽", want: 2},
-		{name: "skin tone on narrow base", in: "✌🏽", want: 2},
-		{name: "skin tone on narrow index finger", in: "☝🏽", want: 2},
-		{name: "skin tone on narrow raised hand", in: "🖐🏽", want: 2},
-		{name: "skin tone on narrow detective", in: "🕵🏽", want: 2},
-		{name: "skin tone in zwj sequence", in: "👩🏻\u200d💻", want: 2},
-		{name: "zwj gender sign with selector", in: "🏃\u200d♂\ufe0f", want: 2},
-		{name: "zwj with selectors on both sides", in: "👁\ufe0f\u200d🗨\ufe0f", want: 2},
-		{name: "zwj rainbow flag", in: "🏳\ufe0f\u200d🌈", want: 2},
-		{name: "zwj black cat", in: "🐈\u200d⬛", want: 2},
-		{name: "zwj on narrow base", in: "❤\u200d🔥", want: 2},
-		{name: "lone skin tone", in: "🏽", want: 2},
-		{name: "skin tone after letter", in: "a🏽", want: 3},
-		{name: "zwj between letters", in: "a\u200db", want: 2},
-		{name: "zwj in devanagari conjunct", in: "क्\u200dष", want: 2},
-		{name: "regional indicator flag", in: "🇫🇷", want: 2},
-		{name: "tag sequence flag", in: scotlandFlag, want: 2},
-		{name: "trailing zwj", in: "👨\u200d", want: 2},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			if got := displayWidth(tt.in); got != tt.want {
-				t.Errorf("displayWidth(%q) = %d, want %d", tt.in, got, tt.want)
 			}
 		})
 	}
@@ -2047,7 +1905,7 @@ func TestPrintTasksAlignment(t *testing.T) {
 				if !ok {
 					t.Fatalf("row %q does not end with %q", row, tt.descs[i])
 				}
-				col := displayWidth(prefix)
+				col := display.Width(prefix)
 				if want == -1 {
 					want = col
 				} else if col != want {
@@ -2122,11 +1980,10 @@ func writeSlowParseMadefile(t *testing.T) string {
 }
 
 func TestParseTimeout(t *testing.T) {
-	old := parseTimeout
-	parseTimeout = time.Millisecond
-	t.Cleanup(func() { parseTimeout = old })
+	a := newTestApp()
+	a.parseTimeout = time.Millisecond
 	f := writeSlowParseMadefile(t)
-	checkRunCases(t, []runCase{
+	a.checkRunCases(t, []runCase{
 		{name: "list", args: []string{"-f", f, "-l"}, wantCode: 1,
 			wantStderr: []string{"cannot parse", "parsing took longer than 1ms"}},
 		{name: "list-names", args: []string{"-f", f, "--list-names"}, wantCode: 1,
@@ -2136,22 +1993,4 @@ func TestParseTimeout(t *testing.T) {
 		{name: "check", args: []string{"--check", "-f", f}, wantCode: 1,
 			wantStdout: []string{f + ": error: parse-timeout: parsing took longer than 1ms"}},
 	})
-}
-
-// endlessReader returns zero bytes forever, like a /proc file that reports size 0.
-type endlessReader struct{}
-
-func (endlessReader) Read(p []byte) (int, error) {
-	clear(p)
-	return len(p), nil
-}
-
-func TestReadLimited(t *testing.T) {
-	if _, err := readLimited(endlessReader{}, "x.md"); !errors.Is(err, errTooLarge) {
-		t.Errorf("readLimited(endless) error = %v, want errTooLarge", err)
-	}
-	atCap := io.LimitReader(endlessReader{}, maxMadefileBytes)
-	if b, err := readLimited(atCap, "x.md"); err != nil || len(b) != maxMadefileBytes {
-		t.Errorf("readLimited(at cap) = %d bytes, %v; want %d bytes, nil", len(b), err, maxMadefileBytes)
-	}
 }
