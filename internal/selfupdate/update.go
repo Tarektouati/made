@@ -122,6 +122,10 @@ type Updater struct {
 // and only then renamed over Exe, so a failure leaves the old binary in place. The
 // returned error is an *Error.
 func (u Updater) Run(ctx context.Context) error {
+	return u.run(ctx, os.Stat)
+}
+
+func (u Updater) run(ctx context.Context, stat func(string) (os.FileInfo, error)) error {
 	if !IsRelease(u.Current) {
 		return failure("cannot update from %s, which is not a release version", u.Current)
 	}
@@ -160,7 +164,7 @@ func (u Updater) Run(ctx context.Context) error {
 	if !writable(dir) {
 		return notWritable(dir, fs.ErrPermission)
 	}
-	info, err := os.Stat(exe)
+	info, err := stat(exe)
 	if err != nil {
 		return failure("cannot read the running binary's permissions: %w", err)
 	}

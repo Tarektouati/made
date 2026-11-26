@@ -312,6 +312,51 @@ func TestUpdatePreservesPermissions(t *testing.T) {
 	}
 }
 
+func TestUpdateStatFailure(t *testing.T) {
+	g := newFakeGitHub(t, "v0.7.0", map[string]*fakeRelease{"v0.7.0": release("v0.7.0")})
+	exe := installed(t, "v0.6.0")
+	if err := os.Chmod(exe, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	u := Updater{
+		Client:  Client{BaseURL: g.srv.URL},
+		Exe:     exe,
+		Current: "v0.6.0",
+		Target:  "v0.7.0",
+		GOOS:    testOS,
+		GOARCH:  testArch,
+		Stdout:  &stdout,
+	}
+	statErr := &os.PathError{Op: "stat", Path: resolved, Err: os.ErrNotExist}
+	calls := 0
+	err = u.run(context.Background(), func(path string) (os.FileInfo, error) {
+		calls++
+		if path != resolved {
+			t.Errorf("stat path = %q, want %q", path, resolved)
+		}
+		return nil, statErr
+	})
+	if code := exitCode(t, err); code != ExitFailure {
+		t.Fatalf("Run = %v (code %d), want exit %d", err, code, ExitFailure)
+	}
+	if !errors.Is(err, statErr) || !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Run = %v, want the original stat error", err)
+	}
+	if !strings.Contains(err.Error(), "cannot read the running binary's permissions") {
+		t.Errorf("error = %q, want the permissions diagnostic", err)
+	}
+	if calls != 1 || g.downloadCount() != 0 || stdout.Len() != 0 {
+		t.Errorf("stat calls=%d downloads=%d stdout=%q", calls, g.downloadCount(), stdout.String())
+	}
+	assertBinary(t, exe, "v0.6.0")
+	assertPermissions(t, exe, 0o700)
+}
+
 // TestUpdateRunsNewBinaryNextToOld checks the new binary is written, and run, in the
 // directory of the one it replaces, so the final rename stays on one filesystem.
 func TestUpdateRunsNewBinaryNextToOld(t *testing.T) {
