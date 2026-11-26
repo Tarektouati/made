@@ -26,8 +26,12 @@ script may outlive it.
 brew install Tarektouati/tap/made
 ```
 
-The binary is unsigned, so the cask strips the macOS Gatekeeper quarantine
-attribute on install; otherwise the first run would be blocked.
+The release workflow requires Developer ID signing and accepted notarization
+before publishing new macOS binaries. The cask keeps the Gatekeeper quarantine
+attribute. Standalone executables use Apple's online notarization tickets, so
+Gatekeeper needs access to that ticket when checking the binary. Older releases
+and local builds may be unsigned. Maintainers can find the credential setup and
+native validation steps in [Releasing signed macOS binaries](releasing.md).
 
 **curl**
 

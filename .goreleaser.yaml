@@ -25,6 +25,11 @@ builds:
       - -trimpath
     ldflags:
       - -s -w -X main.version={{ .Version }}
+    hooks:
+      post:
+        # Mandatory for each Darwin binary, before archives and checksums.
+        # Native Apple tools are used through the OSS build hook.
+        - cmd: bash scripts/notarize-macos.sh "{{ .Os }}" "{{ .Path }}"
 
 archives:
   - id: made
@@ -59,12 +64,3 @@ homebrew_casks:
       bash: completions/made.bash
       zsh: completions/_made
       fish: completions/made.fish
-    hooks:
-      post:
-        # The binary is unsigned, so strip the Gatekeeper quarantine attribute on
-        # macOS; otherwise the first run is blocked. (Proper signing/notarization
-        # would be the alternative.)
-        install_steps: |
-          on_macos do
-            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/made"]
-          end
