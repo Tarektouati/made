@@ -82,6 +82,7 @@ _made() {
   _arguments -C -S -A '-*' \
     '(-f -file --file)'{-f+,-file=,--file=}'[Markdown file to read tasks from]:file:_files' \
     '--no-chdir[run the task in the current directory]' \
+    '(-timeout --timeout)'{-timeout=,--timeout=}'[stop the task after a duration; 0 disables]:duration:' \
     '(-l --list -V --version 1 *)--check[check the task file for problems]' \
     '(-l --list -V --version 1 *)--strict[with --check, fail on warnings too]' \
     '(-l --list -V --version 1 *)--host[with --check, also check that interpreters are on PATH]' \
