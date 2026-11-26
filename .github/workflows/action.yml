@@ -1,0 +1,79 @@
+name: Action
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  install:
+    name: ${{ matrix.os }} / ${{ matrix.version }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+        version: [latest, "0.7.0"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./
+        id: made
+        with:
+          version: ${{ matrix.version }}
+      - name: Check version, PATH and task execution
+        shell: bash
+        env:
+          REQUESTED_VERSION: ${{ matrix.version }}
+          RESOLVED_VERSION: ${{ steps.made.outputs.version }}
+        run: |
+          test -n "$RESOLVED_VERSION"
+          if [ "$REQUESTED_VERSION" != latest ]; then
+            test "$RESOLVED_VERSION" = "$REQUESTED_VERSION"
+          fi
+          test "$(made --version)" = "made v$RESOLVED_VERSION"
+          cat > "$RUNNER_TEMP/action-tasks.md" <<'MARKDOWN'
+          ### ci
+          ```sh
+          printf 'action task ran\n'
+          ```
+          MARKDOWN
+          test "$(made -f "$RUNNER_TEMP/action-tasks.md" ci)" = 'action task ran'
+
+  windows:
+    name: Reject Windows with a clear error
+    runs-on: windows-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./
+        id: made
+        continue-on-error: true
+      - name: Check unsupported-platform error
+        if: always()
+        shell: bash
+        env:
+          ACTION_OUTCOME: ${{ steps.made.outcome }}
+          MADE_ACTION_OS: ${{ runner.os }}
+          MADE_ACTION_ARCH: ${{ runner.arch }}
+        run: |
+          test "$ACTION_OUTCOME" = failure
+          if output=$(bash scripts/setup-action.sh 2>&1); then
+            echo 'Expected the installer to reject Windows' >&2
+            exit 1
+          fi
+          case "$output" in
+            *'does not support Windows runners'*) ;;
+            *) printf 'Unexpected error: %s\n' "$output" >&2; exit 1 ;;
+          esac
