@@ -179,7 +179,7 @@ func TestUsage(t *testing.T) {
 		"Usage: made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]",
 		"made [-f file] --check [--strict] [--host]",
 		"made init [--force]",
-		"made completion <bash|zsh|fish>",
+		"made completion <bash|zsh|fish|powershell>",
 		"-f, --file <file>",
 		"    --no-chdir",
 		"    --check",
@@ -1540,7 +1540,8 @@ func TestCompletion(t *testing.T) {
 		{name: "bash", args: []string{"completion", "bash"}, wantStdout: []string{"complete -o default -F _made made"}},
 		{name: "zsh", args: []string{"completion", "zsh"}, wantStdout: []string{"#compdef made"}},
 		{name: "fish", args: []string{"completion", "fish"}, wantStdout: []string{"complete -c made"}},
-		{name: "no shell", args: []string{"completion"}, wantCode: 2, wantStderr: []string{"completion takes one of: bash, zsh, fish"}},
+		{name: "powershell", args: []string{"completion", "powershell"}, wantStdout: []string{"Register-ArgumentCompleter -Native -CommandName made"}},
+		{name: "no shell", args: []string{"completion"}, wantCode: 2, wantStderr: []string{"completion takes one of: bash, zsh, fish, powershell"}},
 		{name: "unknown shell", args: []string{"completion", "pwsh"}, wantCode: 2, wantStderr: []string{"completion takes one of"}},
 		{name: "extra args", args: []string{"completion", "zsh", "extra"}, wantCode: 2, wantStderr: []string{"completion takes one of"}},
 		{name: "with -f", args: []string{"-f", "tasks.md", "completion", "zsh"}, wantCode: 2, wantStderr: []string{"completion does not take -f"}},
@@ -1548,7 +1549,7 @@ func TestCompletion(t *testing.T) {
 		{name: "-l before completion", args: []string{"-l", "completion", "bash"}, wantCode: 2, wantStderr: []string{"completion does not take -l"}, notStdout: []string{"complete -o default"}},
 		{name: "--no-chdir before completion", args: []string{"--no-chdir", "completion", "zsh"}, wantCode: 2, wantStderr: []string{"completion does not take --no-chdir"}, notStdout: []string{"#compdef"}},
 		{name: "--list-names before completion", args: []string{"--list-names", "completion", "fish"}, wantCode: 2, wantStderr: []string{"completion does not take --list-names"}, notStdout: []string{"complete -c made"}},
-		{name: "help shows usage", args: []string{"-h"}, wantStdout: []string{"made completion <bash|zsh|fish>"}, notStdout: []string{"list-names"}},
+		{name: "help shows usage", args: []string{"-h"}, wantStdout: []string{"made completion <bash|zsh|fish|powershell>"}, notStdout: []string{"list-names"}},
 	})
 }
 

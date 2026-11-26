@@ -9,7 +9,7 @@ reach a task, the new-version notice, and environment variables. [← Back to RE
 made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]
 made [-f file] --check [--strict] [--host]
 made init [--force]
-made completion <bash|zsh|fish>
+made completion <bash|zsh|fish|powershell>
 made self-update [vX.Y.Z] [--dry-run]
 ```
 
@@ -56,8 +56,8 @@ like plain `made init`. If `Madefile.md` exists but is not a regular file (a
 directory, a broken symlink, or a symlink to a directory), `made init` and
 `made init --force` exit with `1` and say what it is; remove it first.
 
-**`made completion <shell>`** prints the completion script for `bash`, `zsh`, or
-`fish` (see [Shell completion](installation.md#shell-completion)). Like `init`, it needs no task
+**`made completion <shell>`** prints the completion script for `bash`, `zsh`, `fish`, or
+`powershell` (see [Shell completion](installation.md#shell-completion)). Like `init`, it needs no task
 file, takes no top-level flags, and is reserved: a task named `completion` cannot be run with
 `made completion`.
 

@@ -9,11 +9,11 @@ package completion
 
 import "embed"
 
-//go:embed made.bash made.zsh made.fish
+//go:embed made.bash made.zsh made.fish made.powershell
 var scripts embed.FS
 
 // Shells lists the supported shells, in the order shown in messages.
-var Shells = []string{"bash", "zsh", "fish"}
+var Shells = []string{"bash", "zsh", "fish", "powershell"}
 
 // Script returns the completion script for shell, or false if the shell is not
 // supported.

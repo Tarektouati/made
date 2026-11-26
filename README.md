@@ -77,7 +77,7 @@ made --version       # print the version
 made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]
 made [-f file] --check [--strict] [--host]
 made init [--force]
-made completion <bash|zsh|fish>
+made completion <bash|zsh|fish|powershell>
 made self-update [vX.Y.Z] [--dry-run]
 ```
 
@@ -112,6 +112,10 @@ The code fence's language selects the interpreter. Matching is case-insensitive.
 | `python` | `python3 -c`, or `python -c` if `python3` is not on `PATH` |
 | `python3` | `python3 -c` |
 | `node`, `js`, `javascript` | `node -e` |
+| `pwsh`, `powershell` | `pwsh -NoProfile -NonInteractive -CommandWithArgs` (PowerShell 7.5+) |
+| `deno` | `deno eval` |
+| `bun` | `bun -e` |
+| `ts` | `deno eval --ext=ts` |
 | `ruby` | `ruby -e` |
 | `perl` | `perl -e` |
 

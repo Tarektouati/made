@@ -101,13 +101,13 @@ func cancelSignal(ctx context.Context) os.Signal {
 // interpreter is the program that runs a script passed as a single inline argument.
 type interpreter struct {
 	cmd  string   // executable to run
-	opts []string // options passed before flag (e.g. strict-mode shell options)
-	flag string   // flag that precedes the inline script (e.g. -c, -e)
+	opts []string // options or a subcommand passed before flag
+	flag string   // final option or subcommand before the inline script (e.g. -c, eval)
 	// argSep is always inserted between the script and the task arguments: "made" for
 	// shells (it becomes $0, so the first argument is $1, with or without arguments), and
 	// "--" for interpreters that keep parsing options after the script (fish, node, ruby,
-	// perl) and would otherwise take dash-prefixed arguments as their own options. python
-	// needs none: -c ends its option parsing.
+	// perl, deno, bun) and would otherwise take dash-prefixed arguments as their own
+	// options. Python's -c and PowerShell's -CommandWithArgs need none.
 	argSep []string
 	// noPad disables the leading space inlineScript adds to a script starting with "-"
 	// or "+", for interpreters where leading whitespace is significant (python).
@@ -124,6 +124,9 @@ var (
 	// strictPOSIX is errexit only: pipefail is not portable across sh implementations
 	// (e.g. older dash).
 	strictPOSIX = []string{"-e"}
+	// CommandWithArgs (PowerShell 7.5+) passes task arguments literally into $args.
+	// -Command instead joins them into source text and must not be used here.
+	powerShellOpts = []string{"-NoProfile", "-NonInteractive"}
 )
 
 // Argument separators (see interpreter.argSep).
@@ -149,6 +152,11 @@ var interpreters = map[string]interpreter{
 	"node":       {"node", nil, "-e", endOfOpts, false},
 	"js":         {"node", nil, "-e", endOfOpts, false},
 	"javascript": {"node", nil, "-e", endOfOpts, false},
+	"pwsh":       {"pwsh", powerShellOpts, "-CommandWithArgs", nil, false},
+	"powershell": {"pwsh", powerShellOpts, "-CommandWithArgs", nil, false},
+	"deno":       {"deno", nil, "eval", endOfOpts, false},
+	"bun":        {"bun", nil, "-e", endOfOpts, false},
+	"ts":         {"deno", []string{"eval"}, "--ext=ts", endOfOpts, false},
 	"ruby":       {"ruby", nil, "-e", endOfOpts, false},
 	"perl":       {"perl", nil, "-e", endOfOpts, false},
 }
@@ -178,7 +186,8 @@ var fallbacks = map[string][]string{"python": {"python"}}
 // defaults opts out itself with `set +e` (and `set +o pipefail`).
 //
 // Any args are passed to the script as positional parameters: $1, "$@" in shells,
-// $argv in fish, sys.argv[1:] in python, process.argv.slice(1) in node, ARGV in ruby,
+// $argv in fish, $args in PowerShell, sys.argv[1:] in python,
+// process.argv.slice(1) in node and bun, Deno.args in deno and ts, ARGV in ruby,
 // and @ARGV in perl.
 //
 // Cancelling ctx (e.g. on SIGINT) tears down the whole task, not just the interpreter,

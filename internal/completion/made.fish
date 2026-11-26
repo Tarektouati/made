@@ -134,7 +134,7 @@ complete -c made -n __made_task_start -a '(__made_tasks)'
 complete -c made -n __made_task_start -a init -d 'Create a starter Madefile.md'
 complete -c made -n __made_task_start -a completion -d 'Print a shell completion script'
 complete -c made -n __made_task_start -a self-update -d 'Update made to the latest release'
-complete -c made -n __made_completion_shell -a 'bash zsh fish'
+complete -c made -n __made_completion_shell -a 'bash zsh fish powershell'
 complete -c made -n __made_after_init -l force -d 'Overwrite an existing Madefile'
 complete -c made -n __made_after_self_update -l dry-run -d 'Print what would happen without changing anything'
 complete -c made -n __made_in_task -F

@@ -16,11 +16,32 @@ The code fence's language selects the interpreter. Matching is case-insensitive.
 | `python` | `python3 -c`, or `python -c` if `python3` is not on `PATH` |
 | `python3` | `python3 -c` |
 | `node`, `js`, `javascript` | `node -e` |
+| `pwsh`, `powershell` | `pwsh -NoProfile -NonInteractive -CommandWithArgs` (PowerShell 7.5+) |
+| `deno` | `deno eval` |
+| `bun` | `bun -e` |
+| `ts` | `deno eval --ext=ts` |
 | `ruby` | `ruby -e` |
 | `perl` | `perl -e` |
 
 A fence with no language defaults to `bash`. An unsupported language (e.g. `yaml`)
 is an error rather than being run under bash.
+
+Both `pwsh` and `powershell` require the modern `pwsh` executable,
+[version 7.5 or later](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_pwsh?view=powershell-7.5);
+they do not use Windows PowerShell 5.1's `powershell.exe`. `-CommandWithArgs`
+passes task arguments literally into `$args`, including empty strings and values
+starting with `-`. Profiles are not loaded and the task runs non-interactively.
+PowerShell keeps its own error behavior: use `throw` for a terminating error,
+`$ErrorActionPreference = 'Stop'` to stop on cmdlet errors, or `exit $LASTEXITCODE`
+to propagate a native command's status.
+
+`deno` and `ts` expose task arguments as `Deno.args`. The `ts` fence selects
+TypeScript explicitly with `--ext=ts`. As with
+[Deno's own `eval` command](https://docs.deno.com/runtime/reference/cli/eval/), these
+tasks have full permissions without permission prompts. `bun` exposes task arguments as `process.argv.slice(1)`
+(or `Bun.argv.slice(1)`), the same offset as a `node` task. `made` puts `--` between
+the inline script and task arguments for Deno and Bun, so a task argument such as
+`--help` is not an interpreter option.
 
 A `python` fence runs under `python` only when `python3` is not on `PATH`, and
 `made` doesn't say so. On older systems (e.g. CentOS 7, or macOS before 12.3)

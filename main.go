@@ -4,8 +4,8 @@
 // followed by a fenced code block. `made <task> [args...]` runs that block with args
 // as its positional parameters; `made` with no task lists them. `made init` writes a
 // starter Madefile.md in the current directory, `made completion <shell>` prints a
-// bash, zsh or fish completion script, and `made self-update` replaces made with the
-// latest release.
+// bash, zsh, fish or PowerShell completion script, and `made self-update` replaces
+// made with the latest release.
 package main
 
 import (
