@@ -14,7 +14,10 @@ permissions: {}
 jobs:
   goreleaser:
     name: Release
-    runs-on: ubuntu-latest
+    # codesign and notarytool require a native macOS host. Go still cross-builds
+    # the same Linux and Darwin archives for both supported architectures.
+    runs-on: macos-latest
+    timeout-minutes: 50
     permissions:
       contents: write # create the GitHub Release and upload its assets
     steps:
@@ -29,6 +32,12 @@ jobs:
       - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
       - name: Install Go
         run: proto install go
+      - name: Prepare macOS signing workspace
+        shell: bash
+        run: |
+          umask 077
+          signing_dir=$(mktemp -d "$RUNNER_TEMP/made-signing.XXXXXXXX")
+          echo "MADE_SIGNING_DIR=$signing_dir" >> "$GITHUB_ENV"
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
@@ -36,9 +45,21 @@ jobs:
           # above but not this input. Run `goreleaser check` with the new
           # version against .goreleaser.yaml before bumping.
           version: v2.20.3
-          args: release --clean
+          args: release --clean --timeout 45m
         env:
           # Publishes the GitHub Release in this repo.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Pushes the updated formula to the Tarektouati/homebrew-tap repo.
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # Required owner-configured Developer ID and App Store Connect keys.
+          # Missing credentials fail the Darwin build; no unsigned fallback.
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+      - name: Clean macOS signing workspace
+        if: always()
+        shell: bash
+        run: bash scripts/notarize-macos.sh cleanup
