@@ -157,6 +157,10 @@ printf '%s\n' "${COMPREPLY[@]}"`
 		{line: []string{"made", "self-update", "v1.2.3", ""}, want: []string{"--dry-run"}, not: []string{"build"}},
 		{line: []string{"made", "self-update", "--dry-run", ""}, not: []string{"--dry-run", "build"}},
 		{line: []string{"made", "-f", "other.md", ""}, want: []string{"ns:task"}, not: []string{"build"}},
+		{line: []string{"made", "--env-file", "missing.env", "-f", "other.md", "--print", ""}, want: []string{"ns:task"}, not: []string{"build"}},
+		{line: []string{"made", "--env-file=missing.env", "--dry-run", "b"}, want: []string{"build"}},
+		{line: []string{"made", "--env-file", noRun, "b"}, want: []string{"build"}},
+		{line: []string{"made", "--env-file", ""}, not: []string{"build", "self-update"}},
 		// bash 4+ splits "--file=other.md" on "=", bash 3.2 does not. With spaces, Go's
 		// flag package reads "=" as the file name and other.md as the task.
 		{line: []string{"made", "--file", "=", "other.md", ""}, compLine: "made --file=other.md ", want: []string{"ns:task"}, not: []string{"build"}},
@@ -165,7 +169,7 @@ printf '%s\n' "${COMPREPLY[@]}"`
 		{line: []string{"made", "-f", "=", ""}, want: []string{"init"}, not: []string{"build", "ns:task"}},
 		{line: []string{"made", "--file", "="}, compLine: "made --file=", not: []string{"build", "--file"}},
 		{line: []string{"made", "--file="}, not: []string{"build", "--file"}},
-		{line: []string{"made", "--"}, want: []string{"--file", "--list", "--version", "--no-chdir", "--check", "--strict", "--host"}, not: []string{"--list-names"}},
+		{line: []string{"made", "--"}, want: []string{"--file", "--list", "--version", "--no-chdir", "--env-file", "--print", "--dry-run", "--check", "--strict", "--host"}, not: []string{"--list-names"}},
 		{line: []string{"made", "completion", ""}, want: []string{"bash", "zsh", "fish"}, not: []string{"build"}},
 		{line: []string{"made", "build", ""}, not: []string{"build", "--file"}},
 		{line: []string{"made", "init", ""}, want: []string{"--force"}, not: []string{"build"}},
@@ -182,7 +186,7 @@ printf '%s\n' "${COMPREPLY[@]}"`
 		{line: []string{"made", "--strict", ""}, not: []string{"build", "init", "completion"}},
 		{line: []string{"made", "-host", ""}, not: []string{"build", "init", "completion"}},
 		{line: []string{"made", "-f", "other.md", "--check", ""}, not: []string{"ns:task"}},
-		{line: []string{"made", "--check", "--"}, want: []string{"--strict", "--host", "--file", "--no-chdir"}, not: []string{"--list", "--version"}},
+		{line: []string{"made", "--check", "--"}, want: []string{"--strict", "--host", "--file", "--no-chdir"}, not: []string{"--list", "--version", "--env-file", "--print", "--dry-run"}},
 		// A leading $NAME or ${NAME} is expanded, outside single quotes only, and
 		// nothing else on the line is evaluated. The test runs in $PWD.
 		{line: []string{"made", "-f", "$PWD/other.md", ""}, want: []string{"ns:task"}, not: []string{"build"}},
@@ -369,6 +373,7 @@ _made_tasks`
 		{line: []string{"made", ""}, want: []string{"say-hello:Prints a friendly greeting.", "build:Compiles all packages.", "init:create a starter Madefile.md", "self-update:update made to the latest release"}},
 		{line: []string{"made", "-f", "other.md", ""}, want: []string{`ns\:task:Has a colon\: here.`}, not: []string{"build:Compiles all packages."}},
 		{line: []string{"made", "--file=other.md", ""}, want: []string{`ns\:task:Has a colon\: here.`}},
+		{line: []string{"made", "--env-file", "-f", "--file=other.md", "--print", ""}, want: []string{`ns\:task:Has a colon\: here.`}},
 		{line: []string{"made", "-f", "'my tasks.md'", ""}, want: []string{`ns\:task:Has a colon\: here.`}, not: []string{"build:Compiles all packages."}},
 		{line: []string{"made", `--file=my\ tasks.md`, ""}, want: []string{`ns\:task:Has a colon\: here.`}},
 		// _describe removes backslashes, so they are doubled.
@@ -406,9 +411,13 @@ func TestCompletionFish(t *testing.T) {
 		{line: []string{"made "}, want: []string{"say-hello\tPrints a friendly greeting.", "build\tCompiles all packages.", "init\tCreate a starter Madefile.md"}},
 		{line: []string{"made -f other.md "}, want: []string{"ns:task\tHas a colon: here."}, not: []string{"build\tCompiles all packages."}},
 		{line: []string{"made --file=other.md "}, want: []string{"ns:task\tHas a colon: here."}},
+		{line: []string{"made --env-file missing.env -f other.md --print "}, want: []string{"ns:task\tHas a colon: here."}, not: []string{"build\tCompiles all packages."}},
+		{line: []string{"made --env-file=missing.env --dry-run "}, want: []string{"build\tCompiles all packages."}},
+		{line: []string{"made --env-file (touch PWNED)/vars.env "}, want: []string{"build\tCompiles all packages."}},
+		{line: []string{"made --env-file other"}, want: []string{"other.md"}, not: []string{"build\tCompiles all packages."}},
 		{line: []string{"made -f 'my tasks.md' "}, want: []string{"ns:task\tHas a colon: here."}, not: []string{"build\tCompiles all packages."}},
 		{line: []string{"made -f edge.md "}, want: []string{"back\\slash\thas \\ a: b"}, not: []string{"\tempty"}},
-		{line: []string{"made --"}, want: []string{"--file\tMarkdown file to read tasks from", "--list\tList available tasks", "--check\tCheck the task file for problems"}, not: []string{"--list-names"}},
+		{line: []string{"made --"}, want: []string{"--file\tMarkdown file to read tasks from", "--list\tList available tasks", "--check\tCheck the task file for problems", "--env-file\tLoad missing task environment variables", "--print\tPrint the command and script without running", "--dry-run\tPrint the command and script without running"}, not: []string{"--list-names"}},
 		{line: []string{"made completion "}, want: []string{"bash", "zsh", "fish"}, not: []string{"build\tCompiles all packages."}},
 		{line: []string{"made build "}, want: []string{"Madefile.md", "other.md"}, not: []string{"build\tCompiles all packages."}},
 		// fish lists options only once a "-" is typed.
@@ -424,7 +433,7 @@ func TestCompletionFish(t *testing.T) {
 		{line: []string{"made --check "}, not: []string{"build\tCompiles all packages.", "init\tCreate a starter Madefile.md", "completion\tPrint a shell completion script", "self-update\tUpdate made to the latest release"}},
 		{line: []string{"made --strict "}, not: []string{"build\tCompiles all packages.", "init\tCreate a starter Madefile.md"}},
 		{line: []string{"made -host "}, not: []string{"build\tCompiles all packages.", "init\tCreate a starter Madefile.md"}},
-		{line: []string{"made --check -"}, want: []string{"--strict\tWith --check, fail on warnings too", "--file\tMarkdown file to read tasks from"}, not: []string{"--list\tList available tasks", "--version\tPrint version and exit"}},
+		{line: []string{"made --check -"}, want: []string{"--strict\tWith --check, fail on warnings too", "--file\tMarkdown file to read tasks from"}, not: []string{"--list\tList available tasks", "--version\tPrint version and exit", "--env-file\tLoad missing task environment variables", "--print\tPrint the command and script without running"}},
 		{line: []string{"made -f " + noRun + " "}, not: []string{"ns:task\tHas a colon: here."}},
 		{line: []string{"made -f (touch PWNED)/other.md "}, not: []string{"ns:task\tHas a colon: here."}},
 	}

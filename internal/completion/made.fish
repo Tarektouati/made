@@ -23,6 +23,8 @@ function __made_file_args
                 set -e tokens[1]
             case '-f=*' '-file=*' '--file=*'
                 set value (string replace -r '^[^=]*=' '' -- $tokens[1])
+            case -env-file --env-file
+                set -e tokens[1]
             case '-*'
             case '*'
                 break
@@ -43,7 +45,7 @@ function __made_positional
     set -e tokens[1]
     while set -q tokens[1]
         switch $tokens[1]
-            case -f -file --file
+            case -f -file --file -env-file --env-file
                 set -e tokens[1]
             case '-*'
             case '*'
@@ -65,7 +67,7 @@ function __made_check_mode
     set -e tokens[1]
     while set -q tokens[1]
         switch $tokens[1]
-            case -f -file --file
+            case -f -file --file -env-file --env-file
                 set -e tokens[1]
             case -check --check -strict --strict -host --host '-check=*' '--check=*' '-strict=*' '--strict=*' '-host=*' '--host=*'
                 return 0
@@ -124,6 +126,9 @@ end
 complete -c made -f
 complete -c made -n __made_no_positional -s f -l file -r -F -d 'Markdown file to read tasks from'
 complete -c made -n __made_no_positional -l no-chdir -d 'Run the task in the current directory'
+complete -c made -n __made_task_start -l env-file -r -F -d 'Load missing task environment variables'
+complete -c made -n __made_task_start -l print -d 'Print the command and script without running'
+complete -c made -n __made_task_start -l dry-run -d 'Print the command and script without running'
 complete -c made -n __made_no_positional -l check -d 'Check the task file for problems'
 complete -c made -n __made_no_positional -l strict -d 'With --check, fail on warnings too'
 complete -c made -n __made_no_positional -l host -d 'With --check, also check that interpreters are on PATH'

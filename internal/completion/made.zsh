@@ -54,6 +54,7 @@ _made_tasks() {
         _made_file_value "${words[__made_i]#*=}"
         __made_fileargs=(-f "$__made_reply")
         ;;
+      (-env-file|--env-file) (( __made_i++ )) ;;
     esac
   done
 
@@ -82,6 +83,8 @@ _made() {
   _arguments -C -S -A '-*' \
     '(-f -file --file)'{-f+,-file=,--file=}'[Markdown file to read tasks from]:file:_files' \
     '--no-chdir[run the task in the current directory]' \
+    '(--check --strict --host -l --list -V --version)'{-env-file=,--env-file=}'[load missing task environment variables]:file:_files' \
+    '(--check --strict --host -l --list -V --version --print --dry-run)'{--print,--dry-run}'[print the command and script without running]' \
     '(-l --list -V --version 1 *)--check[check the task file for problems]' \
     '(-l --list -V --version 1 *)--strict[with --check, fail on warnings too]' \
     '(-l --list -V --version 1 *)--host[with --check, also check that interpreters are on PATH]' \

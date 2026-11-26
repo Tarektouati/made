@@ -202,11 +202,16 @@ func run(args []string, stdout, stderr io.Writer) int {
 	var check bool
 	var strict bool
 	var host bool
+	var printTask bool
+	var envFile string
 	fs := flag.NewFlagSet("made", flag.ContinueOnError)
 	fs.SetOutput(io.Discard) // parse errors are reported by flagError
 	fs.StringVar(&file, "file", "", "Markdown file to read tasks from (default: nearest Madefile.md, searched up to the repository root, or $HOME or the filesystem root outside a repository)")
 	fs.StringVar(&file, "f", "", "shorthand for --file")
 	fs.BoolVar(&noChdir, "no-chdir", false, "run the task in the current directory instead of the task file's directory")
+	fs.BoolVar(&printTask, "print", false, "print the resolved command and script without running the task")
+	fs.BoolVar(&printTask, "dry-run", false, "alias for --print")
+	fs.StringVar(&envFile, "env-file", "", "load missing task environment variables from this file, relative to the task file's directory")
 	fs.BoolVar(&check, "check", false, "check the task file for problems instead of running a task")
 	fs.BoolVar(&strict, "strict", false, "with --check, fail on warnings too")
 	fs.BoolVar(&host, "host", false, "with --check, also check that each task's interpreter is on PATH")
@@ -218,6 +223,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	fs.BoolVar(&listNames, "list-names", false, "print task names and descriptions, tab-separated, one per line")
 	printUsage := func(w io.Writer) {
 		fmt.Fprintf(w, "Usage: made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]\n")
+		fmt.Fprintf(w, "       made [-f file] [--no-chdir] [--env-file path] [--print | --dry-run] task [--] [args...]\n")
 		fmt.Fprintf(w, "       made [-f file] --check [--strict] [--host]\n")
 		fmt.Fprintf(w, "       made init [--force]\n")
 		fmt.Fprintf(w, "       made completion <%s>\n", strings.Join(completion.Shells, "|"))
@@ -261,20 +267,30 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	if showVersion {
-		fmt.Fprintln(stdout, "made", resolveVersion())
-		return 0
-	}
-
 	// An explicit empty -f (often an unset variable) must not fall back to discovery.
-	fileSet := false
+	fileSet, envFileSet := false, false
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "f" || f.Name == "file" {
 			fileSet = true
 		}
+		if f.Name == "env-file" {
+			envFileSet = true
+		}
 	})
+	if showVersion {
+		if printTask || envFileSet {
+			fmt.Fprintln(stderr, "made: --version does not take --print or --env-file")
+			return 2
+		}
+		fmt.Fprintln(stdout, "made", resolveVersion())
+		return 0
+	}
 	if fileSet && file == "" {
 		fmt.Fprintln(stderr, "made: -f requires a file path")
+		return 2
+	}
+	if envFileSet && envFile == "" {
+		fmt.Fprintln(stderr, "made: --env-file requires a file path")
 		return 2
 	}
 
@@ -350,6 +366,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		return selfUpdate(fs.Args()[1:], stdout, stderr)
 	}
+	if printTask && (list || listNames || fs.NArg() == 0) {
+		fmt.Fprintln(stderr, "made: --print requires a task and cannot be combined with listing")
+		return 2
+	}
+	if envFileSet && (list || listNames || fs.NArg() == 0) {
+		fmt.Fprintln(stderr, "made: --env-file requires a task and cannot be combined with listing")
+		return 2
+	}
 
 	res, err := resolveFile(file)
 	for _, s := range res.skipped {
@@ -406,15 +430,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	// Every command that must stay quiet (completion, scripts, init, --check, -V,
-	// self-update) has returned by now. The notice comes from the cache and is printed
-	// after the task, so it is never mixed with the task's output or waited for.
-	notice := startUpdateCheck(stdout, stderr)
-	defer func() {
-		if line := notice.Notice(); line != "" {
-			fmt.Fprintln(stderr, line)
-		}
-	}()
+	// Quiet commands have returned by now, except a preview, which must also leave
+	// the update cache alone. The notice comes from the cache and is printed after
+	// the task, so it is never mixed with the task's output or waited for.
+	if !printTask {
+		notice := startUpdateCheck(stdout, stderr)
+		defer func() {
+			if line := notice.Notice(); line != "" {
+				fmt.Fprintln(stderr, line)
+			}
+		}()
+	}
 
 	runTask := !list && fs.NArg() > 0
 	// Before runnableTasks, so its warnings cite lines of a file already named.
@@ -436,6 +462,50 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	// A pipe or device has no directory of its own (it would be /dev or /dev/fd), so
+	// its tasks run in the current directory.
+	dir := ""
+	if !noChdir && regular {
+		abs, absErr := filepath.Abs(file)
+		if absErr != nil {
+			fmt.Fprintf(stderr, "made: %s\n", escapeErr(absErr))
+			return 1
+		}
+		dir = filepath.Dir(abs)
+	}
+
+	// Everything after the task name goes to the script. Flag parsing already stopped
+	// at the task name, so a leading "--" is optional; drop one if present.
+	taskArgs := fs.Args()[1:]
+	if len(taskArgs) > 0 && taskArgs[0] == "--" {
+		taskArgs = taskArgs[1:]
+	}
+
+	var defaults []string
+	if envFileSet {
+		path, envErr := resolveEnvFile(envFile, file, regular)
+		if envErr != nil {
+			fmt.Fprintf(stderr, "made: %s\n", escapeErr(envErr))
+			return 1
+		}
+		defaults, envErr = readEnvFile(path)
+		if envErr != nil {
+			fmt.Fprintf(stderr, "made: cannot load %s: %s\n", displayPath(path), escapeErr(pathOnlyOnce(path, envErr)))
+			return 1
+		}
+	}
+	prepared, err := runner.Prepare(task, dir, taskArgs, defaults)
+	if err != nil {
+		return runErrorCode(stderr, err)
+	}
+	if printTask {
+		if err := printPrepared(stdout, file, prepared); err != nil {
+			fmt.Fprintf(stderr, "made: %s\n", escapeErr(err))
+			return 1
+		}
+		return 0
+	}
+
 	sigs := []os.Signal{syscall.SIGTERM}
 	// Subscribing un-ignores a signal, also for the task, so leave one alone when it is
 	// already ignored: SIGHUP under nohup (otherwise logging out would tear down the
@@ -455,26 +525,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	ctx, force, stop, received := notifySignal(sigs...)
 	defer stop()
 
-	// A pipe or device has no directory of its own (it would be /dev or /dev/fd), so
-	// its tasks run in the current directory.
-	dir := ""
-	if !noChdir && regular {
-		abs, err := filepath.Abs(file)
-		if err != nil {
-			fmt.Fprintf(stderr, "made: %s\n", escapeErr(err))
-			return 1
-		}
-		dir = filepath.Dir(abs)
-	}
-
-	// Everything after the task name goes to the script. Flag parsing already stopped
-	// at the task name, so a leading "--" is optional; drop one if present.
-	taskArgs := fs.Args()[1:]
-	if len(taskArgs) > 0 && taskArgs[0] == "--" {
-		taskArgs = taskArgs[1:]
-	}
-
-	runErr := runner.Run(ctx, force, task, dir, taskArgs)
+	runErr := prepared.Run(ctx, force)
 	// A task that handled Ctrl-C or Ctrl-\ itself and exited reports its own status, as
 	// when run from a shell. Otherwise made was interrupted like a shell would be: 128+n
 	// for the signal it received, whatever status the torn-down task ended with.
@@ -485,22 +536,28 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 128 + int(sig)
 	}
 	if runErr != nil {
-		var exitErr *exec.ExitError
-		if errors.As(runErr, &exitErr) {
-			return taskExitCode(exitErr)
-		}
-		fmt.Fprintf(stderr, "made: %s\n", escapeErr(runErr))
-		code := 1
-		var interpErr *runner.InterpreterError
-		var argErr *runner.ArgLimitError
-		if errors.As(runErr, &interpErr) {
-			code = interpErr.ExitCode()
-		} else if errors.As(runErr, &argErr) {
-			code = argErr.ExitCode()
-		}
-		return code
+		return runErrorCode(stderr, runErr)
 	}
 	return 0
+}
+
+// runErrorCode is shared by preparation and execution, so a preview reports the
+// same missing-interpreter and invalid-script errors as running the task.
+func runErrorCode(stderr io.Writer, err error) int {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return taskExitCode(exitErr)
+	}
+	fmt.Fprintf(stderr, "made: %s\n", escapeErr(err))
+	var interpErr *runner.InterpreterError
+	var argErr *runner.ArgLimitError
+	if errors.As(err, &interpErr) {
+		return interpErr.ExitCode()
+	}
+	if errors.As(err, &argErr) {
+		return argErr.ExitCode()
+	}
+	return 1
 }
 
 // signalReceived is the cancellation cause of a notifySignal context.
@@ -1243,6 +1300,9 @@ type usageOption struct{ short, long, arg string }
 var mainOptions = []usageOption{
 	{short: "f", long: "file", arg: "file"},
 	{long: "no-chdir"},
+	{long: "env-file", arg: "path"},
+	{long: "print"},
+	{long: "dry-run"},
 	{long: "check"},
 	{long: "strict"},
 	{long: "host"},

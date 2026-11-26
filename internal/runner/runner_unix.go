@@ -261,12 +261,16 @@ func argLen(s string) int { return len(s) }
 // argListTooLong reports whether err is the kernel rejecting exec arguments as too large.
 func argListTooLong(err error) bool { return errors.Is(err, syscall.E2BIG) }
 
-// envLen returns the size of the environment a task inherits, as exec counts it
+// envLen returns the size of the task's environment, as exec counts it
 // (each "key=value" string and its NUL), without the pointers to them.
-func envLen() int {
+func envLen(env []string) int {
 	n := 0
-	for _, kv := range os.Environ() {
+	for _, kv := range env {
 		n += len(kv) + 1
 	}
 	return n
+}
+
+func lookExecutable(path string, _ []string) (string, error) {
+	return exec.LookPath(path)
 }
