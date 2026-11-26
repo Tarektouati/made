@@ -95,7 +95,7 @@ _made() {
     (first) _made_tasks && __made_ret=0 ;;
     (args)
       case $words[1] in
-        (completion) (( CURRENT == 2 )) && _values 'shell' bash zsh fish && __made_ret=0 ;;
+        (completion) (( CURRENT == 2 )) && _values 'shell' bash zsh fish powershell && __made_ret=0 ;;
         (init) _arguments '--force[overwrite an existing Madefile]' && __made_ret=0 ;;
         (self-update) _arguments '--dry-run[print what would happen without changing anything]' '1::version: ' && __made_ret=0 ;;
         (*) _files && __made_ret=0 ;;

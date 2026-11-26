@@ -151,7 +151,7 @@ address and Go's default `User-Agent`). The answer is kept in
 
 ## Shell completion
 
-`made <TAB>` completes task names (with their descriptions in zsh and fish) from the
+`made <TAB>` completes task names (with their descriptions in zsh, fish and PowerShell) from the
 task file `made` would use, including one given with `-f`. `made -f <TAB>` completes
 file names, and `made completion <TAB>` completes shell names. Homebrew installs the
 completions for bash, zsh, and fish automatically. Otherwise, load the script that
@@ -162,17 +162,21 @@ completions for bash, zsh, and fish automatically. Otherwise, load the script th
 | bash | add `eval "$(made completion bash)"` to `~/.bashrc` |
 | zsh | add `eval "$(made completion zsh)"` to `~/.zshrc`, after `compinit`; or save it as `_made` in a directory on `$fpath` |
 | fish | run `made completion fish > ~/.config/fish/completions/made.fish` once |
+| PowerShell | add `Invoke-Expression (& made completion powershell \| Out-String)` to `$PROFILE` |
 
 Release archives also include the scripts, in `completions/`.
+The PowerShell script is `completions/made.ps1` and can be dot-sourced instead.
 
 For the `-f` value, bash and zsh remove its quoting and expand a leading `~`, `$NAME`
 or `${NAME}` (not inside single quotes); fish 4 expands it the way fish would for a
 run, and older fish removes its quoting and expands only a leading `~`. Completion
-never runs a command substitution such as `$(...)` from the command line. A variable
+never runs a command substitution such as `$(...)` from the command line. PowerShell
+reads quoted literal paths and simple leading variables, such as `$PWD/other.md`
+or `"$env:TASK_FILE"`, without evaluating expressions. A variable
 with the same name as a local of the shell's completion system may not expand: in
 zsh, for example, `$name`, `$line`, `$i` or `$REPLY`.
 
-All three shells insert a task name quoted, so a name with spaces, quotes or `$(...)`
+All four shells insert a task name quoted, so a name with spaces, quotes or `$(...)`
 is one literal word on the command line and never runs anything. bash escapes it
 (`with\ space`), or quotes it to match a quote you opened (`'with space'`). The part
 you typed may be quoted or escaped too: `with\ s`, `'with s`, `"with s` and `ns\:t`

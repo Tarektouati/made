@@ -1,0 +1,170 @@
+# PowerShell completion for made.
+# Add to $PROFILE: Invoke-Expression (& made completion powershell | Out-String)
+
+Register-ArgumentCompleter -Native -CommandName made -ScriptBlock {
+    param($__made_word, $__made_ast, $__made_cursor)
+
+    # Read quoting from the AST. A simple variable at the start of a file value
+    # may expand, but a command, subexpression or property access never runs.
+    function __made_value($__made_node) {
+        if ($__made_node -is [System.Management.Automation.Language.CommandParameterAst]) {
+            return $__made_node.Extent.Text
+        }
+        if ($__made_node -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+            $__made_text = $__made_node.Value
+            if ($__made_node.StringConstantType -eq 'BareWord' -and $__made_text -cmatch '^~([/\\]|$)') {
+                return $HOME + $__made_text.Substring(1)
+            }
+            return $__made_text
+        }
+        $__made_variable = $__made_node
+        $__made_before = ''
+        $__made_after = ''
+        if ($__made_node -is [System.Management.Automation.Language.ExpandableStringExpressionAst]) {
+            if ($__made_node.NestedExpressions.Count -ne 1) { return $null }
+            $__made_variable = $__made_node.NestedExpressions[0]
+            $__made_offset = $__made_variable.Extent.StartOffset - $__made_node.Extent.StartOffset
+            $__made_leading = $__made_node.Extent.Text.Substring(0, $__made_offset)
+            if (@('', '"', '-f=', '-f="', '-file=', '-file="', '--file=', '--file="') -cnotcontains $__made_leading) {
+                return $null
+            }
+            $__made_at = $__made_node.Value.IndexOf($__made_variable.Extent.Text, [StringComparison]::Ordinal)
+            $__made_before = $__made_node.Value.Substring(0, $__made_at)
+            $__made_after = $__made_node.Value.Substring($__made_at + $__made_variable.Extent.Text.Length)
+        }
+        if ($__made_variable -isnot [System.Management.Automation.Language.VariableExpressionAst]) { return $null }
+        $__made_name = $__made_variable.VariablePath.UserPath
+        if ($__made_name.StartsWith('env:', [StringComparison]::OrdinalIgnoreCase)) {
+            $__made_value = [Environment]::GetEnvironmentVariable($__made_name.Substring(4))
+        } else {
+            $__made_value = $ExecutionContext.SessionState.PSVariable.GetValue($__made_name)
+        }
+        if ($__made_value -is [System.Management.Automation.PathInfo]) { $__made_value = $__made_value.Path }
+        if ($__made_value -isnot [string]) { return $null }
+        return $__made_before + $__made_value + $__made_after
+    }
+
+    function __made_files($__made_path, $__made_option = '') {
+        foreach ($__made_match in [System.Management.Automation.CompletionCompleters]::CompleteFilename($__made_path)) {
+            [System.Management.Automation.CompletionResult]::new(
+                $__made_option + $__made_match.CompletionText, $__made_match.ListItemText,
+                $__made_match.ResultType, $__made_match.ToolTip)
+        }
+    }
+
+    $__made_elements = @($__made_ast.CommandElements | Where-Object { $_.Extent.EndOffset -lt $__made_cursor })
+    $__made_fileargs = @()
+    $__made_fileKnown = $true
+    $__made_check = $false
+    $__made_options = $true
+    $__made_first = ''
+    $__made_rest = @()
+    for ($__made_i = 1; $__made_i -lt $__made_elements.Count; $__made_i++) {
+        $__made_value = __made_value $__made_elements[$__made_i]
+        if ($null -eq $__made_value) { return }
+        if (!$__made_options) {
+            $__made_first = $__made_value
+            $__made_rest = @($__made_elements | Select-Object -Skip ($__made_i + 1) | ForEach-Object { __made_value $_ })
+            break
+        }
+        if ($__made_value -ceq '--') { $__made_options = $false; continue }
+        if (@('-f', '-file', '--file') -ccontains $__made_value) {
+            $__made_i++
+            if ($__made_i -ge $__made_elements.Count) { __made_files $__made_word; return }
+            $__made_file = __made_value $__made_elements[$__made_i]
+            $__made_fileKnown = $null -ne $__made_file
+            $__made_fileargs = @('-f', $__made_file)
+            continue
+        }
+        if ($__made_value -cmatch '^(-f|-file|--file)=(.*)$') {
+            $__made_fileargs = @('-f', $Matches[2])
+            $__made_fileKnown = $true
+            continue
+        }
+        if ($__made_value -cmatch '^--?(check|strict|host)(=|$)') { $__made_check = $true; continue }
+        if ($__made_value.StartsWith('-')) { continue }
+        $__made_first = $__made_value
+        $__made_rest = @($__made_elements | Select-Object -Skip ($__made_i + 1) | ForEach-Object { __made_value $_ })
+        break
+    }
+
+    if (!$__made_first -and $__made_options -and $__made_word -cmatch '^(-f|-file|--file)=(.*)$') {
+        __made_files $Matches[2] ($Matches[1] + '=')
+        return
+    }
+
+    # Parsing a partial quoted word removes its quoting without evaluating it.
+    $__made_prefix = $__made_word
+    if ($__made_word) {
+        $__made_tokens = $null
+        $__made_errors = $null
+        $__made_partial = [System.Management.Automation.Language.Parser]::ParseInput('made ' + $__made_word, [ref]$__made_tokens, [ref]$__made_errors)
+        $__made_command = $__made_partial.Find({ param($__made_node) $__made_node -is [System.Management.Automation.Language.CommandAst] }, $true)
+        if ($__made_command.CommandElements.Count -gt 1) {
+            $__made_prefix = __made_value $__made_command.CommandElements[1]
+        }
+        if ($null -eq $__made_prefix) { return }
+    }
+
+    function __made_candidate($__made_name, $__made_description, $__made_kind = 'ParameterValue') {
+        if (!$__made_name.StartsWith($__made_prefix, [StringComparison]::OrdinalIgnoreCase)) { return }
+        $__made_insert = $__made_name
+        if ($__made_kind -ne 'ParameterName' -and $__made_name -cnotmatch '^[A-Za-z0-9_][A-Za-z0-9_:.@/-]*$') {
+            $__made_insert = "'" + $__made_name.Replace("'", "''") + "'"
+        }
+        if (!$__made_description) { $__made_description = $__made_name }
+        [System.Management.Automation.CompletionResult]::new($__made_insert, $__made_name, $__made_kind, $__made_description)
+    }
+
+    if ($__made_first) {
+        switch -CaseSensitive ($__made_first) {
+            'completion' {
+                if ($__made_rest.Count -eq 0) {
+                    foreach ($__made_shell in @('bash', 'zsh', 'fish', 'powershell')) {
+                        __made_candidate $__made_shell ($__made_shell + ' completion script')
+                    }
+                }
+            }
+            'init' {
+                if (!($__made_rest -cmatch '^--?force(=|$)')) { __made_candidate '--force' 'Overwrite an existing Madefile' 'ParameterName' }
+            }
+            'self-update' {
+                if (!($__made_rest -cmatch '^--?dry-run(=|$)')) { __made_candidate '--dry-run' 'Print what would happen without changing anything' 'ParameterName' }
+            }
+            default { __made_files $__made_word }
+        }
+        return
+    }
+
+    if ($__made_options -and $__made_prefix.StartsWith('-')) {
+        $__made_flags = [ordered]@{
+            '-f' = 'Markdown file to read tasks from'; '--file' = 'Markdown file to read tasks from'
+            '--no-chdir' = 'Run the task in the current directory'
+            '--check' = 'Check the task file for problems'; '--strict' = 'With --check, fail on warnings too'
+            '--host' = 'With --check, also check that interpreters are on PATH'
+            '-h' = 'Show help'; '--help' = 'Show help'
+        }
+        if (!$__made_check) {
+            $__made_flags['-l'] = 'List available tasks'; $__made_flags['--list'] = 'List available tasks'
+            $__made_flags['-V'] = 'Print version and exit'; $__made_flags['--version'] = 'Print version and exit'
+        }
+        foreach ($__made_flag in $__made_flags.GetEnumerator()) { __made_candidate $__made_flag.Key $__made_flag.Value 'ParameterName' }
+        return
+    }
+    if ($__made_check) { return }
+
+    if ($__made_fileKnown) {
+        # --list-names reads only regular files and has its own 1.5s parse limit.
+        try { $__made_lines = @(& made @__made_fileargs --list-names 2>$null) } catch { $__made_lines = @() }
+        foreach ($__made_line in $__made_lines) {
+            $__made_parts = $__made_line -split "`t", 2
+            if ($__made_parts[0]) {
+                $__made_description = if ($__made_parts.Count -gt 1) { $__made_parts[1] } else { '' }
+                __made_candidate $__made_parts[0] $__made_description
+            }
+        }
+    }
+    __made_candidate 'init' 'Create a starter Madefile.md'
+    __made_candidate 'completion' 'Print a shell completion script'
+    __made_candidate 'self-update' 'Update made to the latest release'
+}

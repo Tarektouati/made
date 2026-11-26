@@ -7,7 +7,7 @@ before:
     - go mod tidy
     # Shell completion scripts, shipped in the archives and installed by the cask.
     # zsh looks completions up by function name, hence _made.
-    - sh -c 'mkdir -p completions && go run . completion bash > completions/made.bash && go run . completion zsh > completions/_made && go run . completion fish > completions/made.fish'
+    - sh -c 'mkdir -p completions && go run . completion bash > completions/made.bash && go run . completion zsh > completions/_made && go run . completion fish > completions/made.fish && go run . completion powershell > completions/made.ps1'
 
 builds:
   - id: made

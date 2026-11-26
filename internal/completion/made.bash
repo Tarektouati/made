@@ -215,7 +215,7 @@ _made() {
             completion)
                 compopt +o default 2>/dev/null || :
                 if ((__made_cword == __made_firstidx + 1)); then
-                    COMPREPLY=($(compgen -W "bash zsh fish" -- "$__made_cur")) || :
+                    COMPREPLY=($(compgen -W "bash zsh fish powershell" -- "$__made_cur")) || :
                 fi
                 ;;
             init)
