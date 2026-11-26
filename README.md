@@ -75,6 +75,7 @@ made --version       # print the version
 
 ```
 made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]
+made [-f file] [--no-chdir] [--env-file path] [--print | --dry-run] task [--] [args...]
 made [-f file] --check [--strict] [--host]
 made init [--force]
 made completion <bash|zsh|fish>
@@ -85,6 +86,8 @@ made self-update [vX.Y.Z] [--dry-run]
 |---|---|---|
 | `-f`, `--file` | nearest `Madefile.md` | Markdown file to read tasks from: any readable file but a directory, including a pipe (`-f <(…)`, `-f /dev/stdin`), whose tasks run in the current directory. Without `-f`, `made` uses the `Madefile.md` in the current directory or the closest parent directory, up to the repository root (or `$HOME` or the filesystem root outside a repository; a parent directory's Madefile must be yours and not writable by others; see [How it works](docs/how-it-works.md)) |
 | `--no-chdir` | | Run the task in the current directory instead of the task file's directory |
+| `--print`, `--dry-run` | | Show the resolved task file, working directory, interpreter, arguments and script without running the task |
+| `--env-file <path>` | | Load missing task environment variables from an explicit file, relative to the task file's directory; see [Environment files](docs/cli.md#environment-files) |
 | `--check` | | Check the task file for problems instead of running a task; see [Checking a Madefile](docs/checking.md) |
 | `--strict` | | With `--check`, fail on warnings too |
 | `--host` | | With `--check`, also check that each task's interpreter is on PATH; see [Checking against this machine](docs/checking.md#checking-against-this-machine) |
@@ -98,6 +101,11 @@ Long flags also work with a single dash (`-file`, `-list`).
 
 More: `made init`, `made completion`, `made self-update`, exit codes, and passing
 arguments in [docs/cli.md](docs/cli.md).
+
+Review a task with `made --print build`. To supply local defaults explicitly, use
+`made --env-file .env build`; variables already in your environment take precedence.
+The two flags work together: `made --env-file .env --print build` previews the
+resolved command without displaying environment values.
 
 ## Supported languages
 

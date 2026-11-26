@@ -197,31 +197,70 @@ var fallbacks = map[string][]string{"python": {"python"}}
 // as does one containing a NUL byte, which cannot be passed as an argument. On Linux
 // the interpreter is also killed if made itself dies.
 func Run(ctx context.Context, force <-chan struct{}, t task.Task, dir string, args []string) error {
+	p, err := Prepare(t, dir, args, nil)
+	if err != nil {
+		return err
+	}
+	return p.Run(ctx, force)
+}
+
+// Prepared is a task's resolved command. Preparing it does not start a process.
+// Args includes the interpreter options, script, separator and task arguments;
+// Script is the original, unpadded script. An empty Dir means the current directory.
+// The environment stays private so a command preview cannot accidentally print it.
+type Prepared struct {
+	Path   string
+	Args   []string
+	Dir    string
+	Script string
+	env    []string
+	task   task.Task
+	args   []string
+	name   string
+	cands  []string
+}
+
+// Prepare validates a task and resolves its interpreter in absolute PATH entries,
+// using the same command that Run executes. defaults adds environment entries only
+// when the inherited child environment does not already contain their names; it
+// never changes made's process environment. Later defaults win over earlier ones.
+func Prepare(t task.Task, dir string, args, defaults []string) (*Prepared, error) {
 	lang := NormalizeLang(t.Lang)
 	in, ok := interpreters[lang]
 	if !ok {
-		return unsupportedError(t)
+		return nil, unsupportedError(t)
 	}
 	if EmptyScript(t.Script) {
-		return fmt.Errorf("task %q has an empty code block; nothing to run", t.Name)
+		return nil, fmt.Errorf("task %q has an empty code block; nothing to run", t.Name)
 	}
 	if i := strings.IndexByte(t.Script, 0); i >= 0 {
-		return fmt.Errorf("task %q: script contains a NUL byte (line %d of the script)", t.Name, strings.Count(t.Script[:i], "\n")+1)
+		return nil, fmt.Errorf("task %q: script contains a NUL byte (line %d of the script)", t.Name, strings.Count(t.Script[:i], "\n")+1)
 	}
 
 	argv := append(slices.Clone(in.opts), in.flag, inlineScript(in, t.Script))
 	argv = append(argv, in.argSep...)
 	argv = append(argv, args...)
 	cands := append([]string{in.cmd}, fallbacks[lang]...)
-	name, path, ok := lookInterpreter(cands)
+	// Environ keeps the ordinary PWD adjustment when a task changes directory.
+	base := (&exec.Cmd{Dir: dir}).Environ()
+	env := mergeEnvironment(base, defaults)
+	name, path, ok := lookInterpreterEnv(cands, env)
 	if !ok {
-		return notFoundError(cands, t)
+		return nil, notFoundError(cands, t, env)
 	}
+	return &Prepared{Path: path, Args: argv, Dir: dir, Script: t.Script,
+		env: env, task: t, args: slices.Clone(args), name: name, cands: cands}, nil
+}
+
+// Run starts exactly the prepared command, with Run's cancellation and exit-error
+// behavior. No PATH search or argument reconstruction takes place here.
+func (p *Prepared) Run(ctx context.Context, force <-chan struct{}) error {
 	// An absolute path is not looked up again, so exec.ErrDot cannot occur. It is also
 	// argv[0]: given a bare name, bash ($BASH) and python (sys.executable) search PATH
 	// themselves and can find the relative-entry binary made skipped.
-	cmd := exec.CommandContext(ctx, path, argv...)
-	cmd.Dir = dir
+	cmd := exec.CommandContext(ctx, p.Path, p.Args...)
+	cmd.Dir = p.Dir
+	cmd.Env = p.env
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -233,15 +272,15 @@ func Run(ctx context.Context, force <-chan struct{}, t task.Task, dir string, ar
 
 	if err := cmd.Start(); err != nil {
 		if argListTooLong(err) {
-			e := &ArgLimitError{Task: t.Name, Interp: filepath.Base(cmd.Path), ScriptLen: ScriptLen(t.Lang, t.Script),
-				ArgCount: len(args), EnvLen: envLen(), Err: err, lim: hostLimits()}
-			for _, a := range args {
+			e := &ArgLimitError{Task: p.task.Name, Interp: filepath.Base(cmd.Path), ScriptLen: ScriptLen(p.task.Lang, p.task.Script),
+				ArgCount: len(p.args), EnvLen: envLen(p.env), Err: err, lim: hostLimits()}
+			for _, a := range p.args {
 				e.ArgsLen += argLen(a)
 			}
 			e.Script = e.lim.blamesScript(e.ScriptLen, e.ArgsLen, e.EnvLen)
 			return e
 		}
-		return startError(err, cmd, name, cands, t)
+		return startError(err, cmd, p.name, p.cands, p.task, p.env)
 	}
 
 	setInterpreter(cmd.Process.Pid, true)
@@ -530,12 +569,16 @@ func (e *ArgLimitError) ExitCode() int { return 126 }
 // its path. Relative entries (".", "", "bin") are skipped, so a binary found through
 // one never runs; on Windows the current directory is not searched either.
 func lookInterpreter(cands []string) (name, path string, ok bool) {
+	return lookInterpreterEnv(cands, os.Environ())
+}
+
+func lookInterpreterEnv(cands, env []string) (name, path string, ok bool) {
 	for _, c := range cands {
-		for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		for _, dir := range filepath.SplitList(environmentValue(env, "PATH")) {
 			if !filepath.IsAbs(dir) {
 				continue
 			}
-			if p, err := exec.LookPath(filepath.Join(dir, c)); err == nil {
+			if p, err := lookExecutable(filepath.Join(dir, c), env); err == nil {
 				return c, p, true
 			}
 		}
@@ -556,7 +599,7 @@ func Resolve(t task.Task) error {
 	}
 	cands := append([]string{in.cmd}, fallbacks[lang]...)
 	if _, _, ok := lookInterpreter(cands); !ok {
-		return notFoundError(cands, t)
+		return notFoundError(cands, t, os.Environ())
 	}
 	return nil
 }
@@ -586,9 +629,9 @@ func EmptyScript(script string) bool {
 // startError turns a cmd.Start failure into an *InterpreterError when the interpreter
 // was missing, not executable, or could not be executed; other errors pass through.
 // name is the candidate cmd runs, which the error names.
-func startError(err error, cmd *exec.Cmd, name string, cands []string, t task.Task) error {
+func startError(err error, cmd *exec.Cmd, name string, cands []string, t task.Task, env []string) error {
 	if errors.Is(err, exec.ErrNotFound) {
-		return notFoundError(cands, t)
+		return notFoundError(cands, t, env)
 	}
 	var pathErr *fs.PathError
 	if errors.As(err, &pathErr) && pathErr.Op == "fork/exec" {
@@ -599,9 +642,9 @@ func startError(err error, cmd *exec.Cmd, name string, cands []string, t task.Ta
 
 // notFoundError returns the *InterpreterError for none of cands being on PATH: a
 // not-executable one when a file named after a candidate is on PATH anyway.
-func notFoundError(cands []string, t task.Task) *InterpreterError {
+func notFoundError(cands []string, t task.Task, env []string) *InterpreterError {
 	for _, c := range cands {
-		if p := findNonExecutable(c); p != "" {
+		if p := findNonExecutable(c, env); p != "" {
 			return &InterpreterError{Cmd: c, Path: p, Task: t.Name, Lang: t.Lang, Err: fs.ErrPermission, NotExecutable: true}
 		}
 	}
@@ -611,8 +654,8 @@ func notFoundError(cands []string, t task.Task) *InterpreterError {
 // findNonExecutable returns the first regular file named name in an absolute PATH
 // directory, or "" if there is none. exec.LookPath skips such files when they are not
 // executable.
-func findNonExecutable(name string) string {
-	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+func findNonExecutable(name string, env []string) string {
+	for _, dir := range filepath.SplitList(environmentValue(env, "PATH")) {
 		if !filepath.IsAbs(dir) {
 			continue
 		}

@@ -4,7 +4,9 @@ package runner
 
 import (
 	"errors"
+	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"unicode/utf16"
 )
@@ -79,4 +81,31 @@ func hostLimits() osLimits {
 }
 
 // envLen returns 0: the environment does not count against the command-line limit.
-func envLen() int { return 0 }
+func envLen([]string) int { return 0 }
+
+// lookExecutable uses the child's PATHEXT without changing process-wide variables.
+// The ordinary inherited case stays with os/exec. Explicit candidates with an
+// extension are also checked through os/exec, so the prepared path is the path
+// CommandContext will use, even when the child's PATHEXT differs from made's.
+func lookExecutable(path string, env []string) (string, error) {
+	ext := environmentValue(env, "PATHEXT")
+	if ext == os.Getenv("PATHEXT") {
+		return exec.LookPath(path)
+	}
+	if ext == "" {
+		ext = ".com;.exe;.bat;.cmd"
+	}
+	for e := range strings.SplitSeq(strings.ToLower(ext), ";") {
+		if e == "" {
+			continue
+		}
+		if e[0] != '.' {
+			e = "." + e
+		}
+		candidate := path + e
+		if p, err := exec.LookPath(candidate); err == nil && p == candidate {
+			return p, nil
+		}
+	}
+	return "", exec.ErrNotFound
+}

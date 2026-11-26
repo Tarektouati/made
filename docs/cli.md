@@ -7,6 +7,7 @@ reach a task, the new-version notice, and environment variables. [← Back to RE
 
 ```
 made [-f file] [--no-chdir] [-l] [-V] [task [--] [args...]]
+made [-f file] [--no-chdir] [--env-file path] [--print | --dry-run] task [--] [args...]
 made [-f file] --check [--strict] [--host]
 made init [--force]
 made completion <bash|zsh|fish>
@@ -17,6 +18,8 @@ made self-update [vX.Y.Z] [--dry-run]
 |---|---|---|
 | `-f`, `--file` | nearest `Madefile.md` | Markdown file to read tasks from: any readable file but a directory, including a pipe (`-f <(…)`, `-f /dev/stdin`), whose tasks run in the current directory. Without `-f`, `made` uses the `Madefile.md` in the current directory or the closest parent directory, up to the repository root (or `$HOME` or the filesystem root outside a repository; a parent directory's Madefile must be yours and not writable by others; see [How it works](how-it-works.md)) |
 | `--no-chdir` | | Run the task in the current directory instead of the task file's directory |
+| `--print`, `--dry-run` | | Show the resolved command and script without running the task; see [Previewing a task](#previewing-a-task) |
+| `--env-file <path>` | | Load missing task environment variables from an explicit file; see [Environment files](#environment-files) |
 | `--check` | | Check the task file for problems instead of running a task; see [Checking a Madefile](checking.md) |
 | `--strict` | | With `--check`, fail on warnings too |
 | `--host` | | With `--check`, also check that each task's interpreter is on PATH; see [Checking against this machine](checking.md#checking-against-this-machine) |
@@ -110,6 +113,84 @@ names line up. An emoji sequence (a ZWJ sequence such as 👨‍👩‍👧, a s
 flag) counts as one two-cell emoji, the way terminals that cluster graphemes draw it
 (iTerm2, Terminal.app, Ghostty, WezTerm, kitty). Terminals that draw each code point
 separately, and ambiguous-width characters, may still be off.
+
+## Previewing a task
+
+Put `--print` (or its alias `--dry-run`) before the task name:
+
+```sh
+made --print build
+made -f tasks.md --no-chdir --dry-run deploy -- staging
+made --env-file .env --print deploy staging
+```
+
+The preview prints the absolute task-file path, working directory, resolved
+interpreter path, every interpreter argument, and the script text. It uses the
+same preparation as an actual run, including strict shell options, script padding,
+argument separators, and interpreter lookup in absolute `PATH` entries. Missing
+interpreters and invalid or empty task blocks produce the usual errors. A
+successful preview exits `0`; runtime errors, including script syntax errors, are
+only discovered when the task runs.
+
+Paths and arguments are individually double-quoted with Go-style escapes, so
+empty arguments, spaces and control characters stay visible. The script keeps
+its line breaks while terminal controls and invisible formatting characters are
+escaped. This output is for review. Previewing starts no task process or update
+check, and it does not list or expand environment values.
+
+Preview requires a task name and cannot be combined with task listing, `--check`,
+`--version`, or a subcommand. Flags after the task name still belong to the task:
+`made build --print` passes `--print` to `build`. The existing
+`made self-update --dry-run` keeps its separate meaning.
+
+## Environment files
+
+Environment files are opt-in, through `--env-file <path>` before the task name.
+Made does not discover or load `.env` automatically. For a relative path, the
+base directory is the selected task file's directory, including with
+`--no-chdir`; with a pipe or device as the task file, it is the current directory.
+Absolute paths work too.
+
+```sh
+made --env-file .env serve
+made -f tools/tasks.md --env-file local.env serve  # tools/local.env
+```
+
+The file supplies defaults to the task process only. Existing environment
+variables always win, including an explicitly empty value and `PATH`. When a
+name is repeated in the file, its last definition wins. Keys are case-sensitive
+on Unix and case-insensitive on Windows. The ordinary working-directory
+adjustment of `PWD` is preserved. If the process has no `PATH`, a `PATH` from the
+file is used both to find the interpreter and in the task's environment; relative
+entries are still skipped during interpreter lookup.
+
+The supported format is deliberately small:
+
+- UTF-8 text, with LF or CRLF line endings and an optional initial UTF-8 BOM.
+- Blank lines and lines starting with `#` after whitespace are ignored.
+- `NAME=VALUE`, with optional `export` before the name. Names use ASCII letters,
+  digits and underscores, with a letter or underscore first.
+- Spaces and tabs around names and unquoted values are trimmed. Matching single
+  or double quotes around a value preserve the whitespace inside; that same
+  quote cannot appear inside the quoted value.
+- Values are literal. There is no variable expansion, command substitution,
+  backslash escape decoding or multiline syntax. A `#` inside a value is literal,
+  so put comments on their own lines.
+
+```dotenv
+# Defaults for local tasks
+PORT=8080
+export LABEL="local service"
+LITERAL='$HOME and $(commands) stay literal'
+EMPTY=
+```
+
+The file must be a regular file of at most 1 MiB; symlinks to regular files are
+accepted. An unreadable, oversized or malformed file fails before a task starts.
+Parse errors identify the line and reason without including values. `--env-file`
+can be combined with `--print`; the preview uses the supplied defaults to resolve
+the command and keeps environment values out of its output. Listing, checking
+and subcommands do not accept `--env-file`.
 
 ## Passing arguments
 
