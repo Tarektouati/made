@@ -43,6 +43,14 @@ The generated file starts with `<!-- made vX.Y.Z -->`, which records the version
 `made` that created it. The comment is invisible when the Markdown is rendered, and
 it is safe to edit or delete. Local `dev` builds leave it out.
 
+When that first-line comment names a newer release than the running `made`, task
+execution and the text task list print a warning on stderr. The task still runs,
+and its exit code is unchanged. This is a compatibility hint: the recorded version
+is the version that wrote the file, not a guaranteed minimum requirement. Keep it
+current when editing a Madefile to rely on newer behavior. Files without the marker,
+development builds, and prerelease versions produce no warning. `--check`,
+`--list-names`, and commands that do not read tasks stay quiet.
+
 **`made init --force`** overwrites the existing file with the starter template
 instead, keeping its name (so a `madefile.md` stays `madefile.md`), and prints
 `made: overwrote <name>`. The file is rewritten in place, so if it is a hard link,
