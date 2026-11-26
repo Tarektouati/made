@@ -111,10 +111,12 @@ func TestUpdateRenameFailure(t *testing.T) {
 	// exercises the rename error and cleanup without depending on user IDs.
 	dir := t.TempDir()
 	exe := filepath.Join(dir, "made")
+	// #nosec G301 -- Directory fixture makes the final rename fail without relying on permissions.
 	if err := os.Mkdir(exe, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	marker := filepath.Join(exe, "keep")
+	// #nosec G306 -- Non-sensitive marker inside the private rename-failure fixture.
 	if err := os.WriteFile(marker, []byte("unchanged"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -126,6 +128,7 @@ func TestUpdateRenameFailure(t *testing.T) {
 	if !strings.Contains(res.err.Error(), "cannot replace") || res.stdout != "" {
 		t.Errorf("Run = (%q, %v), want no output and a rename failure", res.stdout, res.err)
 	}
+	// #nosec G304 -- Reads the marker from the private rename-failure fixture.
 	if got, err := os.ReadFile(marker); err != nil || string(got) != "unchanged" {
 		t.Errorf("destination changed: (%q, %v)", got, err)
 	}
