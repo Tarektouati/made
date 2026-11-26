@@ -271,6 +271,17 @@ func assertNoLeftovers(t *testing.T, dir string) {
 	}
 }
 
+func assertPermissions(t *testing.T, exe string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Errorf("%s permissions = %04o, want %04o", exe, got, want)
+	}
+}
+
 func TestUpdateHappyPath(t *testing.T) {
 	g := newFakeGitHub(t, "v0.7.0", map[string]*fakeRelease{"v0.7.0": release("v0.7.0")})
 	exe := installed(t, "v0.6.0")
@@ -282,6 +293,68 @@ func TestUpdateHappyPath(t *testing.T) {
 		t.Errorf("stdout = %q, want %q", res.stdout, want)
 	}
 	assertBinary(t, exe, "v0.7.0")
+}
+
+func TestUpdatePreservesPermissions(t *testing.T) {
+	for _, mode := range []os.FileMode{0o755, 0o700, 0o750, 0o550} {
+		t.Run(fmt.Sprintf("%04o", mode), func(t *testing.T) {
+			g := newFakeGitHub(t, "v0.7.0", map[string]*fakeRelease{"v0.7.0": release("v0.7.0")})
+			exe := installed(t, "v0.6.0")
+			if err := os.Chmod(exe, mode); err != nil {
+				t.Fatal(err)
+			}
+			if res := runUpdate(t, g, exe, "v0.6.0", "", false); res.err != nil {
+				t.Fatalf("Run = %v, want success", res.err)
+			}
+			assertBinary(t, exe, "v0.7.0")
+			assertPermissions(t, exe, mode)
+		})
+	}
+}
+
+func TestUpdateStatFailure(t *testing.T) {
+	g := newFakeGitHub(t, "v0.7.0", map[string]*fakeRelease{"v0.7.0": release("v0.7.0")})
+	exe := installed(t, "v0.6.0")
+	if err := os.Chmod(exe, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	u := Updater{
+		Client:  Client{BaseURL: g.srv.URL},
+		Exe:     exe,
+		Current: "v0.6.0",
+		Target:  "v0.7.0",
+		GOOS:    testOS,
+		GOARCH:  testArch,
+		Stdout:  &stdout,
+	}
+	statErr := &os.PathError{Op: "stat", Path: resolved, Err: os.ErrNotExist}
+	calls := 0
+	err = u.run(context.Background(), func(path string) (os.FileInfo, error) {
+		calls++
+		if path != resolved {
+			t.Errorf("stat path = %q, want %q", path, resolved)
+		}
+		return nil, statErr
+	})
+	if code := exitCode(t, err); code != ExitFailure {
+		t.Fatalf("Run = %v (code %d), want exit %d", err, code, ExitFailure)
+	}
+	if !errors.Is(err, statErr) || !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Run = %v, want the original stat error", err)
+	}
+	if !strings.Contains(err.Error(), "cannot read the running binary's permissions") {
+		t.Errorf("error = %q, want the permissions diagnostic", err)
+	}
+	if calls != 1 || g.downloadCount() != 0 || stdout.Len() != 0 {
+		t.Errorf("stat calls=%d downloads=%d stdout=%q", calls, g.downloadCount(), stdout.String())
+	}
+	assertBinary(t, exe, "v0.6.0")
+	assertPermissions(t, exe, 0o700)
 }
 
 // TestUpdateRunsNewBinaryNextToOld checks the new binary is written, and run, in the
@@ -414,6 +487,9 @@ func TestUpdateFailuresReplaceNothing(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			g := newFakeGitHub(t, c.latest, map[string]*fakeRelease{"v0.7.0": c.rel})
 			exe := installed(t, "v0.6.0")
+			if err := os.Chmod(exe, 0o700); err != nil {
+				t.Fatal(err)
+			}
 			res := runUpdate(t, g, exe, "v0.6.0", "", false)
 			if code := exitCode(t, res.err); code != ExitFailure {
 				t.Fatalf("Run = %v (code %d), want exit %d", res.err, code, ExitFailure)
@@ -425,6 +501,7 @@ func TestUpdateFailuresReplaceNothing(t *testing.T) {
 				t.Errorf("stdout = %q, want nothing", res.stdout)
 			}
 			assertBinary(t, exe, "v0.6.0")
+			assertPermissions(t, exe, 0o700)
 		})
 	}
 }
@@ -576,6 +653,9 @@ func TestUpdateUnwritableDirectory(t *testing.T) {
 func TestUpdateFollowsSymlink(t *testing.T) {
 	g := newFakeGitHub(t, "v0.7.0", map[string]*fakeRelease{"v0.7.0": release("v0.7.0")})
 	dest := installed(t, "v0.6.0")
+	if err := os.Chmod(dest, 0o750); err != nil {
+		t.Fatal(err)
+	}
 	link := filepath.Join(t.TempDir(), "made")
 	if err := os.Symlink(dest, link); err != nil {
 		t.Fatal(err)
@@ -588,6 +668,7 @@ func TestUpdateFollowsSymlink(t *testing.T) {
 		t.Errorf("%s is no longer a symlink (%v, %v)", link, info, err)
 	}
 	assertBinary(t, dest, "v0.7.0")
+	assertPermissions(t, dest, 0o750)
 }
 
 func TestUpdateDryRun(t *testing.T) {

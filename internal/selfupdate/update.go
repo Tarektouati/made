@@ -122,6 +122,10 @@ type Updater struct {
 // and only then renamed over Exe, so a failure leaves the old binary in place. The
 // returned error is an *Error.
 func (u Updater) Run(ctx context.Context) error {
+	return u.run(ctx, os.Stat)
+}
+
+func (u Updater) run(ctx context.Context, stat func(string) (os.FileInfo, error)) error {
 	if !IsRelease(u.Current) {
 		return failure("cannot update from %s, which is not a release version", u.Current)
 	}
@@ -160,6 +164,10 @@ func (u Updater) Run(ctx context.Context) error {
 	if !writable(dir) {
 		return notWritable(dir, fs.ErrPermission)
 	}
+	info, err := stat(exe)
+	if err != nil {
+		return failure("cannot read the running binary's permissions: %w", err)
+	}
 	sumsURL := ReleaseURL(base, target, ChecksumsName)
 	sums, err := u.Client.get(ctx, sumsURL, maxChecksumsBytes)
 	if err != nil {
@@ -181,7 +189,7 @@ func (u Updater) Run(ctx context.Context) error {
 		return failure("cannot extract made from %s: %w", asset, err)
 	}
 
-	tmp, err := writeTemp(dir, bin)
+	tmp, err := writeTemp(dir, bin, info)
 	if err != nil {
 		if isPermission(err) {
 			return notWritable(dir, err)
@@ -290,18 +298,19 @@ func extractMade(archive []byte) ([]byte, error) {
 	}
 }
 
-// writeTemp writes bin to a new executable file in dir and returns its path. The
-// file is in the same directory as the binary it replaces, so the rename is atomic.
-// It is flushed to disk before it is closed, so a crash after the rename cannot
-// leave an empty or partly written made.
-func writeTemp(dir string, bin []byte) (string, error) {
+// writeTemp writes bin to a new file in dir with the original permissions and,
+// when permitted, group, and returns its path. The file is next to the binary it
+// replaces, so the rename is atomic. It is flushed to disk before it is closed,
+// so a crash after the rename cannot leave an empty or partly written made.
+func writeTemp(dir string, bin []byte, info fs.FileInfo) (string, error) {
 	f, err := os.CreateTemp(dir, tempPrefix+"*")
 	if err != nil {
 		return "", err
 	}
 	_, err = f.Write(bin)
 	if err == nil {
-		err = f.Chmod(0o755)
+		preserveGroup(f, info)
+		err = f.Chmod(info.Mode().Perm())
 	}
 	if err == nil {
 		err = f.Sync()

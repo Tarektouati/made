@@ -92,6 +92,10 @@ release archive. It works like `install.sh`:
    any failure the old one is left in place.
 
 If `made` is a symlink, the file it points to is replaced and the link is kept.
+The new binary keeps the old binary's read, write and execute permission bits.
+On Unix it also tries to keep the old binary's group. If the group cannot be
+changed, the update continues with the new file's default group. The file owner,
+special mode bits and other metadata are not copied.
 
 The checksum comes from the same GitHub release as the archive, as with
 `install.sh`, so it catches a corrupted download but not a tampered release. If you
