@@ -58,6 +58,7 @@ func completionDir(t *testing.T) string {
 	dir := writeTasks(t, "Madefile.md", madefileMD)
 	mkdir(t, filepath.Join(dir, ".git"))
 	for name, content := range map[string]string{"other.md": otherMD, "my tasks.md": otherMD, "edge.md": edgeMD, "quote.md": quoteMD} {
+		// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -80,6 +81,7 @@ func runShellOut(t *testing.T, dir, shell string, args ...string) (stdout, stder
 		t.Skip("shell completion scripts are not tested on Windows")
 	}
 	requireCmd(t, shell)
+	// #nosec G204 -- Completion tests explicitly select the shell and script arguments.
 	cmd := exec.CommandContext(t.Context(), shell, args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),

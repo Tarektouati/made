@@ -30,6 +30,7 @@ const runTasksMD = "# Tasks\n\n" +
 func writeRunTasks(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "tasks.md")
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(path, []byte(runTasksMD), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -223,6 +224,7 @@ func TestUsage(t *testing.T) {
 
 func TestRunRejectsDeepNesting(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "deep.md")
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(f, []byte("### t\n\n"+strings.Repeat("> ", 257)+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -253,6 +255,7 @@ func TestRunDeepNestingHintQuotesPath(t *testing.T) {
 		{"deep.md", "run made --check -f deep.md\n"},
 	} {
 		t.Run(tc.file, func(t *testing.T) {
+			// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 			if err := os.WriteFile(tc.file, src, 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -302,6 +305,7 @@ func TestRunTaskArgs(t *testing.T) {
 func TestRunInterpreterExitCodes(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "tasks.md")
 	content := "### py\n```python\nprint('hi')\n```\n\n### plain\n```\necho hi\n```\n"
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(f, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -320,6 +324,7 @@ func TestRunInterpreterExitCodes(t *testing.T) {
 		}
 		dir := t.TempDir()
 		bash := filepath.Join(dir, "bash")
+		// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 		if err := os.WriteFile(bash, []byte("#!/bin/sh\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -335,6 +340,7 @@ func TestRunInterpreterExitCodes(t *testing.T) {
 func TestRunArgsTooLarge(t *testing.T) {
 	requireCmd(t, "bash")
 	f := filepath.Join(t.TempDir(), "tasks.md")
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(f, []byte("### s\n```bash\necho ok\n```\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -352,6 +358,7 @@ func TestRunArgsTooLarge(t *testing.T) {
 func TestRunDashTaskName(t *testing.T) {
 	requireCmd(t, "bash")
 	f := filepath.Join(t.TempDir(), "tasks.md")
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(f, []byte("### -x\n```bash\nexit 0\n```\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -476,14 +483,17 @@ func mkTree(t *testing.T, root string, paths ...string) {
 	for _, p := range paths {
 		full := filepath.Join(root, filepath.FromSlash(p))
 		if strings.HasSuffix(p, "/") {
+			// #nosec G301 -- The fixture tree is inside a private temporary directory.
 			if err := os.MkdirAll(full, 0o755); err != nil {
 				t.Fatal(err)
 			}
 			continue
 		}
+		// #nosec G301 -- The fixture tree is inside a private temporary directory.
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 			t.Fatal(err)
 		}
+		// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 		if err := os.WriteFile(full, nil, 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -617,6 +627,7 @@ func chmodDir(t *testing.T, dir string, mode os.FileMode) {
 	if err := os.Chmod(dir, mode); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G302 -- Restore directory search/write access for temporary-file cleanup.
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 }
 
@@ -665,6 +676,7 @@ func TestFindMadefilePriority(t *testing.T) {
 func TestIsRegularFile(t *testing.T) {
 	dir := t.TempDir()
 	regular := filepath.Join(dir, "regular.md")
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(regular, []byte("ok"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -673,6 +685,7 @@ func TestIsRegularFile(t *testing.T) {
 	}
 
 	dirPath := filepath.Join(dir, madefileNames[0])
+	// #nosec G301 -- The fixture tree is inside a private temporary directory.
 	if err := os.Mkdir(dirPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -708,6 +721,7 @@ func TestRunSkipsFIFOForDiscovery(t *testing.T) {
 	t.Run("fifo in subdir parent wins", func(t *testing.T) {
 		dir := t.TempDir()
 		content := "# Tasks\n\n### hello\n```bash\necho hi\n```\n"
+		// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 		if err := os.WriteFile(filepath.Join(dir, "Madefile.md"), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -743,6 +757,7 @@ func TestRunWarnsOnUnusableMadefile(t *testing.T) {
 			mkTree(t, dir, ".git/", "sub/")
 			if tt.parent {
 				content := "# Tasks\n\n### hello\n```bash\necho hi\n```\n"
+				// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 				if err := os.WriteFile(filepath.Join(dir, "Madefile.md"), []byte(content), 0o644); err != nil {
 					t.Fatal(err)
 				}
@@ -785,6 +800,7 @@ func TestRunFailsOnUnreadableMadefile(t *testing.T) {
 			dir := t.TempDir()
 			mkTree(t, dir, ".git/", "sub/")
 			content := "# Tasks\n\n### hello\n```bash\necho outer\n```\n"
+			// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 			if err := os.WriteFile(filepath.Join(dir, "Madefile.md"), []byte(content), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -805,6 +821,7 @@ func TestRunFailsOnUnreadableMadefile(t *testing.T) {
 // mkUnreadable creates a Madefile at path with mode 000.
 func mkUnreadable(t *testing.T, path string) {
 	t.Helper()
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(path, []byte("### t\n```bash\necho inner\n```\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -913,6 +930,7 @@ func TestReadMadefileDiscoveryRejectsFIFO(t *testing.T) {
 func TestReadMadefileRejectsOversize(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "huge.md")
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	f, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)
@@ -936,6 +954,7 @@ func TestReadMadefileRejectsOversize(t *testing.T) {
 func writeTemp(t *testing.T, name, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1013,6 +1032,7 @@ func TestCheckExactOutput(t *testing.T) {
 
 func TestCheckFileTooLarge(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "huge.md")
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	f, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)
@@ -1183,6 +1203,7 @@ func TestInitCreatesMadefile(t *testing.T) {
 	if got := stdout.String(); got != "made: created Madefile.md\n" {
 		t.Errorf("stdout = %q, want %q", got, "made: created Madefile.md\n")
 	}
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	got, err := os.ReadFile(filepath.Join(dir, "Madefile.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -1232,6 +1253,7 @@ func TestInitRefusesExisting(t *testing.T) {
 				requireCaseSensitiveFS(t, t.TempDir())
 			}
 			path := filepath.Join(dir, name)
+			// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 			if err := os.WriteFile(path, []byte("keep me"), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -1241,6 +1263,7 @@ func TestInitRefusesExisting(t *testing.T) {
 				t.Errorf("run(init) = %d, want 1", code)
 			}
 			checkContains(t, "stderr", stderr.String(), []string{name + " already exists", "made init --force"}, true)
+			// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 			if got, _ := os.ReadFile(path); string(got) != "keep me" {
 				t.Errorf("%s = %q, want it untouched", name, got)
 			}
@@ -1295,6 +1318,7 @@ func TestInitIsReserved(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "ran")
 	content := "### init\n```bash\ntouch " + marker + "\n```\n"
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(filepath.Join(dir, "Madefile.md"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1317,6 +1341,7 @@ func TestInitForceOverwrites(t *testing.T) {
 				requireCaseSensitiveFS(t, t.TempDir())
 			}
 			path := filepath.Join(dir, name)
+			// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 			if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -1328,6 +1353,7 @@ func TestInitForceOverwrites(t *testing.T) {
 			if want := "made: overwrote " + name + "\n"; stdout.String() != want {
 				t.Errorf("stdout = %q, want %q", stdout.String(), want)
 			}
+			// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 			if got, _ := os.ReadFile(path); string(got) != initTemplate(resolveVersion()) {
 				t.Errorf("%s = %q, want the template", name, got)
 			}
@@ -1348,6 +1374,7 @@ func TestInitForceWithoutExisting(t *testing.T) {
 	if got := stdout.String(); got != "made: created Madefile.md\n" {
 		t.Errorf("stdout = %q, want %q", got, "made: created Madefile.md\n")
 	}
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	if got, _ := os.ReadFile(filepath.Join(dir, "Madefile.md")); string(got) != initTemplate(resolveVersion()) {
 		t.Errorf("Madefile.md = %q, want the template", got)
 	}
@@ -1359,6 +1386,7 @@ func TestInitForceMultiple(t *testing.T) {
 	dir := t.TempDir()
 	requireCaseSensitiveFS(t, t.TempDir())
 	for _, n := range []string{"madefile.md", "Madefile.md"} {
+		// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 		if err := os.WriteFile(filepath.Join(dir, n), []byte("old "+n), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -1386,6 +1414,7 @@ func TestInitForceSkipsDirectory(t *testing.T) {
 	dir := t.TempDir()
 	requireCaseSensitiveFS(t, t.TempDir())
 	mkTree(t, dir, "Madefile.md/")
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(filepath.Join(dir, "madefile.md"), []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1411,13 +1440,16 @@ func initSymlinkMadefileTree(t *testing.T) (repo, target string) {
 	base := t.TempDir()
 	outDir := filepath.Join(base, "outside")
 	repo = filepath.Join(base, "repo")
+	// #nosec G301 -- The fixture tree is inside a private temporary directory.
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G301 -- The fixture tree is inside a private temporary directory.
 	if err := os.Mkdir(repo, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	target = filepath.Join(outDir, "target.txt")
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(target, []byte("ORIGINAL"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1441,6 +1473,7 @@ func TestWriteTemplateNoFollowRefusesSymlink(t *testing.T) {
 	if err := writeTemplate("Madefile.md", os.O_TRUNC|initForceNoFollow); err == nil {
 		t.Fatal("writeTemplate on symlink with O_NOFOLLOW = nil, want error")
 	}
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	if got, _ := os.ReadFile(target); string(got) != "ORIGINAL" {
 		t.Errorf("symlink target = %q, want %q", got, "ORIGINAL")
 	}
@@ -1455,6 +1488,7 @@ func TestInitForceRefusesSymlink(t *testing.T) {
 		t.Fatalf("run(init --force) = %d, want 1 (stdout: %q, stderr: %q)", code, &stdout, &stderr)
 	}
 	checkContains(t, "stderr", stderr.String(), []string{"Madefile.md", "symlink", "refusing"}, true)
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	if got, _ := os.ReadFile(target); string(got) != "ORIGINAL" {
 		t.Errorf("symlink target = %q, want %q", got, "ORIGINAL")
 	}
@@ -1475,6 +1509,7 @@ func TestInitRefusesSymlinkWithoutFollowing(t *testing.T) {
 		t.Errorf("run(init) = %d, want 1", code)
 	}
 	checkContains(t, "stderr", stderr.String(), []string{"Madefile.md already exists", "made init --force"}, true)
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	if got, _ := os.ReadFile(target); string(got) != "ORIGINAL" {
 		t.Errorf("symlink target = %q, want %q", got, "ORIGINAL")
 	}
@@ -1558,6 +1593,7 @@ func TestCompletionIsReserved(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "ran")
 	content := "### completion\n```bash\ntouch " + marker + "\n```\n"
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(filepath.Join(dir, "Madefile.md"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1593,6 +1629,7 @@ func TestListNamesSkipsEmptyName(t *testing.T) {
 	md := "### \nempty\n```sh\necho\n```\n" +
 		"### \u200b\ninvisible\n```sh\necho\n```\n" +
 		"### hello\nSay hello.\n```sh\necho\n```\n"
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(path, []byte(md), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1611,6 +1648,7 @@ func TestListNamesSkipsDuplicateNote(t *testing.T) {
 	requireCaseSensitiveFS(t, t.TempDir())
 	dir := t.TempDir()
 	for _, name := range []string{"Madefile.md", "madefile.md"} {
+		// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(runTasksMD), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -1670,6 +1708,7 @@ func TestRunWarnsDuplicateTask(t *testing.T) {
 func TestRunUsingNoteBeforeDuplicateWarning(t *testing.T) {
 	root := filepath.Dir(writeTemp(t, "Madefile.md", dupTasksMD))
 	sub := filepath.Join(root, "sub")
+	// #nosec G301 -- The fixture tree is inside a private temporary directory.
 	if err := os.Mkdir(sub, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1854,6 +1893,7 @@ const controlCharsTasksMD = "### evil\x1b[2J\n\x1b]0;pwned\x07note\n```bash\ntru
 
 func TestPrintTasksStripsControlChars(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tasks.md")
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(path, []byte(controlCharsTasksMD), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -2115,6 +2155,7 @@ func writeSlowParseMadefile(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "slow.md")
 	src := "### t\n\n" + strings.Repeat("_a*", 10000) + "\n\n```bash\necho ok\n```\n"
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
 		t.Fatal(err)
 	}

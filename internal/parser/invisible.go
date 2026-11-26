@@ -62,12 +62,13 @@ func ReplaceInvisible(s string, repl func(r rune) string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); {
 		r, size := utf8.DecodeRuneInString(s[i:])
-		if r == flagTagBase {
+		switch {
+		case r == flagTagBase:
 			size += flagTagSeqLen(s[i+size:])
 			b.WriteString(s[i : i+size])
-		} else if isInvisible(r) {
+		case isInvisible(r):
 			b.WriteString(repl(r))
-		} else {
+		default:
 			b.WriteString(s[i : i+size])
 		}
 		i += size

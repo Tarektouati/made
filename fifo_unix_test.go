@@ -14,6 +14,7 @@ import (
 // mkFIFO creates a named pipe at path, creating parent directories as needed.
 func mkFIFO(t *testing.T, path string) {
 	t.Helper()
+	// #nosec G301 -- The fixture tree is inside a private temporary directory.
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -31,6 +32,7 @@ func feedFIFO(t *testing.T, path string, content []byte) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 		f, err := os.OpenFile(path, os.O_WRONLY, 0)
 		if err != nil {
 			return
@@ -39,6 +41,7 @@ func feedFIFO(t *testing.T, path string, content []byte) {
 		_ = f.Close()
 	}()
 	t.Cleanup(func() {
+		// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 		r, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 		if err != nil {
 			<-done

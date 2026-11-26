@@ -238,6 +238,7 @@ func TestRunCancelGivesSurvivorsGrace(t *testing.T) {
 	const script = "( trap 'sleep 1; echo done > graceful; exit 0' TERM; echo ok > ready; while :; do sleep 0.05; done ) &\nwait"
 	forEachStdinMode(t, func(t *testing.T, _ stdinMode) {
 		dir, cancelled := cancelTask(t, script, signalCause{syscall.SIGTERM})
+		// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 		if b, err := os.ReadFile(filepath.Join(dir, "graceful")); err != nil || len(b) == 0 {
 			t.Errorf("child with a SIGTERM handler did not finish its shutdown (graceful: %v)", err)
 		}
@@ -269,6 +270,7 @@ func TestRunTerminalSignalTracksLateDescendants(t *testing.T) {
 // readPid reads the pid in path.
 func readPid(t *testing.T, path string) int {
 	t.Helper()
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
@@ -391,6 +393,7 @@ func TestSurvivorsIgnoresZombies(t *testing.T) {
 // startProc starts name with args and attr, leaving it unreaped until the test ends.
 func startProc(t *testing.T, name string, args []string, attr *syscall.SysProcAttr) *exec.Cmd {
 	t.Helper()
+	// #nosec G204 -- Tests choose the process and arguments to exercise process-group teardown.
 	cmd := exec.CommandContext(t.Context(), name, args...)
 	cmd.SysProcAttr = attr
 	if err := cmd.Start(); err != nil {
@@ -408,6 +411,7 @@ func waitZombie(t *testing.T, pid int) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
+		// #nosec G204 -- ps receives a test PID as a separate decimal argument, without a shell.
 		out, _ := exec.CommandContext(t.Context(), "ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
 		if strings.HasPrefix(strings.TrimSpace(string(out)), "Z") {
 			return
@@ -424,6 +428,7 @@ func waitForFile(t *testing.T, path string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
+		// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 		if b, err := os.ReadFile(path); err == nil && len(b) > 0 {
 			return
 		}

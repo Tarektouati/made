@@ -160,6 +160,7 @@ func valid(tag string) bool {
 // load reads the cache at path. A missing, unreadable or malformed cache, or one
 // whose latest version is not valid, reads as empty, so the next check overwrites it.
 func load(path string) state {
+	// #nosec G304 -- Reads the caller-selected update cache; size and tag contents are checked before use.
 	f, err := os.Open(path)
 	if err != nil {
 		return state{}

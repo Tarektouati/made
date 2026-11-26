@@ -191,6 +191,7 @@ func release(tag string) *fakeRelease {
 func installed(t *testing.T, v string) string {
 	t.Helper()
 	exe := filepath.Join(t.TempDir(), "made")
+	// #nosec G306 -- Executable fixture inside a private temporary directory.
 	if err := os.WriteFile(exe, []byte(versionScript(v)), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -241,6 +242,7 @@ func exitCode(t *testing.T, err error) int {
 // temporary file was left next to it.
 func assertBinary(t *testing.T, exe, v string) {
 	t.Helper()
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	b, err := os.ReadFile(exe)
 	if err != nil {
 		t.Fatal(err)
@@ -294,6 +296,7 @@ func TestUpdateRunsNewBinaryNextToOld(t *testing.T) {
 	if res := runUpdate(t, g, exe, "v0.6.0", "", false); res.err != nil {
 		t.Fatalf("Run = %v, want success", res.err)
 	}
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	got, err := os.ReadFile(marker)
 	if err != nil {
 		t.Fatal(err)
@@ -512,6 +515,7 @@ func TestUpdateVersionCheckDoesNotHang(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "pid")
 	bin := "#!/bin/sh\nsleep 20 &\necho $! >'" + pidFile + "'\necho made v0.7.0\n"
 	t.Cleanup(func() {
+		// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 		if b, err := os.ReadFile(pidFile); err == nil {
 			if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
 				_ = syscall.Kill(pid, syscall.SIGTERM)
@@ -548,9 +552,11 @@ func TestUpdateUnwritableDirectory(t *testing.T) {
 	g := newFakeGitHub(t, "v0.7.0", map[string]*fakeRelease{"v0.7.0": release("v0.7.0")})
 	exe := installed(t, "v0.6.0")
 	dir := filepath.Dir(exe)
+	// #nosec G302 -- The read-only directory is required to test an unwritable installation.
 	if err := os.Chmod(dir, 0o555); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G302 -- Restore directory search/write access for temporary-file cleanup.
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 
 	res := runUpdate(t, g, exe, "v0.6.0", "", false)
@@ -620,9 +626,11 @@ func TestUpdateDryRunUnwritable(t *testing.T) {
 	g := newFakeGitHub(t, "v0.7.0", map[string]*fakeRelease{"v0.7.0": release("v0.7.0")})
 	exe := installed(t, "v0.6.0")
 	dir := filepath.Dir(exe)
+	// #nosec G302 -- The read-only directory is required to test an unwritable installation.
 	if err := os.Chmod(dir, 0o555); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G302 -- Restore directory search/write access for temporary-file cleanup.
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 	res := runUpdate(t, g, exe, "v0.6.0", "", true)
 	if code := exitCode(t, res.err); code != 0 {

@@ -253,7 +253,7 @@ func (u Updater) target(ctx context.Context) (string, error) {
 // install.sh's awk does: the first line whose second field is asset, after removing
 // a trailing carriage return.
 func checksumFor(sums []byte, asset string) (string, error) {
-	for _, line := range strings.Split(string(sums), "\n") {
+	for line := range strings.SplitSeq(string(sums), "\n") {
 		f := strings.Fields(strings.TrimSuffix(line, "\r"))
 		if len(f) >= 2 && f[1] == asset {
 			return strings.ToLower(f[0]), nil

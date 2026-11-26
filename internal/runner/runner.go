@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -138,19 +137,19 @@ var (
 // failures) and non-shell interpreters fail on an uncaught error, so only bash, sh,
 // and zsh get strict-mode options.
 var interpreters = map[string]interpreter{
-	"":           {"bash", strictPipefail, "-c", shellSep, false},
-	"bash":       {"bash", strictPipefail, "-c", shellSep, false},
-	"sh":         {"sh", strictPOSIX, "-c", shellSep, false},
-	"shell":      {"bash", strictPipefail, "-c", shellSep, false},
-	"zsh":        {"zsh", strictPipefail, "-c", shellSep, false},
-	"fish":       {"fish", nil, "-c", endOfOpts, false},
-	"python":     {"python3", nil, "-c", nil, true},
-	"python3":    {"python3", nil, "-c", nil, true},
-	"node":       {"node", nil, "-e", endOfOpts, false},
-	"js":         {"node", nil, "-e", endOfOpts, false},
-	"javascript": {"node", nil, "-e", endOfOpts, false},
-	"ruby":       {"ruby", nil, "-e", endOfOpts, false},
-	"perl":       {"perl", nil, "-e", endOfOpts, false},
+	"":           {cmd: "bash", opts: strictPipefail, flag: "-c", argSep: shellSep},
+	"bash":       {cmd: "bash", opts: strictPipefail, flag: "-c", argSep: shellSep},
+	"sh":         {cmd: "sh", opts: strictPOSIX, flag: "-c", argSep: shellSep},
+	"shell":      {cmd: "bash", opts: strictPipefail, flag: "-c", argSep: shellSep},
+	"zsh":        {cmd: "zsh", opts: strictPipefail, flag: "-c", argSep: shellSep},
+	"fish":       {cmd: "fish", flag: "-c", argSep: endOfOpts},
+	"python":     {cmd: "python3", flag: "-c", noPad: true},
+	"python3":    {cmd: "python3", flag: "-c", noPad: true},
+	"node":       {cmd: "node", flag: "-e", argSep: endOfOpts},
+	"js":         {cmd: "node", flag: "-e", argSep: endOfOpts},
+	"javascript": {cmd: "node", flag: "-e", argSep: endOfOpts},
+	"ruby":       {cmd: "ruby", flag: "-e", argSep: endOfOpts},
+	"perl":       {cmd: "perl", flag: "-e", argSep: endOfOpts},
 }
 
 // fallbacks lists interpreters tried in order when a language's interpreter is not on
@@ -220,6 +219,7 @@ func Run(ctx context.Context, force <-chan struct{}, t task.Task, dir string, ar
 	// An absolute path is not looked up again, so exec.ErrDot cannot occur. It is also
 	// argv[0]: given a bare name, bash ($BASH) and python (sys.executable) search PATH
 	// themselves and can find the relative-entry binary made skipped.
+	// #nosec G204 -- The chosen task is intentionally executed by an interpreter resolved from absolute PATH entries.
 	cmd := exec.CommandContext(ctx, path, argv...)
 	cmd.Dir = dir
 	cmd.Stdin = os.Stdin
@@ -369,7 +369,7 @@ func Languages() []string {
 			keys = append(keys, k)
 		}
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	return keys
 }
 
@@ -617,6 +617,7 @@ func findNonExecutable(name string) string {
 			continue
 		}
 		p := filepath.Join(dir, name)
+		// #nosec G703 -- Absolute PATH entries select interpreters; name comes from the fixed interpreter table.
 		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
 			return p
 		}

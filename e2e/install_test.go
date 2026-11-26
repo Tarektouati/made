@@ -191,6 +191,7 @@ func customRelease(t *testing.T, opts releaseOpts) string {
 	}
 	archive := fmt.Sprintf("made_%s_%s_%s.tar.gz", installVersion, goos, goarch)
 	dir := t.TempDir()
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(filepath.Join(dir, archive), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -216,6 +217,7 @@ func linkTool(t *testing.T, bin, name string) {
 
 func writeExec(t *testing.T, path, content string) {
 	t.Helper()
+	// #nosec G306 -- Executable fixture inside a private temporary directory.
 	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -306,9 +308,11 @@ func runInstall(t *testing.T, release string, opts installOpts, env ...string) i
 	if opts.stdin == nil {
 		args = []string{script}
 	}
+	// #nosec G204 -- Runs the repository installer with a controlled PATH and local release fixtures.
 	cmd := exec.CommandContext(t.Context(), sh, args...)
 	cmd.Dir = res.work
-	cmd.Env = append(cmdEnv, env...)
+	cmdEnv = append(cmdEnv, env...)
+	cmd.Env = cmdEnv
 	if opts.stdin != nil {
 		cmd.Stdin = bytes.NewReader(opts.stdin)
 	}
@@ -323,13 +327,16 @@ func runInstall(t *testing.T, release string, opts installOpts, env ...string) i
 		res.code = ee.ExitCode()
 	}
 	res.stdout, res.stderr = out.String(), errb.String()
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	if data, err := os.ReadFile(log); err == nil {
 		res.curlLog = string(data)
 		res.curlCalls = strings.Count(res.curlLog, "\n")
 	}
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	if data, err := os.ReadFile(outLog); err == nil {
 		res.curlOuts = string(data)
 	}
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	if data, err := os.ReadFile(sudoLog); err == nil {
 		res.sudoLog = string(data)
 	}
@@ -381,7 +388,9 @@ func TestScriptTmpWithSpace(t *testing.T) {
 	archive := "made_" + installVersion + "_linux_amd64.tar.gz"
 	url := "https://github.com/Tarektouati/made/releases/download/v" + installVersion + "/" + archive
 	// The release is empty, so curl exits 22 after logging the call.
+	// #nosec G204 -- Runs the test curl fixture to check output paths containing spaces.
 	_ = exec.CommandContext(t.Context(), filepath.Join(bin, "curl"), "-fsSL", "-o", filepath.Join(tmp, archive), url).Run()
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	data, err := os.ReadFile(outLog)
 	if err != nil {
 		t.Fatal(err)
@@ -494,9 +503,11 @@ func TestInstallScript(t *testing.T) {
 					t.Skip("root can write to any directory; skipping")
 				}
 				mkdir(t, dir)
+				// #nosec G302 -- The read-only directory is required to test an unwritable installation.
 				if err := os.Chmod(dir, 0o555); err != nil {
 					t.Fatal(err)
 				}
+				// #nosec G302 -- Restore directory search/write access for temporary-file cleanup.
 				t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 				return []string{"MADE_VERSION=v1.2.3", "MADE_INSTALL_DIR=" + dir}
 			},
@@ -825,6 +836,7 @@ func TestInstallScriptRelease(t *testing.T) {
 			}
 			res := runInstall(t, release, tc.opts, "MADE_INSTALL_DIR="+dir)
 			if tc.existing != "" {
+				// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 				got, err := os.ReadFile(filepath.Join(dir, "made"))
 				if err != nil {
 					t.Fatal(err)
@@ -1001,6 +1013,7 @@ func TestInstallScriptFetchHTTPSOnly(t *testing.T) {
 	secure := httptest.NewTLSServer(handler)
 	t.Cleanup(secure.Close)
 	old := httptest.NewUnstartedServer(handler)
+	// #nosec G402 -- This local server deliberately offers TLS 1.0/1.1 to test their rejection.
 	old.TLS = &tls.Config{MinVersion: tls.VersionTLS10, MaxVersion: tls.VersionTLS11}
 	old.StartTLS()
 	t.Cleanup(old.Close)
@@ -1033,6 +1046,7 @@ func TestInstallScriptFetchHTTPSOnly(t *testing.T) {
 			args = append([]string{"-fsSL"}, args...)
 		}
 		before := plainHits.Load()
+		// #nosec G204 -- Runs the fixed fetch function or curl against local httptest servers.
 		cmd := exec.CommandContext(t.Context(), name, args...)
 		cmd.Env = append([]string{"PATH=" + os.Getenv("PATH"), "HOME=" + home}, env...)
 		var errb bytes.Buffer
@@ -1047,6 +1061,7 @@ func TestInstallScriptFetchHTTPSOnly(t *testing.T) {
 		}
 		res.stderr = errb.String()
 		res.plainHits = plainHits.Load() - before
+		// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 		if data, readErr := os.ReadFile(out); readErr == nil {
 			res.body = string(data)
 		}

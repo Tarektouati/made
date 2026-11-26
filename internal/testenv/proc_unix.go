@@ -16,6 +16,7 @@ import (
 // over the pids cannot pass vacuously.
 func ReadPids(t testing.TB, path string) []int {
 	t.Helper()
+	// #nosec G304 -- The PID file is written by a test task in its temporary directory.
 	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
@@ -41,6 +42,7 @@ func Alive(t testing.TB, pid int) bool {
 	if syscall.Kill(pid, 0) != nil {
 		return false
 	}
+	// #nosec G204 -- ps receives a decimal PID as a separate argument, without a shell.
 	out, err := exec.CommandContext(t.Context(), "ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
 	return err == nil && !strings.HasPrefix(strings.TrimSpace(string(out)), "Z")
 }

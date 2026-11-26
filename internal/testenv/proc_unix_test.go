@@ -24,6 +24,7 @@ func TestReadPids(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "pids")
+			// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 			if err := os.WriteFile(path, []byte(tc.content), 0o644); err != nil {
 				t.Fatal(err)
 			}

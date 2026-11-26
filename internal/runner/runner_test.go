@@ -182,6 +182,7 @@ func TestRunShellOptOut(t *testing.T) {
 // writeMarker creates an empty file named "marker" in dir.
 func writeMarker(t *testing.T, dir string) {
 	t.Helper()
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(filepath.Join(dir, "marker"), nil, 0o644); err != nil {
 		t.Fatalf("write marker: %v", err)
 	}
@@ -224,6 +225,7 @@ func fakePath(t *testing.T, bins ...fakeBin) string {
 // writeBins writes bins into dir, creating it if needed.
 func writeBins(t *testing.T, dir string, bins ...fakeBin) {
 	t.Helper()
+	// #nosec G301 -- The fixture tree is inside a private temporary directory.
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
@@ -309,7 +311,7 @@ func TestRunInterpreterStartErrors(t *testing.T) {
 				t.Errorf("ExitCode = %d, want %d", got, tt.wantCode)
 			}
 			msg := err.Error()
-			if len(tt.bins) > 0 && tt.wantIs != exec.ErrNotFound && !strings.Contains(msg, filepath.Join(dir, tt.bins[0].name)) {
+			if len(tt.bins) > 0 && !errors.Is(tt.wantIs, exec.ErrNotFound) && !strings.Contains(msg, filepath.Join(dir, tt.bins[0].name)) {
 				t.Errorf("error = %q, want it to name the path in %s", msg, dir)
 			}
 			for _, w := range tt.want {
@@ -506,6 +508,7 @@ func TestRunBashVarIsAbsolute(t *testing.T) {
 	if runErr := Run(context.Background(), nil, task, "", []string{out}); runErr != nil {
 		t.Fatalf("Run: %v", runErr)
 	}
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	got, err := os.ReadFile(out)
 	if err != nil {
 		t.Fatal(err)

@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -68,6 +69,7 @@ func TestResolveFileRefusesWritableParentMadefile(t *testing.T) {
 			mf := filepath.Join(root, "Madefile.md")
 			chmod(t, mf, tt.file)
 			chmod(t, root, tt.dir)
+			// #nosec G302 -- Restore directory search/write access for temporary-file cleanup.
 			t.Cleanup(func() { _ = os.Chmod(root, 0o700) })
 			res, err := resolveFile("")
 			wantUntrusted(t, err, mf, tt.problem, tt.subject)
@@ -94,6 +96,7 @@ func TestResolveFileAcceptsTrustedParentMadefile(t *testing.T) {
 			mf := filepath.Join(root, "Madefile.md")
 			chmod(t, mf, tt.file)
 			chmod(t, root, tt.dir)
+			// #nosec G302 -- Restore directory search/write access for temporary-file cleanup.
 			t.Cleanup(func() { _ = os.Chmod(root, 0o700) })
 			res, err := resolveFile("")
 			if err != nil {
@@ -114,6 +117,7 @@ func TestResolveFileDoesNotCheckCwdOrExplicit(t *testing.T) {
 	mf := filepath.Join(root, "Madefile.md")
 	chmod(t, mf, 0o666)
 	chmod(t, root, 0o777)
+	// #nosec G302 -- Restore directory search/write access for temporary-file cleanup.
 	t.Cleanup(func() { _ = os.Chmod(root, 0o700) })
 
 	if res, err := resolveFile(mf); err != nil || !res.explicit {
@@ -153,6 +157,7 @@ func TestResolveFileChecksBothEndsOfASymlink(t *testing.T) {
 			}
 			chmod(t, filepath.Join(shared, "tasks.md"), tt.target)
 			chmod(t, shared, tt.targetDir)
+			// #nosec G302 -- Restore directory search/write access for temporary-file cleanup.
 			t.Cleanup(func() { _ = os.Chmod(shared, 0o700) })
 			t.Chdir(filepath.Join(root, "a"))
 
@@ -205,6 +210,7 @@ func TestResolveFileChecksEveryHopOfASymlinkChain(t *testing.T) {
 			symlink(t, filepath.Join("..", "shared", "tasks.md"), filepath.Join(base, "mid", "link2"))
 			chmod(t, filepath.Join(base, "shared", "tasks.md"), tt.target)
 			chmod(t, filepath.Join(base, "mid"), tt.mid)
+			// #nosec G302 -- Restore directory search/write access for temporary-file cleanup.
 			t.Cleanup(func() { _ = os.Chmod(filepath.Join(base, "mid"), 0o700) })
 			t.Chdir(filepath.Join(base, "proj", "a"))
 
@@ -346,6 +352,7 @@ func TestRunRefusesUntrustedParentMadefile(t *testing.T) {
 	root := parentTree(t)
 	mf := filepath.Join(root, "Madefile.md")
 	marker := filepath.Join(root, "ran")
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(mf, []byte("### touch\n```sh\ntouch "+marker+"\n```\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -374,6 +381,10 @@ func TestTrustedUIDsIgnoresSudoUIDWhenNotRoot(t *testing.T) {
 	euid := os.Geteuid()
 	if euid == 0 {
 		t.Skip("running as root, where SUDO_UID counts")
+	}
+	if euid < 0 || euid >= math.MaxUint32 {
+		t.Fatalf("effective uid %d is outside the Unix uid range", euid)
+		return
 	}
 	t.Setenv("SUDO_UID", "65534")
 	if got, want := trustedUIDs(), []uint32{0, uint32(euid)}; !slices.Equal(got, want) {
