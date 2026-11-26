@@ -278,7 +278,7 @@ type Install struct {
 // a platform without release archives is NoArchive; anything else is Manual.
 func Detect(in Install) Method {
 	exe := filepath.Clean(in.Exe)
-	for _, seg := range strings.Split(filepath.ToSlash(filepath.Dir(exe)), "/") {
+	for seg := range strings.SplitSeq(filepath.ToSlash(filepath.Dir(exe)), "/") {
 		if seg == "Cellar" || seg == "Caskroom" {
 			return Homebrew
 		}

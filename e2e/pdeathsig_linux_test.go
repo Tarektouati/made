@@ -19,6 +19,7 @@ func TestSIGKILLStopsInterpreter(t *testing.T) {
 	dir := writeTasks(t, "Madefile.md", "### sleeper\n```bash\necho $$ > pid\necho started\nexec sleep 30\n```\n")
 	cmd, waitErr := startMade(t, dir, "sleeper")
 
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	b, err := os.ReadFile(filepath.Join(dir, "pid"))
 	if err != nil {
 		t.Fatalf("read pid: %v", err)

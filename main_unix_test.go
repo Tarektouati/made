@@ -25,6 +25,7 @@ const signalTasksMD = "# Tasks\n\n" +
 func TestRunSignalExitCode(t *testing.T) {
 	requireCmd(t, "bash")
 	f := filepath.Join(t.TempDir(), "tasks.md")
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(f, []byte(signalTasksMD), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -49,16 +50,20 @@ func TestRunEscapesControlCharsInPaths(t *testing.T) {
 	evil := filepath.Join(root, "x\x1b]0;PWNED\x07dir")
 	mkTree(t, evil, ".git/", "sub/", "bin/")
 	md := "### t\n```sh\ntrue\n```\n### t\n```sh\ntrue\n```\n### py\n```python3\npass\n```\n"
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(filepath.Join(evil, "Madefile.md"), []byte(md), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(filepath.Join(evil, "empty.md"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	deep := strings.Repeat("> ", 257) + "\n"
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(filepath.Join(evil, "deep.md"), []byte(deep), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(filepath.Join(evil, "bin", "python3"), []byte("#!/bin/sh\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

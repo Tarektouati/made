@@ -41,20 +41,24 @@ func TestBenchReportGoSignificance(t *testing.T) {
 				"stat.csv":       ",sec/op,CI,sec/op,CI,vs base,P\n" + tc.row + "\n",
 			}
 			for name, content := range files {
+				// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 				if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			}
 			bin := filepath.Join(dir, "bin")
+			// #nosec G301 -- The fixture tree is inside a private temporary directory.
 			if err := os.Mkdir(bin, 0o755); err != nil {
 				t.Fatal(err)
 			}
 			script := "#!/bin/sh\ncat '" + filepath.Join(dir, "stat.csv") + "'\n"
+			// #nosec G306 -- Executable fixture inside a private temporary directory.
 			if err := os.WriteFile(filepath.Join(bin, "benchstat"), []byte(script), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
+			// #nosec G204 -- Runs the repository report script against the temporary benchmark fixtures.
 			out, err := exec.CommandContext(t.Context(), "python3", "scripts/bench-report.py", dir).CombinedOutput()
 			if err != nil {
 				t.Fatalf("bench-report.py: %v\n%s", err, out)

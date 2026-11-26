@@ -38,6 +38,7 @@ func TestSignalsKillGrandchild(t *testing.T) {
 			dir := writeTasks(t, "Madefile.md", content)
 
 			outPath := filepath.Join(t.TempDir(), "out.txt")
+			// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 			outFile, err := os.Create(outPath)
 			if err != nil {
 				t.Fatalf("create out file: %v", err)
@@ -50,6 +51,7 @@ func TestSignalsKillGrandchild(t *testing.T) {
 			cmd.Stdout = outFile
 			cmd.Stderr = &stderr
 			output := func() string {
+				// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 				b, _ := os.ReadFile(outPath)
 				return string(b)
 			}

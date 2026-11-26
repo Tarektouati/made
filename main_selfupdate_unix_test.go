@@ -68,9 +68,11 @@ func TestSelfUpdateUnwritableDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G302 -- The read-only directory is required to test an unwritable installation.
 	if err := os.Chmod(dir, 0o555); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G302 -- Restore directory search/write access for temporary-file cleanup.
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 	useFakeInstall(t, f, in)
 	var stdout, stderr bytes.Buffer

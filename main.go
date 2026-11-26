@@ -747,6 +747,7 @@ func notRegular(path string) (kind string, ok bool) {
 // writeTemplate opens name for writing with the extra open flags and writes
 // the init template for this build's version to it. New files get mode 0644.
 func writeTemplate(name string, flags int) error {
+	// #nosec G302 G304 -- initMadefile selects a known name in the current directory; the public task template is intentionally mode 0644.
 	f, err := os.OpenFile(name, os.O_WRONLY|flags, 0o644)
 	if err != nil {
 		return err
@@ -883,6 +884,7 @@ func readMadefile(path string, explicit bool, trusted fs.FileInfo) (source []byt
 	if info.Mode().IsRegular() && info.Size() > maxMadefileBytes {
 		return nil, false, fmt.Errorf("%s %w (%d bytes)", path, errTooLarge, maxMadefileBytes)
 	}
+	// #nosec G304 -- Explicit paths are user-selected; trusted parent files are checked again with SameFile below.
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, false, err

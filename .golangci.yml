@@ -12,6 +12,11 @@ linters:
     - whitespace
     - bodyclose
     - noctx
+    - gosec
+    - errorlint
+    - gocritic
+    - revive
+    - nolintlint
   settings:
     govet:
       enable-all: true
@@ -25,6 +30,9 @@ linters:
         - fmt.Fprint
         - fmt.Fprintf
         - fmt.Fprintln
+    nolintlint:
+      require-explanation: true
+      require-specific: true
 
 formatters:
   enable:

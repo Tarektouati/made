@@ -21,10 +21,12 @@ func TestRefusesWritableParentMadefile(t *testing.T) {
 	mf := filepath.Join(dir, "Madefile.md")
 	writeFile(t, mf, catMarkerMD)
 	writeFile(t, filepath.Join(dir, "marker.txt"), "in-root\n")
+	// #nosec G302 -- A world-writable fixture is required to test the parent-file trust check.
 	if err := os.Chmod(mf, 0o666); err != nil {
 		t.Fatal(err)
 	}
 	nested := filepath.Join(dir, "a", "b")
+	// #nosec G301 -- The fixture tree is inside a private temporary directory.
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatal(err)
 	}

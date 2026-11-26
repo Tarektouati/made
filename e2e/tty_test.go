@@ -83,6 +83,7 @@ func TestCtrlCOnTTYLetsTaskCleanUp(t *testing.T) {
 	if status := waitStatus(t, dir); status != "3" {
 		t.Errorf("made exit status = %q, want the trap's 3", status)
 	}
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	if b, _ := os.ReadFile(filepath.Join(dir, "clean")); string(b) != "start\ndone\n" {
 		t.Errorf("trap output = %q, want it to run to the end (%q)", b, "start\ndone\n")
 	}
@@ -151,6 +152,7 @@ func startOnTTY(t *testing.T, dir string, args ...string) *os.File {
 	go func() { _, _ = io.Copy(io.Discard, master) }()
 
 	wrapper := `trap : INT QUIT; "$0" "$@"; echo $? > status; exec sleep 60`
+	// #nosec G204 -- The fixed terminal wrapper runs the test binary and records its exit status.
 	cmd := exec.CommandContext(t.Context(), "bash", append([]string{"-c", wrapper, madeBin}, args...)...)
 	cmd.Dir = dir
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = slave, slave, slave
@@ -172,6 +174,7 @@ func waitStatus(t *testing.T, dir string) string {
 	t.Helper()
 	path := filepath.Join(dir, "status")
 	waitForFile(t, path)
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)

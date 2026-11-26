@@ -96,6 +96,7 @@ func unsetenv(t *testing.T, key string) {
 func writeNoticeTasks(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "tasks.md")
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(path, []byte(noticeTasksMD), 0o644); err != nil {
 		t.Fatal(err)
 	}

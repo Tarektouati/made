@@ -62,6 +62,7 @@ func TestMain(m *testing.M) {
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
 	}
+	// #nosec G204 -- The module path is fixed and the output is a private test binary.
 	build := exec.CommandContext(context.Background(), "go", "build", "-o", bin, "github.com/Tarektouati/made")
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
@@ -87,6 +88,7 @@ func runMade(t *testing.T, dir string, args ...string) (stdout, stderr string, c
 // inherited environment.
 func runMadeEnv(t *testing.T, dir string, env []string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
+	// #nosec G204 -- Runs the made binary built by TestMain with test-case arguments.
 	cmd := exec.CommandContext(t.Context(), madeBin, args...)
 	cmd.Dir = dir
 	if env != nil {
@@ -110,6 +112,7 @@ func runMadeEnv(t *testing.T, dir string, env []string, args ...string) (stdout,
 func writeTasks(t *testing.T, name, content string) string {
 	t.Helper()
 	dir := t.TempDir()
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", name, err)
 	}
@@ -702,6 +705,7 @@ func checkCancellation(t *testing.T, sig os.Signal, code int) {
 	// until the sleep ends (~30s). A file lets exec pass the fd directly, so
 	// cmd.Wait returns as soon as made itself exits, and we can read it anytime.
 	outPath := filepath.Join(t.TempDir(), "out.txt")
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	outFile, err := os.Create(outPath)
 	if err != nil {
 		t.Fatalf("create out file: %v", err)
@@ -713,6 +717,7 @@ func checkCancellation(t *testing.T, sig os.Signal, code int) {
 	cmd.Stdout = outFile
 
 	output := func() string {
+		// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 		b, _ := os.ReadFile(outPath)
 		return string(b)
 	}
@@ -791,6 +796,7 @@ func TestSignalledTaskExitCode(t *testing.T) {
 	t.Run("pipeline", func(t *testing.T) {
 		dir := writeTasks(t, "Madefile.md", "### lines\n```bash\nyes\n```\n")
 		script := `"$0" lines | head -1 >/dev/null; echo "${PIPESTATUS[0]}"`
+		// #nosec G204 -- The fixed pipeline tests SIGPIPE on the locally built made binary.
 		cmd := exec.CommandContext(t.Context(), "bash", "-c", script, madeBin)
 		cmd.Dir = dir
 		out, err := cmd.Output()
@@ -937,9 +943,11 @@ func TestRelativePathInterpreter(t *testing.T) {
 	}
 	dir := writeTasks(t, "Madefile.md", "### t\n```bash\necho real\n```\n")
 	fake := filepath.Join(dir, "bash")
+	// #nosec G306 -- An executable in a relative PATH entry is needed to verify that made rejects it.
 	if err := os.WriteFile(fake, []byte("#!/bin/sh\necho FAKE\nexit 3\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G302 -- An executable in a relative PATH entry is needed to verify that made rejects it.
 	if err := os.Chmod(fake, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1022,6 +1030,7 @@ func TestSIGHUPIgnoredKeepsTask(t *testing.T) {
 	dir := writeTasks(t, "Madefile.md", content)
 
 	outPath := filepath.Join(t.TempDir(), "out.txt")
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	outFile, err := os.Create(outPath)
 	if err != nil {
 		t.Fatalf("create out file: %v", err)
@@ -1029,10 +1038,12 @@ func TestSIGHUPIgnoredKeepsTask(t *testing.T) {
 	defer func() { _ = outFile.Close() }()
 
 	// exec keeps the pid and the ignored disposition, so cmd.Process is made itself.
+	// #nosec G204 -- The fixed wrapper preserves ignored HUP handling for the test binary.
 	cmd := exec.CommandContext(t.Context(), "bash", "-c", `trap "" HUP; exec "$0" long`, madeBin)
 	cmd.Dir = dir
 	cmd.Stdout = outFile
 	output := func() string {
+		// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 		b, _ := os.ReadFile(outPath)
 		return string(b)
 	}
@@ -1081,6 +1092,7 @@ func TestIgnoredINTQUITStayIgnored(t *testing.T) {
 	dir := writeTasks(t, "Madefile.md", content)
 
 	outPath := filepath.Join(t.TempDir(), "out.txt")
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	outFile, err := os.Create(outPath)
 	if err != nil {
 		t.Fatalf("create out file: %v", err)
@@ -1088,10 +1100,12 @@ func TestIgnoredINTQUITStayIgnored(t *testing.T) {
 	defer func() { _ = outFile.Close() }()
 
 	// exec keeps the pid and the ignored dispositions, so cmd.Process is made itself.
+	// #nosec G204 -- The fixed wrapper preserves ignored INT/QUIT handling for the test binary.
 	cmd := exec.CommandContext(t.Context(), "bash", "-c", `trap "" INT QUIT; exec "$0" long`, madeBin)
 	cmd.Dir = dir
 	cmd.Stdout = outFile
 	output := func() string {
+		// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 		b, _ := os.ReadFile(outPath)
 		return string(b)
 	}
@@ -1140,9 +1154,11 @@ const catMarkerMD = "### where\n```bash\ncat marker.txt\n```\n"
 // writeFile writes content to path, creating parent directories as needed.
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
+	// #nosec G301 -- The fixture tree is inside a private temporary directory.
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
 	}
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
@@ -1188,6 +1204,7 @@ func TestFindsMadefileInParent(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "Madefile.md"), catMarkerMD)
 	writeFile(t, filepath.Join(dir, "marker.txt"), "in-root\n")
 	nested := filepath.Join(dir, "a", "b")
+	// #nosec G301 -- The fixture tree is inside a private temporary directory.
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1222,6 +1239,7 @@ func TestExplicitFileNotSearchedUpward(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "Madefile.md"), catMarkerMD)
 	nested := filepath.Join(dir, "a")
+	// #nosec G301 -- The fixture tree is inside a private temporary directory.
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1265,6 +1283,7 @@ func TestTaskArgsPassthrough(t *testing.T) {
 // mkdir creates path and its parents.
 func mkdir(t *testing.T, path string) {
 	t.Helper()
+	// #nosec G301 -- The fixture tree is inside a private temporary directory.
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", path, err)
 	}
@@ -1459,6 +1478,7 @@ func TestFileFromStdinPipe(t *testing.T) {
 	}
 	for _, args := range [][]string{{"-f", "/dev/stdin", "-l"}, {"--check", "-f", "/dev/stdin"}} {
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		// #nosec G204 -- Runs the locally built made binary against a pipe supplied by this test.
 		cmd := exec.CommandContext(ctx, madeBin, args...)
 		cmd.Dir = t.TempDir()
 		cmd.Stdin = strings.NewReader(tasksMD)
@@ -1508,6 +1528,7 @@ func TestListDoesNotHangOnFIFOMadefile(t *testing.T) {
 		t.Skip("FIFOs are not supported on Windows")
 	}
 	dir := t.TempDir()
+	// #nosec G301 -- The fixture tree is inside a private temporary directory.
 	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}

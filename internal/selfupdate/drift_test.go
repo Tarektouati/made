@@ -14,6 +14,7 @@ import (
 
 func readRepoFile(t *testing.T, name string) string {
 	t.Helper()
+	// #nosec G304 -- Reads fixed repository files to compare the release and installer contracts.
 	b, err := os.ReadFile("../../" + name)
 	if err != nil {
 		t.Fatal(err)
@@ -33,7 +34,7 @@ func yamlSection(t *testing.T, src, key string) []string {
 	t.Helper()
 	var out []string
 	in := false
-	for _, line := range strings.Split(src, "\n") {
+	for line := range strings.SplitSeq(src, "\n") {
 		if strings.TrimSpace(line) != "" && line[0] != ' ' && line[0] != '#' {
 			in = strings.HasPrefix(line, key+":")
 			continue

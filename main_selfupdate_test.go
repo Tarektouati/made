@@ -65,6 +65,7 @@ const oldBinary = "#!/bin/sh\necho made v0.6.0\n"
 func manualInstall(t *testing.T) selfupdate.Install {
 	t.Helper()
 	in := selfupdate.Install{Exe: filepath.Join(t.TempDir(), "made"), Version: "v0.6.0", Stamped: true, GOOS: "linux", GOARCH: "amd64"}
+	// #nosec G306 -- Executable fixture inside a private temporary directory.
 	if err := os.WriteFile(in.Exe, []byte(oldBinary), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -106,6 +107,7 @@ func TestSelfUpdateIsReserved(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "ran")
 	content := "### self-update\n```sh\ntouch " + marker + "\n```\n"
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(filepath.Join(dir, "Madefile.md"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -131,6 +133,7 @@ func TestUpdateTaskStillRuns(t *testing.T) {
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "ran")
 	content := "### update\n```sh\ntouch '" + marker + "'\n```\n"
+	// #nosec G306 -- Non-sensitive fixture inside a private temporary directory.
 	if err := os.WriteFile(filepath.Join(dir, "Madefile.md"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}

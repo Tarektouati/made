@@ -15,12 +15,14 @@ import (
 func startMade(t *testing.T, dir string, args ...string) (cmd *exec.Cmd, waitErr <-chan error) {
 	t.Helper()
 	outPath := filepath.Join(t.TempDir(), "out.txt")
+	// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 	outFile, err := os.Create(outPath)
 	if err != nil {
 		t.Fatalf("create out file: %v", err)
 	}
 	t.Cleanup(func() { _ = outFile.Close() })
 
+	// #nosec G204 -- Runs the made binary built by TestMain with test-case arguments.
 	cmd = exec.CommandContext(t.Context(), madeBin, args...)
 	cmd.Dir = dir
 	cmd.Stdout = outFile
@@ -32,6 +34,7 @@ func startMade(t *testing.T, dir string, args ...string) (cmd *exec.Cmd, waitErr
 
 	deadline := time.Now().Add(10 * time.Second)
 	for {
+		// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 		b, _ := os.ReadFile(outPath)
 		if strings.Contains(string(b), "started") {
 			return cmd, errc
@@ -49,6 +52,7 @@ func waitForFile(t *testing.T, path string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
+		// #nosec G304 -- This path is a fixture or output inside the test's temporary directory.
 		if b, err := os.ReadFile(path); err == nil && len(b) > 0 {
 			return
 		}
