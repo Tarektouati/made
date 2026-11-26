@@ -96,10 +96,12 @@ func newNotarizationFixture(t *testing.T) notarizationFixture {
 		t.Fatal(err)
 	}
 	for _, tool := range []string{"uname", "security", "codesign", "ditto", "xcrun", "PlistBuddy", "openssl"} {
+		// #nosec G306 -- Private executable stub models the Apple tool without using credentials.
 		if err = os.WriteFile(filepath.Join(f.bin, tool), []byte(notarizationStub), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
+	// #nosec G306 -- The private fixture models the executable being signed.
 	if err = os.WriteFile(f.binary, []byte("unsigned\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -123,6 +125,7 @@ func (f notarizationFixture) run(t *testing.T, osname string, env ...string) (st
 	if osname != "cleanup" {
 		args = append(args, f.binary)
 	}
+	// #nosec G204 -- Runs the checked-in hook with literal fixture arguments and mocked Apple tools.
 	cmd := exec.CommandContext(t.Context(), "bash", args...)
 	cmd.Env = append(append(os.Environ(), f.env...), env...)
 	var out bytes.Buffer
@@ -353,6 +356,7 @@ func TestMacOSNotarizationCleanupIsScoped(t *testing.T) {
 	if out, code := f.run(t, "cleanup"); code == 0 {
 		t.Errorf("cleanup followed or silently left a symlink: %s", out)
 	}
+	// #nosec G304 -- Read the unrelated fixture to verify cleanup leaves it intact.
 	b, err := os.ReadFile(keep)
 	if err != nil || string(b) != "keep this unrelated keychain" {
 		t.Errorf("cleanup touched an unrelated keychain: %q, %v", b, err)
