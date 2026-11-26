@@ -431,7 +431,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	name := fs.Arg(0)
 	task, ok := find(tasks, name)
 	if !ok {
-		fmt.Fprintf(stderr, "made: unknown task %q\n\n", name)
+		fmt.Fprintf(stderr, "made: unknown task %q\n", name)
+		if suggestions := taskSuggestions(tasks, name); suggestions != "" {
+			fmt.Fprintf(stderr, "made: did you mean %s?\n", suggestions)
+		}
+		fmt.Fprintln(stderr)
 		printTasks(stdout, stderr, file, tasks)
 		return 1
 	}
