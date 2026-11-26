@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest a change that would make made more useful.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check existing issues and the [project's non-goals](https://github.com/Tarektouati/made#what-made-is-not) before opening a request.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the task or workflow that is difficult today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Suggested behavior
+      description: A short Madefile or command example is helpful.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include any workaround you use today.
