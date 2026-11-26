@@ -40,8 +40,10 @@ type fakeRelease struct {
 	raw []byte
 	// sums replaces checksums.txt when set.
 	sums *string
-	// failArchive and failSums make the downloads fail with 404.
-	failArchive, failSums bool
+	// bundle replaces the in-process verifier's test signature when set.
+	bundle *string
+	// failArchive, failSums and failBundle make the downloads fail with 404.
+	failArchive, failSums, failBundle bool
 	// blockArchive makes the archive download hang until the request is cancelled;
 	// started is closed when it begins.
 	blockArchive bool
@@ -90,8 +92,14 @@ func (g *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case rel == nil:
 			http.NotFound(w, r)
-		case name == ChecksumsName && rel.failSums, name == asset && rel.failArchive:
+		case name == ChecksumsName && rel.failSums, name == asset && rel.failArchive, name == SignatureName && rel.failBundle:
 			http.NotFound(w, r)
+		case name == SignatureName:
+			bundle := testSignature
+			if rel.bundle != nil {
+				bundle = *rel.bundle
+			}
+			_, _ = w.Write([]byte(bundle))
 		case name == ChecksumsName:
 			sums := checksumsFor(tag, rel.archive(g.t))
 			if rel.sums != nil {
@@ -211,7 +219,13 @@ func runUpdateCtx(ctx context.Context, t *testing.T, g *fakeGitHub, exe, current
 	t.Helper()
 	var stdout bytes.Buffer
 	u := Updater{
-		Client:  Client{BaseURL: g.srv.URL},
+		Client: Client{BaseURL: g.srv.URL},
+		Verifier: verifierFunc(func(_ context.Context, _ string, _, bundle []byte) error {
+			if string(bundle) != testSignature {
+				return errors.New("invalid test signature")
+			}
+			return nil
+		}),
 		Exe:     exe,
 		Current: current,
 		Target:  target,

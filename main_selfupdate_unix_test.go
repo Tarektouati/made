@@ -6,7 +6,9 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,6 +40,7 @@ func (f *fakeReleases) addRelease(t *testing.T, tag string) {
 	asset, _ := selfupdate.AssetName(tag, "linux", "amd64")
 	f.files[tag+"/"+asset] = buf.Bytes()
 	f.files[tag+"/"+selfupdate.ChecksumsName] = fmt.Appendf(nil, "%x  %s\n", sha256.Sum256(buf.Bytes()), asset)
+	f.files[tag+"/"+selfupdate.SignatureName] = []byte("test-only signature")
 }
 
 func TestSelfUpdateReplaces(t *testing.T) {
@@ -54,6 +57,31 @@ func TestSelfUpdateReplaces(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(in.Exe); !bytes.Contains(b, []byte("made v0.7.0")) {
 		t.Errorf("%s = %q, want the v0.7.0 binary", in.Exe, b)
+	}
+}
+
+func TestSelfUpdateSignatureFailure(t *testing.T) {
+	f := newFakeReleases(t, "v0.7.0")
+	f.addRelease(t, "v0.7.0")
+	in := manualInstall(t)
+	useFakeInstall(t, f, in)
+	selfUpdateVerifier = testSignatureVerifier(func(context.Context, string, []byte, []byte) error {
+		return errors.New("wrong release signer")
+	})
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"self-update"}, &stdout, &stderr); code != selfupdate.ExitFailure {
+		t.Errorf("run(self-update) = %d, want %d", code, selfupdate.ExitFailure)
+	}
+	checkContains(t, "stderr", stderr.String(), []string{
+		"release signature verification failed: wrong release signer",
+		"cosign v3.1.6 or later",
+	}, true)
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want no success message", &stdout)
+	}
+	// #nosec G304 -- Read the binary created by manualInstall inside this test's directory.
+	if b, err := os.ReadFile(in.Exe); err != nil || string(b) != oldBinary {
+		t.Errorf("old binary = %q, %v; must remain unchanged", b, err)
 	}
 }
 

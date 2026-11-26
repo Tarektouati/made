@@ -101,6 +101,8 @@ func isPermission(err error) bool {
 // release.
 type Updater struct {
 	Client Client
+	// Verifier authenticates release checksums; nil uses the installed Cosign.
+	Verifier Verifier
 	// Exe is the binary to replace; a symlink is followed and its target replaced.
 	Exe string
 	// Current is the release version Exe reports.
@@ -116,11 +118,11 @@ type Updater struct {
 	Stdout io.Writer
 }
 
-// Run installs the target release in place of Exe. The archive is checked against
-// checksums.txt from the same release, which catches a corrupted download but not
-// a tampered release. The new binary is written next to Exe, run with --version,
-// and only then renamed over Exe, so a failure leaves the old binary in place. The
-// returned error is an *Error.
+// Run installs the target release in place of Exe. Cosign authenticates checksums.txt
+// against the release workflow and tag before its SHA-256 is used to check the
+// archive. The new binary is written next to Exe, run with --version, and only then
+// renamed over Exe, so a failure leaves the old binary in place. The returned error
+// is an *Error.
 func (u Updater) Run(ctx context.Context) error {
 	if !IsRelease(u.Current) {
 		return failure("cannot update from %s, which is not a release version", u.Current)
@@ -168,6 +170,18 @@ func (u Updater) Run(ctx context.Context) error {
 	want, err := checksumFor(sums, asset)
 	if err != nil {
 		return failure("%w", err)
+	}
+	bundleURL := ReleaseURL(base, target, SignatureName)
+	bundle, err := u.Client.get(ctx, bundleURL, maxSignatureBytes)
+	if err != nil {
+		return signatureFailure(fmt.Errorf("download failed: %s: %w", bundleURL, err))
+	}
+	verifier := u.Verifier
+	if verifier == nil {
+		verifier = cosignVerifier{}
+	}
+	if err = verifier.Verify(ctx, target, sums, bundle); err != nil {
+		return signatureFailure(err)
 	}
 	archive, err := u.Client.get(ctx, archiveURL, maxArchiveBytes)
 	if err != nil {

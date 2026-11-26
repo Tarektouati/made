@@ -133,6 +133,9 @@ func initTemplate(v string) string {
 // local server.
 var selfUpdateBaseURL = ""
 
+// selfUpdateVerifier is nil for Cosign; tests use an in-process signature verifier.
+var selfUpdateVerifier selfupdate.Verifier
+
 // detectInstall describes the running binary for made self-update; tests replace it.
 var detectInstall = selfupdate.Current
 
@@ -689,14 +692,15 @@ func selfUpdate(args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	u := selfupdate.Updater{
-		Client:  selfupdate.Client{BaseURL: selfUpdateBaseURL},
-		Exe:     in.Exe,
-		Current: in.Version,
-		Target:  target,
-		GOOS:    in.GOOS,
-		GOARCH:  in.GOARCH,
-		DryRun:  dryRun,
-		Stdout:  stdout,
+		Client:   selfupdate.Client{BaseURL: selfUpdateBaseURL},
+		Verifier: selfUpdateVerifier,
+		Exe:      in.Exe,
+		Current:  in.Version,
+		Target:   target,
+		GOOS:     in.GOOS,
+		GOARCH:   in.GOARCH,
+		DryRun:   dryRun,
+		Stdout:   stdout,
 	}
 	if err := u.Run(ctx); err != nil {
 		fmt.Fprintf(stderr, "made: %s\n", escapeErr(err))

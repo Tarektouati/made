@@ -17,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the GitHub Release and upload its assets
+      id-token: write # Cosign's keyless certificate for this workflow and tag
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -29,6 +30,38 @@ jobs:
       - uses: moonrepo/setup-toolchain@261c62cb5b0f580c7be7c8cd0f023a2e96756095 # v0.6.4
       - name: Install Go
         run: proto install go
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
+        with:
+          cosign-release: v3.1.6
+      - name: Check pinned Cosign before using it
+        # The installer bootstraps with an older verifier. Pin the final binary
+        # too; update all four hashes together with cosign-release above.
+        shell: bash
+        run: |
+          set -eu
+          case "$RUNNER_OS/$RUNNER_ARCH" in
+            Linux/X64) expected=318a99ade4156a0c4113aa983b46c0a0830fa7896a096c63121ee47b610a94c6 ;;
+            Linux/ARM64) expected=bbb2ebc765f483cf9fac42da8763dddc2b55b350ee12ea0c44a520a6d6d52334 ;;
+            macOS/X64) expected=a91eebd5824c1d40a2f3fb730a65f470ec0acf99e5c63dc7b79c322eeb9b5549 ;;
+            macOS/ARM64) expected=0ce6045c42e9f21427b3a8b70d54b130ca35cdd88a38358cc303fc6fec7366ba ;;
+            *) echo "unsupported Cosign platform: $RUNNER_OS/$RUNNER_ARCH" >&2; exit 1 ;;
+          esac
+          binary=$(command -v cosign)
+          if command -v sha256sum >/dev/null 2>&1; then
+            actual=$(sha256sum "$binary")
+          else
+            actual=$(shasum -a 256 "$binary")
+          fi
+          if [ "${actual%% *}" != "$expected" ]; then
+            echo "Cosign does not match the pinned v3.1.6 checksum" >&2
+            exit 1
+          fi
+          cosign version
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@dfcb83b97731532d72be422cbc51ee64adb6fd56 # v0.24.4
+        with:
+          syft-version: v1.57.2
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:

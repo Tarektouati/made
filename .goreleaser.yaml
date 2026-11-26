@@ -34,8 +34,30 @@ archives:
       - LICENSE
       - completions/*
 
+sboms:
+  - artifacts: archive
+    # Inventory the files actually shipped; do not enrich them from online sources.
+    args:
+      - "${artifact}"
+      - --output
+      - "spdx-json=${document}"
+    env:
+      - SYFT_CHECK_FOR_APP_UPDATE=false
+      - SYFT_FILE_METADATA_CATALOGER_ENABLED=true
+
 checksum:
   name_template: checksums.txt
+
+signs:
+  - cmd: sh
+    # GoReleaser v2 only warns if a signer writes no file. The wrapper requires
+    # a nonempty bundle before the pipeline reaches Homebrew or release uploads.
+    args:
+      - scripts/sign-checksums.sh
+      - "${artifact}"
+      - "${signature}"
+    artifacts: checksum
+    signature: "${artifact}.sigstore.json"
 
 changelog:
   sort: asc

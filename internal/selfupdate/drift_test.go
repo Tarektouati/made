@@ -113,6 +113,17 @@ func TestGoreleaserMatchesAssetName(t *testing.T) {
 	}
 }
 
+func TestGoreleaserSignatureMatchesUpdater(t *testing.T) {
+	src := lfText(readRepoFile(t, ".goreleaser.yaml"))
+	signs := yamlSection(t, src, "signs")
+	if got := yamlValue(t, signs, "artifacts"); got != "checksum" {
+		t.Errorf("GoReleaser signs %q, want the checksums used by self-update", got)
+	}
+	if got := yamlValue(t, signs, "signature"); strings.ReplaceAll(got, "${artifact}", ChecksumsName) != SignatureName {
+		t.Errorf("signature name %q does not match updater asset %q", got, SignatureName)
+	}
+}
+
 func checkGoreleaser(t *testing.T, src string) {
 	src = lfText(src)
 	project := yamlValue(t, strings.Split(src, "\n"), "project_name")

@@ -58,8 +58,9 @@ curl -fsSL https://raw.githubusercontent.com/Tarektouati/made/main/install.sh | 
 ```
 
 The checksum is downloaded from the same GitHub release as the archive, so it catches
-a corrupted download but not a tampered release. If you need more than that, build
-from source with `go install` or verify the release yourself.
+a corrupted download but not a tampered release. For signature verification before
+installing, follow [Verifying a release](#verifying-a-release), or build from source
+with `go install`.
 
 **go install**
 
@@ -71,12 +72,14 @@ go install github.com/Tarektouati/made@latest
 
 ```sh
 made self-update            # install the latest release
-made self-update v0.6.0     # install a specific release, older ones included
+made self-update vX.Y.Z     # install a specific signed release
 made self-update --dry-run  # show what would happen, change nothing
 ```
 
 `made self-update` updates a binary installed with `install.sh` or copied from a
-release archive. It works like `install.sh`:
+release archive. Install [Cosign](https://docs.sigstore.dev/cosign/system_config/installation/)
+v3.1.6 or later first and make sure `cosign` is on the PATH used to run `made`
+(including when using `sudo`). Development and pre-release Cosign builds are refused.
 
 1. It reads the latest release tag from where the `releases/latest` page on
    github.com redirects to, without following the redirect (no API token, no rate
@@ -84,19 +87,24 @@ release archive. It works like `install.sh`:
 2. If `made` is already that release, it prints `made: v0.7.0 is the latest version`
    and exits with `0`. It never installs an older release than the one running
    unless you name it.
-3. It downloads `made_<version>_<os>_<arch>.tar.gz` and `checksums.txt` from that
-   release and checks the archive's SHA-256 before using it.
-4. It writes the new binary next to the old one, runs it with `--version` (it must
+3. It downloads `checksums.txt` and `checksums.txt.sigstore.json`. Cosign verifies
+   the exact checksum bytes against GitHub's OIDC issuer and this repository's
+   `.github/workflows/release.yml` at `refs/tags/<version>`. A missing bundle,
+   different signer, invalid signature or unavailable verifier stops the update.
+4. It downloads `made_<version>_<os>_<arch>.tar.gz` and checks its SHA-256 against
+   those authenticated checksums before extracting or running anything from it.
+5. It writes the new binary next to the old one, runs it with `--version` (it must
    report the expected version), and only then renames it over the old one. The
    rename is atomic, so `made` is always either the old or the new binary, and on
    any failure the old one is left in place.
 
 If `made` is a symlink, the file it points to is replaced and the link is kept.
 
-The checksum comes from the same GitHub release as the archive, as with
-`install.sh`, so it catches a corrupted download but not a tampered release. If you
-need more than that, build from source with `go install` or verify the release
-yourself.
+Older releases without a signing bundle cannot be installed with `made self-update`,
+even when a version is named explicitly. There is no option to fall back to an
+unsigned checksum. `--dry-run` and an already-installed version do not invoke
+Cosign or create verification files; a dry run does not establish that a release
+is signed.
 
 Installs that another tool owns are not replaced, because that would break the
 tool's bookkeeping. `made self-update` prints the command to use and exits with `3`:
@@ -111,15 +119,45 @@ tool's bookkeeping. `made self-update` prints the command to use and exits with 
 If the binary's directory is not writable (for example `/usr/local/bin`), it fails
 with exit code `4` before downloading anything, and suggests `sudo made self-update`
 or re-running `install.sh`; it never installs somewhere else. Other failures
-(download, checksum, extraction, the new binary not running) exit with `1`. See the [exit codes](cli.md#subcommands).
+(download, signature, checksum, extraction, the new binary not running) exit with `1`. See the [exit codes](cli.md#subcommands).
 
-The only network requests are plain HTTPS GETs to github.com (and the release
-download host it redirects to): the `releases/latest` redirect, `checksums.txt` and
-the archive, as `install.sh` makes. Nothing else is sent. A redirect from HTTPS to
-plain HTTP is refused. The `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` environment
-variables are honoured.
+Release discovery and downloads use HTTPS GETs to github.com and its release
+download hosts. A redirect from HTTPS to plain HTTP is refused. Cosign may also
+fetch Sigstore trust metadata to verify the certificate and transparency-log
+proof in the bundle; no GitHub login or API token is required. Signature
+verification has a two-minute limit and stops when the update is interrupted.
+The `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` environment variables are honoured.
 
 Shell completion offers `self-update` and its `--dry-run` flag.
+
+### Verifying a release
+
+Signed releases publish `checksums.txt.sigstore.json` alongside `checksums.txt`.
+They also include an SPDX JSON software bill of materials (SBOM) for each archive,
+named `<archive>.sbom.json`. The signed checksum file covers the archives and SBOMs.
+
+With Cosign v3.1.6 or later, download the checksum file, its bundle and the archive
+for your platform from the same release. Set `tag` to that release's exact tag,
+then verify the checksum file before trusting any of its hashes:
+
+```sh
+tag=vX.Y.Z # choose a release that publishes a signing bundle
+cosign verify-blob \
+  --certificate-identity "https://github.com/Tarektouati/made/.github/workflows/release.yml@refs/tags/$tag" \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  --bundle checksums.txt.sigstore.json checksums.txt
+```
+
+Only after that command succeeds, check the files you downloaded. With GNU
+coreutils, run `sha256sum --check --ignore-missing checksums.txt`. On macOS,
+`shasum -a 256 <archive>` prints the archive's hash: compare it with the matching
+entry in the verified checksum file. Do not extract or run an archive whose
+signature or hash check fails. The same procedure verifies a downloaded SBOM.
+
+The release workflow generates the SBOMs, checksums and keyless signature before
+publishing the release or updating the Homebrew tap. `install.sh` continues to
+check only the archive checksum; use the verification steps above when installing
+a release manually.
 
 ### New-version notice
 

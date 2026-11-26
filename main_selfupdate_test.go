@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -51,10 +53,23 @@ func newFakeReleases(t *testing.T, latest string) *fakeReleases {
 // in, for the rest of the test.
 func useFakeInstall(t *testing.T, f *fakeReleases, in selfupdate.Install) {
 	t.Helper()
-	oldURL, oldDetect := selfUpdateBaseURL, detectInstall
-	t.Cleanup(func() { selfUpdateBaseURL, detectInstall = oldURL, oldDetect })
+	oldURL, oldDetect, oldVerifier := selfUpdateBaseURL, detectInstall, selfUpdateVerifier
+	t.Cleanup(func() { selfUpdateBaseURL, detectInstall, selfUpdateVerifier = oldURL, oldDetect, oldVerifier })
 	selfUpdateBaseURL = f.srv.URL
 	detectInstall = func(string, bool) selfupdate.Install { return in }
+	selfUpdateVerifier = testSignatureVerifier(func(_ context.Context, tag string, sums, bundle []byte) error {
+		if string(bundle) != "test-only signature" || !bytes.Equal(sums, f.files[tag+"/"+selfupdate.ChecksumsName]) {
+			return errors.New("invalid test release signature")
+		}
+		return nil
+	})
+}
+
+// Fake releases exercise the CLI without a Cosign installation or signing credentials.
+type testSignatureVerifier func(context.Context, string, []byte, []byte) error
+
+func (f testSignatureVerifier) Verify(ctx context.Context, tag string, sums, bundle []byte) error {
+	return f(ctx, tag, sums, bundle)
 }
 
 // oldBinary is the content of the made binary manualInstall writes.

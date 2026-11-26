@@ -62,12 +62,14 @@ file, takes no top-level flags, and is reserved: a task named `completion` canno
 `made completion`.
 
 **`made self-update`** replaces the running `made` with the latest release, after
-verifying its checksum and checking that the new binary runs, and prints
+authenticating its signed checksums with Cosign v3.1.6 or later, verifying the
+archive's hash and checking that the new binary runs, and prints
 `made: updated v0.6.0 -> v0.7.0`. If `made` is already the latest release it prints
 `made: v0.7.0 is the latest version`; it never installs an older release unless you
-name one, as in `made self-update v0.6.0` (`0.6.0` works too). Only releases
+name a signed release, as in `made self-update v1.2.3` (`1.2.3` works too). Only releases
 (`vX.Y.Z`) can be named: a pre-release such as `v0.7.0-rc.1` would install as a
-development build, which `made self-update` could not replace later. `--dry-run` prints
+development build, which `made self-update` could not replace later. Unsigned
+releases are refused, including older releases named explicitly. `--dry-run` prints
 the release, the download URL and the binary that would be replaced, and whether its
 directory is writable, without downloading or changing anything. The version and
 `--dry-run` may come in either order. Binaries installed with Homebrew or
